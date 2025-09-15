@@ -39,6 +39,8 @@ typedef enum {
     HYPRLAX_ERROR_NO_COMPOSITOR = -4,
     HYPRLAX_ERROR_GL_INIT = -5,
     HYPRLAX_ERROR_FILE_NOT_FOUND = -6,
+    HYPRLAX_ERROR_LOAD_FAILED = -7,
+    HYPRLAX_ERROR_NO_DATA = -8,
 } hyprlax_error_t;
 
 /* Forward declarations for cross-module types */

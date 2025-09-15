@@ -19,6 +19,7 @@ void config_set_defaults(config_t *cfg) {
     cfg->target_fps = 60;
     cfg->max_fps = 144;
     cfg->shift_pixels = 150.0f;
+    cfg->scale_factor = 1.5f;
     cfg->animation_duration = 1.0;
     cfg->default_easing = EASE_CUBIC_OUT;
     cfg->debug = false;

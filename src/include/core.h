@@ -54,9 +54,13 @@ typedef struct parallax_layer {
     animation_state_t y_animation;
     float current_x;
     float current_y;
+    float offset_x;  /* Current parallax offset */
+    float offset_y;
     
     /* OpenGL resources */
     uint32_t texture_id;
+    int width;       /* Texture width */
+    int height;      /* Texture height */
     int texture_width;
     int texture_height;
     
@@ -69,6 +73,7 @@ typedef struct {
     /* Display settings */
     int target_fps;
     int max_fps;
+    float scale_factor;
     
     /* Animation settings */
     float shift_pixels;

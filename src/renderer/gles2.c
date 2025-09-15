@@ -30,6 +30,7 @@ typedef struct {
     
     /* Vertex buffer for quad rendering */
     GLuint vbo;
+    GLuint ebo;
     GLuint position_attrib;
     GLuint texcoord_attrib;
     
@@ -38,6 +39,9 @@ typedef struct {
     int height;
     bool vsync_enabled;
 } gles2_renderer_data_t;
+
+/* Global instance */
+static gles2_renderer_data_t *g_gles2_data = NULL;
 
 /* Quad vertices for layer rendering */
 static const GLfloat quad_vertices[] = {
@@ -137,6 +141,12 @@ static int gles2_init(void *native_display, void *native_window,
     glBufferData(GL_ARRAY_BUFFER, sizeof(quad_vertices), 
                  quad_vertices, GL_STATIC_DRAW);
     
+    /* Create element buffer for indices */
+    GLushort indices[] = {0, 1, 2, 1, 3, 2};
+    glGenBuffers(1, &data->ebo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, data->ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+    
     /* Compile shaders */
     data->basic_shader = shader_create_program("basic");
     if (shader_compile(data->basic_shader, shader_vertex_basic, 
@@ -153,20 +163,46 @@ static int gles2_init(void *native_display, void *native_window,
     /* Set vsync if requested */
     eglSwapInterval(data->egl_display, config->vsync ? 1 : 0);
     
-    /* Store private data - this is a simplified approach
-     * In real implementation, we'd store this in the renderer struct */
-    /* For now, we'll use a static variable (not ideal but works for single instance) */
-    static gles2_renderer_data_t *global_data = NULL;
-    global_data = data;
+    /* Store private data globally */
+    g_gles2_data = data;
     
     return HYPRLAX_SUCCESS;
 }
 
 /* Destroy renderer */
 static void gles2_destroy(void) {
-    /* In real implementation, get data from renderer struct */
-    /* For now, this is simplified */
-    fprintf(stderr, "Note: gles2_destroy not fully implemented\n");
+    if (!g_gles2_data) return;
+    
+    if (g_gles2_data->basic_shader) {
+        shader_destroy_program(g_gles2_data->basic_shader);
+    }
+    
+    if (g_gles2_data->blur_shader) {
+        shader_destroy_program(g_gles2_data->blur_shader);
+    }
+    
+    if (g_gles2_data->vbo) {
+        glDeleteBuffers(1, &g_gles2_data->vbo);
+    }
+    
+    if (g_gles2_data->ebo) {
+        glDeleteBuffers(1, &g_gles2_data->ebo);
+    }
+    
+    if (g_gles2_data->egl_surface != EGL_NO_SURFACE) {
+        eglDestroySurface(g_gles2_data->egl_display, g_gles2_data->egl_surface);
+    }
+    
+    if (g_gles2_data->egl_context != EGL_NO_CONTEXT) {
+        eglDestroyContext(g_gles2_data->egl_display, g_gles2_data->egl_context);
+    }
+    
+    if (g_gles2_data->egl_display != EGL_NO_DISPLAY) {
+        eglTerminate(g_gles2_data->egl_display);
+    }
+    
+    free(g_gles2_data);
+    g_gles2_data = NULL;
 }
 
 /* Begin frame */
@@ -182,9 +218,9 @@ static void gles2_end_frame(void) {
 
 /* Present frame */
 static void gles2_present(void) {
-    /* Note: In real implementation, get data from renderer struct */
-    /* For now, this is simplified and won't actually work */
-    fprintf(stderr, "Note: gles2_present needs access to EGL display/surface\n");
+    if (!g_gles2_data) return;
+    
+    eglSwapBuffers(g_gles2_data->egl_display, g_gles2_data->egl_surface);
 }
 
 /* Clear screen */

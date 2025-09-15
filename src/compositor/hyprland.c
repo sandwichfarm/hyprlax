@@ -13,6 +13,7 @@
 #include <sys/un.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <poll.h>
 #include "../include/compositor.h"
 #include "../include/hyprlax_internal.h"
 
@@ -24,8 +25,10 @@
 
 /* Hyprland private data */
 typedef struct {
-    int ipc_fd;
+    int ipc_fd;           /* Command socket */
+    int event_fd;         /* Event socket */
     char socket_path[256];
+    char event_socket_path[256];
     bool connected;
     int current_workspace;
     int current_monitor;
@@ -34,20 +37,24 @@ typedef struct {
 /* Global instance (simplified for now) */
 static hyprland_data_t *g_hyprland_data = NULL;
 
-/* Get Hyprland socket path */
-static const char* get_hyprland_socket_path(void) {
-    static char socket_path[256];
+/* Forward declaration */
+static int hyprland_send_command(const char *command, char *response, size_t response_size);
+
+/* Get Hyprland socket paths */
+static bool get_hyprland_socket_paths(char *cmd_path, char *event_path, size_t size) {
     const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
     const char *hyprland_instance = getenv("HYPRLAND_INSTANCE_SIGNATURE");
     
     if (!runtime_dir || !hyprland_instance) {
-        return NULL;
+        return false;
     }
     
-    snprintf(socket_path, sizeof(socket_path), 
+    snprintf(cmd_path, size, 
              "%s/hypr/%s/.socket.sock", runtime_dir, hyprland_instance);
+    snprintf(event_path, size,
+             "%s/hypr/%s/.socket2.sock", runtime_dir, hyprland_instance);
     
-    return socket_path;
+    return true;
 }
 
 /* Initialize Hyprland adapter */
@@ -194,8 +201,34 @@ static int hyprland_list_monitors(monitor_info_t **monitors, int *count) {
     return HYPRLAX_SUCCESS;
 }
 
+/* Connect socket helper */
+static int connect_hyprland_socket(const char *path) {
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) {
+        return -1;
+    }
+    
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
+    
+    if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        close(fd);
+        return -1;
+    }
+    
+    /* Make event socket non-blocking */
+    int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    
+    return fd;
+}
+
 /* Connect to Hyprland IPC */
 static int hyprland_connect_ipc(const char *socket_path) {
+    (void)socket_path; /* Optional parameter, auto-detect if not provided */
+    
     if (!g_hyprland_data) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
@@ -204,32 +237,39 @@ static int hyprland_connect_ipc(const char *socket_path) {
         return HYPRLAX_SUCCESS;
     }
     
-    /* Use provided path or auto-detect */
-    const char *path = socket_path ? socket_path : get_hyprland_socket_path();
-    if (!path) {
+    /* Get socket paths */
+    if (!get_hyprland_socket_paths(g_hyprland_data->socket_path, 
+                                   g_hyprland_data->event_socket_path,
+                                   sizeof(g_hyprland_data->socket_path))) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
     
-    /* Create socket */
-    g_hyprland_data->ipc_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    /* Connect command socket */
+    g_hyprland_data->ipc_fd = connect_hyprland_socket(g_hyprland_data->socket_path);
     if (g_hyprland_data->ipc_fd < 0) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
     
-    /* Connect to Hyprland */
-    struct sockaddr_un addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
-    
-    if (connect(g_hyprland_data->ipc_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+    /* Connect event socket */
+    g_hyprland_data->event_fd = connect_hyprland_socket(g_hyprland_data->event_socket_path);
+    if (g_hyprland_data->event_fd < 0) {
         close(g_hyprland_data->ipc_fd);
         g_hyprland_data->ipc_fd = -1;
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
     
-    strncpy(g_hyprland_data->socket_path, path, sizeof(g_hyprland_data->socket_path));
     g_hyprland_data->connected = true;
+    
+    /* Get initial workspace */
+    char response[1024];
+    if (hyprland_send_command("j/activeworkspace", response, sizeof(response)) == HYPRLAX_SUCCESS) {
+        /* Parse JSON response to get workspace ID */
+        /* Simple parsing - look for "id": */
+        char *id_str = strstr(response, "\"id\":");
+        if (id_str) {
+            g_hyprland_data->current_workspace = atoi(id_str + 6);
+        }
+    }
     
     return HYPRLAX_SUCCESS;
 }
@@ -243,20 +283,64 @@ static void hyprland_disconnect_ipc(void) {
         g_hyprland_data->ipc_fd = -1;
     }
     
+    if (g_hyprland_data->event_fd >= 0) {
+        close(g_hyprland_data->event_fd);
+        g_hyprland_data->event_fd = -1;
+    }
+    
     g_hyprland_data->connected = false;
 }
 
 /* Poll for events */
 static int hyprland_poll_events(compositor_event_t *event) {
-    if (!event) {
+    if (!event || !g_hyprland_data || !g_hyprland_data->connected) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
     
-    /* Would implement event polling from Hyprland IPC */
-    /* For now, return no event */
-    memset(event, 0, sizeof(*event));
+    /* Poll event socket */
+    struct pollfd pfd = {
+        .fd = g_hyprland_data->event_fd,
+        .events = POLLIN
+    };
     
-    return HYPRLAX_SUCCESS;
+    if (poll(&pfd, 1, 0) <= 0) {
+        return HYPRLAX_ERROR_NO_DATA;
+    }
+    
+    /* Read event data */
+    char buffer[1024];
+    ssize_t n = read(g_hyprland_data->event_fd, buffer, sizeof(buffer) - 1);
+    if (n <= 0) {
+        return HYPRLAX_ERROR_NO_DATA;
+    }
+    buffer[n] = '\0';
+    
+    /* Parse Hyprland event format: "event_name>>data" */
+    if (strncmp(buffer, "workspace>>", 11) == 0) {
+        int new_workspace = atoi(buffer + 11);
+        if (new_workspace != g_hyprland_data->current_workspace) {
+            event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
+            event->data.workspace.from_workspace = g_hyprland_data->current_workspace;
+            event->data.workspace.to_workspace = new_workspace;
+            g_hyprland_data->current_workspace = new_workspace;
+            return HYPRLAX_SUCCESS;
+        }
+    } else if (strncmp(buffer, "focusedmon>>", 12) == 0) {
+        /* Parse monitor change: "focusedmon>>monitor_name,workspace_id" */
+        char *comma = strchr(buffer + 12, ',');
+        if (comma) {
+            int new_workspace = atoi(comma + 1);
+            if (new_workspace != g_hyprland_data->current_workspace) {
+                event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
+                event->data.workspace.from_workspace = g_hyprland_data->current_workspace;
+                event->data.workspace.to_workspace = new_workspace;
+                g_hyprland_data->current_workspace = new_workspace;
+                return HYPRLAX_SUCCESS;
+            }
+        }
+    }
+    
+    return HYPRLAX_ERROR_NO_DATA;
 }
 
 /* Send IPC command */

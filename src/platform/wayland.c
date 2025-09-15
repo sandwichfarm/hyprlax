@@ -21,6 +21,7 @@ typedef struct {
     struct wl_compositor *compositor;
     struct wl_surface *surface;
     struct wl_egl_window *egl_window;
+    struct wl_output *output;
     
     /* Shell objects - will be moved to compositor adapter later */
     void *shell;  /* Generic shell pointer */
@@ -33,6 +34,9 @@ typedef struct {
     bool running;
 } wayland_data_t;
 
+/* Global instance (simplified for now) */
+static wayland_data_t *g_wayland_data = NULL;
+
 /* Registry listener callbacks */
 static void registry_global(void *data, struct wl_registry *registry,
                            uint32_t id, const char *interface, uint32_t version) {
@@ -41,6 +45,9 @@ static void registry_global(void *data, struct wl_registry *registry,
     if (strcmp(interface, "wl_compositor") == 0) {
         wl_data->compositor = wl_registry_bind(registry, id,
                                               &wl_compositor_interface, 1);
+    } else if (strcmp(interface, "wl_output") == 0 && !wl_data->output) {
+        wl_data->output = wl_registry_bind(registry, id,
+                                          &wl_output_interface, 1);
     }
     /* Shell interfaces will be handled by compositor adapters */
 }
@@ -71,79 +78,130 @@ static void wayland_destroy(void) {
 
 /* Connect to Wayland display */
 static int wayland_connect(const char *display_name) {
-    wayland_data_t *data = calloc(1, sizeof(wayland_data_t));
-    if (!data) {
+    if (g_wayland_data) {
+        return HYPRLAX_SUCCESS;  /* Already connected */
+    }
+    
+    g_wayland_data = calloc(1, sizeof(wayland_data_t));
+    if (!g_wayland_data) {
         return HYPRLAX_ERROR_NO_MEMORY;
     }
     
     /* Connect to Wayland display */
-    data->display = wl_display_connect(display_name);
-    if (!data->display) {
-        free(data);
+    g_wayland_data->display = wl_display_connect(display_name);
+    if (!g_wayland_data->display) {
+        free(g_wayland_data);
+        g_wayland_data = NULL;
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
     
     /* Get registry and listen for globals */
-    data->registry = wl_display_get_registry(data->display);
-    wl_registry_add_listener(data->registry, &registry_listener, data);
+    g_wayland_data->registry = wl_display_get_registry(g_wayland_data->display);
+    wl_registry_add_listener(g_wayland_data->registry, &registry_listener, g_wayland_data);
     
     /* Roundtrip to receive globals */
-    wl_display_roundtrip(data->display);
+    wl_display_roundtrip(g_wayland_data->display);
     
-    if (!data->compositor) {
-        wl_display_disconnect(data->display);
-        free(data);
+    if (!g_wayland_data->compositor) {
+        wl_display_disconnect(g_wayland_data->display);
+        free(g_wayland_data);
+        g_wayland_data = NULL;
         return HYPRLAX_ERROR_NO_COMPOSITOR;
     }
-    
-    /* Store data - in real implementation, store in platform struct */
-    /* For now, use static variable (not ideal) */
-    static wayland_data_t *global_data = NULL;
-    global_data = data;
     
     return HYPRLAX_SUCCESS;
 }
 
 /* Disconnect from Wayland display */
 static void wayland_disconnect(void) {
-    /* In real implementation, get data from platform struct */
-    /* For now, this is simplified */
-    fprintf(stderr, "Note: wayland_disconnect not fully implemented\n");
+    if (!g_wayland_data) return;
+    
+    if (g_wayland_data->egl_window) {
+        wl_egl_window_destroy(g_wayland_data->egl_window);
+        g_wayland_data->egl_window = NULL;
+    }
+    
+    if (g_wayland_data->surface) {
+        wl_surface_destroy(g_wayland_data->surface);
+        g_wayland_data->surface = NULL;
+    }
+    
+    if (g_wayland_data->compositor) {
+        wl_compositor_destroy(g_wayland_data->compositor);
+    }
+    
+    if (g_wayland_data->registry) {
+        wl_registry_destroy(g_wayland_data->registry);
+    }
+    
+    if (g_wayland_data->display) {
+        wl_display_disconnect(g_wayland_data->display);
+    }
+    
+    free(g_wayland_data);
+    g_wayland_data = NULL;
 }
 
 /* Check if connected */
 static bool wayland_is_connected(void) {
-    /* Simplified implementation */
-    return true;
+    return g_wayland_data && g_wayland_data->display;
 }
 
 /* Create window */
 static int wayland_create_window(const window_config_t *config) {
-    if (!config) {
+    if (!config || !g_wayland_data) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
     
-    /* In real implementation, get data from platform struct */
-    /* Window creation will interact with compositor adapter */
+    /* Create surface */
+    g_wayland_data->surface = wl_compositor_create_surface(g_wayland_data->compositor);
+    if (!g_wayland_data->surface) {
+        return HYPRLAX_ERROR_NO_MEMORY;
+    }
     
-    fprintf(stderr, "Note: wayland_create_window needs compositor adapter\n");
+    /* Create EGL window */
+    g_wayland_data->width = config->width;
+    g_wayland_data->height = config->height;
+    g_wayland_data->egl_window = wl_egl_window_create(g_wayland_data->surface,
+                                                      config->width, config->height);
+    if (!g_wayland_data->egl_window) {
+        wl_surface_destroy(g_wayland_data->surface);
+        g_wayland_data->surface = NULL;
+        return HYPRLAX_ERROR_NO_MEMORY;
+    }
+    
+    /* Note: Layer shell setup will be done by compositor adapter */
+    g_wayland_data->configured = true;
+    
     return HYPRLAX_SUCCESS;
 }
 
 /* Destroy window */
 static void wayland_destroy_window(void) {
-    fprintf(stderr, "Note: wayland_destroy_window not fully implemented\n");
+    if (!g_wayland_data) return;
+    
+    if (g_wayland_data->egl_window) {
+        wl_egl_window_destroy(g_wayland_data->egl_window);
+        g_wayland_data->egl_window = NULL;
+    }
+    
+    if (g_wayland_data->surface) {
+        wl_surface_destroy(g_wayland_data->surface);
+        g_wayland_data->surface = NULL;
+    }
 }
 
 /* Show window */
 static void wayland_show_window(void) {
-    /* Commit surface to make it visible */
-    fprintf(stderr, "Note: wayland_show_window not fully implemented\n");
+    if (g_wayland_data && g_wayland_data->surface) {
+        wl_surface_commit(g_wayland_data->surface);
+    }
 }
 
 /* Hide window */
 static void wayland_hide_window(void) {
-    fprintf(stderr, "Note: wayland_hide_window not fully implemented\n");
+    /* Hiding is typically done by unmapping, but for layer-shell
+       we'll just leave it to the compositor */
 }
 
 /* Poll for events */
@@ -178,15 +236,17 @@ static void wayland_flush_events(void) {
 
 /* Get native display handle */
 static void* wayland_get_native_display(void) {
-    /* In real implementation, return wl_display from platform data */
-    fprintf(stderr, "Note: wayland_get_native_display needs platform data\n");
+    if (g_wayland_data) {
+        return g_wayland_data->display;
+    }
     return NULL;
 }
 
 /* Get native window handle */
 static void* wayland_get_native_window(void) {
-    /* In real implementation, return egl_window from platform data */
-    fprintf(stderr, "Note: wayland_get_native_window needs platform data\n");
+    if (g_wayland_data) {
+        return g_wayland_data->egl_window;
+    }
     return NULL;
 }
 

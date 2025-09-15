@@ -10,8 +10,18 @@
 #include <time.h>
 #include <getopt.h>
 #include <unistd.h>
+#include <libgen.h>
+#include <limits.h>
+#include <errno.h>
 #include "include/hyprlax.h"
 #include "include/hyprlax_internal.h"
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+#include <GLES2/gl2.h>
+
+#define MAX_CONFIG_LINE_SIZE 512
 
 /* Create application context */
 hyprlax_context_t* hyprlax_create(void) {
@@ -49,6 +59,119 @@ void hyprlax_destroy(hyprlax_context_t *ctx) {
     config_cleanup(&ctx->config);
     
     free(ctx);
+}
+
+/* Resolve path relative to config file directory */
+static char* resolve_config_relative_path(const char *config_path, const char *relative_path) {
+    if (!relative_path) return NULL;
+    
+    /* If path is absolute, return a copy */
+    if (relative_path[0] == '/') {
+        return strdup(relative_path);
+    }
+    
+    /* Get directory of config file */
+    char *config_copy = strdup(config_path);
+    if (!config_copy) return NULL;
+    
+    char *config_dir = dirname(config_copy);
+    
+    /* Construct full path */
+    char full_path[PATH_MAX];
+    snprintf(full_path, sizeof(full_path), "%s/%s", config_dir, relative_path);
+    
+    free(config_copy);
+    
+    /* Resolve to absolute path */
+    char *resolved = realpath(full_path, NULL);
+    if (!resolved) {
+        /* If realpath fails, just return the constructed path */
+        return strdup(full_path);
+    }
+    
+    return resolved;
+}
+
+/* Parse config file */
+static int parse_config_file(hyprlax_context_t *ctx, const char *filename) {
+    if (!ctx || !filename) return -1;
+    
+    FILE *file = fopen(filename, "r");
+    if (!file) {
+        fprintf(stderr, "Error: Cannot open config file: %s\n", filename);
+        return -1;
+    }
+    
+    char line[MAX_CONFIG_LINE_SIZE];
+    int line_num = 0;
+    
+    while (fgets(line, MAX_CONFIG_LINE_SIZE, file)) {
+        line_num++;
+        
+        /* Skip comments and empty lines */
+        if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') continue;
+        
+        /* Remove newline */
+        char *newline = strchr(line, '\n');
+        if (newline) *newline = '\0';
+        
+        /* Parse tokens */
+        char *cmd = strtok(line, " \t");
+        if (!cmd) continue;
+        
+        if (strcmp(cmd, "layer") == 0) {
+            char *image = strtok(NULL, " \t");
+            char *shift_str = strtok(NULL, " \t");
+            char *opacity_str = strtok(NULL, " \t");
+            char *blur_str = strtok(NULL, " \t");
+            
+            if (!image) {
+                fprintf(stderr, "Config line %d: layer requires image path\n", line_num);
+                continue;
+            }
+            
+            /* Resolve path relative to config file if needed */
+            char *resolved_image_path = resolve_config_relative_path(filename, image);
+            if (!resolved_image_path) {
+                fprintf(stderr, "Error: Failed to resolve image path at line %d: %s\n", line_num, image);
+                continue;
+            }
+            
+            float shift = shift_str ? atof(shift_str) : 1.0f;
+            float opacity = opacity_str ? atof(opacity_str) : 1.0f;
+            float blur = blur_str ? atof(blur_str) : 0.0f;
+            
+            if (ctx->config.debug) {
+                fprintf(stderr, "Config parse layer: image=%s, shift=%.2f, opacity=%.2f, blur=%.2f\n",
+                        resolved_image_path, shift, opacity, blur);
+            }
+            
+            /* Add the layer */
+            hyprlax_add_layer(ctx, resolved_image_path, shift, opacity, blur);
+            free(resolved_image_path);
+            
+        } else if (strcmp(cmd, "duration") == 0) {
+            char *val = strtok(NULL, " \t");
+            if (val) ctx->config.animation_duration = atof(val);
+        } else if (strcmp(cmd, "shift") == 0) {
+            char *val = strtok(NULL, " \t");
+            if (val) ctx->config.shift_pixels = atof(val);
+        } else if (strcmp(cmd, "scale") == 0) {
+            char *val = strtok(NULL, " \t");
+            if (val) ctx->config.scale_factor = atof(val);
+        } else if (strcmp(cmd, "fps") == 0) {
+            char *val = strtok(NULL, " \t");
+            if (val) ctx->config.target_fps = atoi(val);
+        } else if (strcmp(cmd, "easing") == 0) {
+            char *val = strtok(NULL, " \t");
+            if (val) {
+                ctx->config.default_easing = easing_from_string(val);
+            }
+        }
+    }
+    
+    fclose(file);
+    return 0;
 }
 
 /* Parse command-line arguments */
@@ -91,12 +214,12 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 printf("\nEasing types:\n");
                 printf("  linear, quad, cubic, quart, quint, sine, expo, circ,\n");
                 printf("  back, elastic, bounce, snap\n");
-                return -1;
+                exit(0);  /* Exit successfully for help */
                 
             case 'v':
                 printf("hyprlax %s\n", HYPRLAX_VERSION);
                 printf("Modular parallax wallpaper for multiple compositors\n");
-                return -1;
+                exit(0);  /* Exit successfully for version */
                 
             case 'f':
                 ctx->config.target_fps = atoi(optarg);
@@ -116,7 +239,10 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 
             case 'c':
                 ctx->config.config_path = strdup(optarg);
-                config_load_file(&ctx->config, ctx->config.config_path);
+                if (parse_config_file(ctx, ctx->config.config_path) < 0) {
+                    fprintf(stderr, "Failed to load config file: %s\n", optarg);
+                    return -1;
+                }
                 break;
                 
             case 'D':
@@ -157,6 +283,14 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 
                 hyprlax_add_layer(ctx, image, shift, opacity, blur);
             }
+        } else {
+            /* Legacy: treat as image path */
+            /* Check if file exists first */
+            if (access(argv[i], F_OK) != 0) {
+                fprintf(stderr, "Error: Image file not found: %s\n", argv[i]);
+                return -1;
+            }
+            hyprlax_add_layer(ctx, argv[i], 1.0f, 1.0f, 0.0f);
         }
     }
     
@@ -239,7 +373,10 @@ int hyprlax_init_compositor(hyprlax_context_t *ctx) {
     
     /* Connect IPC if available */
     if (ctx->compositor->ops->connect_ipc) {
-        ctx->compositor->ops->connect_ipc(NULL);
+        int ret = ctx->compositor->ops->connect_ipc(NULL);
+        if (ret == HYPRLAX_SUCCESS && ctx->config.debug) {
+            printf("  IPC connected\n");
+        }
     }
     
     if (ctx->config.debug) {
@@ -377,6 +514,31 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
     return HYPRLAX_SUCCESS;
 }
 
+/* Load texture from file */
+static GLuint load_texture(const char *path, int *width, int *height) {
+    int channels;
+    unsigned char *data = stbi_load(path, width, height, &channels, 4);
+    if (!data) {
+        fprintf(stderr, "Failed to load image '%s': %s\n", path, stbi_failure_reason());
+        return 0;
+    }
+    
+    GLuint texture;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, *width, *height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    
+    /* Use trilinear filtering for smoother animation */
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    
+    stbi_image_free(data);
+    return texture;
+}
+
 /* Add a layer */
 int hyprlax_add_layer(hyprlax_context_t *ctx, const char *image_path,
                      float shift_multiplier, float opacity, float blur) {
@@ -387,13 +549,26 @@ int hyprlax_add_layer(hyprlax_context_t *ctx, const char *image_path,
         return HYPRLAX_ERROR_NO_MEMORY;
     }
     
+    /* Load the texture */
+    int img_width, img_height;
+    GLuint texture = load_texture(image_path, &img_width, &img_height);
+    if (texture == 0) {
+        layer_destroy(new_layer);
+        return HYPRLAX_ERROR_LOAD_FAILED;
+    }
+    
+    /* Store texture info in layer */
+    new_layer->texture_id = texture;
+    new_layer->width = img_width;
+    new_layer->height = img_height;
     new_layer->blur_amount = blur;
+    
     ctx->layers = layer_list_add(ctx->layers, new_layer);
     ctx->layer_count = layer_list_count(ctx->layers);
     
     if (ctx->config.debug) {
-        printf("Added layer: %s (shift=%.1f, opacity=%.1f, blur=%.1f)\n",
-               image_path, shift_multiplier, opacity, blur);
+        printf("Added layer: %s (%dx%d, shift=%.1f, opacity=%.1f, blur=%.1f)\n",
+               image_path, img_width, img_height, shift_multiplier, opacity, blur);
     }
     
     return HYPRLAX_SUCCESS;
@@ -452,12 +627,51 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
     RENDERER_BEGIN_FRAME(ctx->renderer);
     RENDERER_CLEAR(ctx->renderer, 0.0f, 0.0f, 0.0f, 1.0f);
     
+    /* Enable blending for multi-layer compositing */
+    if (ctx->layer_count > 1) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    }
+    
+    /* Calculate viewport dimensions */
+    int viewport_width = 1920;  /* TODO: Get from platform */
+    float scale_factor = ctx->config.scale_factor;
+    
     /* Render each layer */
     parallax_layer_t *layer = ctx->layers;
     while (layer) {
-        /* In real implementation, would render texture with offset */
-        /* For now, this is a placeholder */
+        if (layer->texture_id == 0) {
+            layer = layer->next;
+            continue;
+        }
+        
+        /* Calculate texture offset based on layer animation */
+        float viewport_width_in_texture = 1.0f / scale_factor;
+        float max_texture_offset = 1.0f - viewport_width_in_texture;
+        float max_pixel_offset = (scale_factor - 1.0f) * viewport_width;
+        float tex_offset = 0.0f;
+        
+        if (max_pixel_offset > 0) {
+            tex_offset = (layer->offset_x / max_pixel_offset) * max_texture_offset;
+        }
+        
+        /* Clamp to valid range */
+        if (tex_offset > max_texture_offset) tex_offset = max_texture_offset;
+        if (tex_offset < 0.0f) tex_offset = 0.0f;
+        
+        /* Render the layer texture */
+        /* Direct OpenGL rendering for now */
+        glBindTexture(GL_TEXTURE_2D, layer->texture_id);
+        /* TODO: Set up vertices with texture coordinates and draw quad */
+        /* vertices would be: tex_offset to tex_offset + viewport_width_in_texture */
+        (void)tex_offset; /* Suppress unused warning until rendering is complete */
+        (void)viewport_width_in_texture;
+        
         layer = layer->next;
+    }
+    
+    if (ctx->layer_count > 1) {
+        glDisable(GL_BLEND);
     }
     
     RENDERER_END_FRAME(ctx->renderer);
@@ -495,8 +709,12 @@ int hyprlax_run(hyprlax_context_t *ctx) {
         /* Poll compositor events */
         if (ctx->compositor && ctx->compositor->ops->poll_events) {
             compositor_event_t comp_event;
-            if (ctx->compositor->ops->poll_events(&comp_event) == HYPRLAX_SUCCESS) {
+            while (ctx->compositor->ops->poll_events(&comp_event) == HYPRLAX_SUCCESS) {
                 if (comp_event.type == COMPOSITOR_EVENT_WORKSPACE_CHANGE) {
+                    if (ctx->config.debug) {
+                        printf("Workspace changed to %d\n", 
+                               comp_event.data.workspace.to_workspace);
+                    }
                     hyprlax_handle_workspace_change(ctx, 
                                                   comp_event.data.workspace.to_workspace);
                 }

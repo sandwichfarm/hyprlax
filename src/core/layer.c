@@ -71,10 +71,12 @@ void layer_tick(parallax_layer_t *layer, double current_time) {
     // Update current position from animations
     if (animation_is_active(&layer->x_animation)) {
         layer->current_x = animation_evaluate(&layer->x_animation, current_time);
+        layer->offset_x = layer->current_x;  /* Update offset for rendering */
     }
     
     if (animation_is_active(&layer->y_animation)) {
         layer->current_y = animation_evaluate(&layer->y_animation, current_time);
+        layer->offset_y = layer->current_y;  /* Update offset for rendering */
     }
 }
 
