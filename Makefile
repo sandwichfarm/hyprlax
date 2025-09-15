@@ -44,8 +44,14 @@ RENDERER_SRCS = src/renderer/renderer.c src/renderer/shader.c src/renderer/gles2
 # Platform module sources
 PLATFORM_SRCS = src/platform/platform.c src/platform/wayland.c src/platform/x11.c
 
+# Compositor module sources
+COMPOSITOR_SRCS = src/compositor/compositor.c src/compositor/hyprland.c \
+                  src/compositor/sway.c src/compositor/generic_wayland.c \
+                  src/compositor/x11_ewmh.c
+
 # Source files
-SRCS = src/hyprlax.c src/ipc.c $(CORE_SRCS) $(RENDERER_SRCS) $(PLATFORM_SRCS) $(PROTOCOL_SRCS)
+SRCS = src/hyprlax.c src/ipc.c $(CORE_SRCS) $(RENDERER_SRCS) $(PLATFORM_SRCS) \
+       $(COMPOSITOR_SRCS) $(PROTOCOL_SRCS)
 OBJS = $(SRCS:.c=.o)
 TARGET = hyprlax
 
