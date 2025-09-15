@@ -65,7 +65,7 @@ void layer_update_offset(parallax_layer_t *layer, float target_x, float target_y
 }
 
 /* Update layer animations */
-void parallax_layer_tick(parallax_layer_t *layer, double current_time) {
+void layer_tick(parallax_layer_t *layer, double current_time) {
     if (!layer) return;
     
     // Update current position from animations

@@ -49,9 +49,17 @@ COMPOSITOR_SRCS = src/compositor/compositor.c src/compositor/hyprland.c \
                   src/compositor/sway.c src/compositor/generic_wayland.c \
                   src/compositor/x11_ewmh.c
 
-# Source files
+# Main module sources
+MAIN_SRCS = src/main.c src/hyprlax_main.c
+
+# Source files - Choose between legacy monolithic or new modular
+ifdef USE_LEGACY
 SRCS = src/hyprlax.c src/ipc.c $(CORE_SRCS) $(RENDERER_SRCS) $(PLATFORM_SRCS) \
        $(COMPOSITOR_SRCS) $(PROTOCOL_SRCS)
+else
+SRCS = $(MAIN_SRCS) src/ipc.c $(CORE_SRCS) $(RENDERER_SRCS) $(PLATFORM_SRCS) \
+       $(COMPOSITOR_SRCS) $(PROTOCOL_SRCS)
+endif
 OBJS = $(SRCS:.c=.o)
 TARGET = hyprlax
 
