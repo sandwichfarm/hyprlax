@@ -262,7 +262,7 @@ static int hyprland_connect_ipc(const char *socket_path) {
     
     /* Get initial workspace */
     char response[1024];
-    if (hyprland_send_command("j/activeworkspace", response, sizeof(response)) == HYPRLAX_SUCCESS) {
+    if (hyprland_send_command(HYPRLAND_IPC_GET_ACTIVE_WORKSPACE, response, sizeof(response)) == HYPRLAX_SUCCESS) {
         /* Parse JSON response to get workspace ID */
         /* Simple parsing - look for "id": */
         char *id_str = strstr(response, "\"id\":");

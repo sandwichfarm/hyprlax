@@ -230,8 +230,10 @@ static int wayland_wait_events(platform_event_t *event, int timeout_ms) {
 
 /* Flush pending events */
 static void wayland_flush_events(void) {
-    /* In real implementation, flush display */
-    fprintf(stderr, "Note: wayland_flush_events not fully implemented\n");
+    /* TODO: Implement wayland_flush_events - flush display */
+    if (g_wayland_data && g_wayland_data->display) {
+        wl_display_flush(g_wayland_data->display);
+    }
 }
 
 /* Get native display handle */

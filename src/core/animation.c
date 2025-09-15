@@ -31,15 +31,15 @@ void animation_stop(animation_state_t *anim) {
 }
 
 /* Evaluate animation at current time - no allocations */
-float animation_evaluate(const animation_state_t *anim, double current_time) {
+float animation_evaluate(animation_state_t *anim, double current_time) {
     if (!anim || !anim->active) {
         return anim ? anim->to_value : 0.0f;
     }
     
     // Lazy initialization of start time
     if (anim->start_time < 0) {
-        // This is a logical const operation, but C doesn't have mutable
-        ((animation_state_t*)anim)->start_time = current_time;
+        // Initialize start time on first evaluation
+        anim->start_time = current_time;
     }
     
     // Calculate progress
@@ -49,8 +49,8 @@ float animation_evaluate(const animation_state_t *anim, double current_time) {
     }
     
     if (elapsed >= anim->duration) {
-        ((animation_state_t*)anim)->completed = true;
-        ((animation_state_t*)anim)->active = false;
+        anim->completed = true;
+        anim->active = false;
         return anim->to_value;
     }
     

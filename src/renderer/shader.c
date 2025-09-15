@@ -34,6 +34,11 @@ const char *shader_fragment_basic =
     "    gl_FragColor = vec4(color.rgb * final_alpha, final_alpha);\n"
     "}\n";
 
+/* Shader constants */
+#define BLUR_KERNEL_SIZE 5.0f
+#define BLUR_WEIGHT_FALLOFF 0.15f
+#define SHADER_BUFFER_SIZE 2048
+
 /* Blur shader template */
 static const char *shader_fragment_blur_template =
     "precision highp float;\n"
@@ -222,19 +227,21 @@ void shader_set_uniform_int(const shader_program_t *program,
 
 /* Build dynamic blur shader */
 char* shader_build_blur_fragment(float blur_amount, int kernel_size) {
+    (void)kernel_size; /* Currently using fixed BLUR_KERNEL_SIZE */
+    
     if (blur_amount <= 0.001f) {
         /* No blur needed, return basic shader */
         return strdup(shader_fragment_basic);
     }
     
     /* Allocate buffer for shader source */
-    char *shader = malloc(2048);
+    char *shader = malloc(SHADER_BUFFER_SIZE);
     if (!shader) return NULL;
     
     /* Build shader with specific blur parameters */
-    snprintf(shader, 2048, shader_fragment_blur_template,
-             (float)kernel_size,      /* Kernel size */
-             0.15f, 0.15f);          /* Weight falloff */
+    snprintf(shader, SHADER_BUFFER_SIZE, shader_fragment_blur_template,
+             BLUR_KERNEL_SIZE,      /* Kernel size */
+             BLUR_WEIGHT_FALLOFF, BLUR_WEIGHT_FALLOFF);  /* Weight falloff */
     
     return shader;
 }

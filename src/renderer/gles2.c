@@ -317,8 +317,11 @@ static void gles2_resize(int width, int height) {
 
 /* Set vsync */
 static void gles2_set_vsync(bool enabled) {
-    /* Note: Need access to EGL display */
-    fprintf(stderr, "Note: gles2_set_vsync needs access to EGL display\n");
+    /* TODO: Implement vsync setting (requires access to EGL display) */
+    if (g_gles2_data && g_gles2_data->egl_display != EGL_NO_DISPLAY) {
+        eglSwapInterval(g_gles2_data->egl_display, enabled ? 1 : 0);
+        g_gles2_data->vsync_enabled = enabled;
+    }
 }
 
 /* Get capabilities */

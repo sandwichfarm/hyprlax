@@ -660,12 +660,9 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
         if (tex_offset < 0.0f) tex_offset = 0.0f;
         
         /* Render the layer texture */
-        /* Direct OpenGL rendering for now */
+        /* TODO: Implement full quad rendering with vertices */
+        /* For now, just bind the texture - rendering will be completed in next phase */
         glBindTexture(GL_TEXTURE_2D, layer->texture_id);
-        /* TODO: Set up vertices with texture coordinates and draw quad */
-        /* vertices would be: tex_offset to tex_offset + viewport_width_in_texture */
-        (void)tex_offset; /* Suppress unused warning until rendering is complete */
-        (void)viewport_width_in_texture;
         
         layer = layer->next;
     }
@@ -730,8 +727,14 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             ctx->fps = 1.0 / ctx->delta_time;
             last_time = current_time;
         } else {
-            /* Sleep to maintain target FPS */
-            usleep((frame_time - ctx->delta_time) * 1000000);
+            /* Sleep to maintain target FPS using nanosleep for better precision */
+            double sleep_time = frame_time - ctx->delta_time;
+            if (sleep_time > 0) {
+                struct timespec ts;
+                ts.tv_sec = (time_t)sleep_time;
+                ts.tv_nsec = (long)((sleep_time - ts.tv_sec) * 1e9);
+                nanosleep(&ts, NULL);
+            }
         }
     }
     

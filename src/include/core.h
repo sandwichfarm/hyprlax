@@ -120,7 +120,7 @@ const char* easing_to_string(easing_type_t type);
 void animation_start(animation_state_t *anim, float from, float to, 
                     double duration, easing_type_t easing);
 void animation_stop(animation_state_t *anim);
-float animation_evaluate(const animation_state_t *anim, double current_time);
+float animation_evaluate(animation_state_t *anim, double current_time);
 bool animation_is_active(const animation_state_t *anim);
 bool animation_is_complete(const animation_state_t *anim, double current_time);
 
