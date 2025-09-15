@@ -1,0 +1,106 @@
+/*
+ * renderer.h - Renderer abstraction interface
+ * 
+ * Provides an abstraction layer for rendering operations, allowing
+ * different rendering backends (OpenGL ES, OpenGL, Vulkan, etc.)
+ */
+
+#ifndef HYPRLAX_RENDERER_H
+#define HYPRLAX_RENDERER_H
+
+#include <stdbool.h>
+#include <stdint.h>
+#include "hyprlax_internal.h"
+
+/* Renderer capability flags */
+typedef enum {
+    RENDERER_CAP_BLUR = 1 << 0,
+    RENDERER_CAP_VSYNC = 1 << 1,
+    RENDERER_CAP_MULTISAMPLING = 1 << 2,
+} renderer_capability_t;
+
+/* Texture format */
+typedef enum {
+    TEXTURE_FORMAT_RGBA,
+    TEXTURE_FORMAT_RGB,
+    TEXTURE_FORMAT_BGRA,
+    TEXTURE_FORMAT_BGR,
+} texture_format_t;
+
+/* Renderer configuration */
+typedef struct {
+    int width;
+    int height;
+    bool vsync;
+    int target_fps;
+    uint32_t capabilities;
+} renderer_config_t;
+
+/* Texture handle */
+typedef struct {
+    uint32_t id;
+    int width;
+    int height;
+    texture_format_t format;
+} texture_t;
+
+/* Renderer operations interface */
+typedef struct renderer_ops {
+    /* Lifecycle */
+    int (*init)(void *native_display, void *native_window, const renderer_config_t *config);
+    void (*destroy)(void);
+    
+    /* Frame management */
+    void (*begin_frame)(void);
+    void (*end_frame)(void);
+    void (*present)(void);
+    
+    /* Texture management */
+    texture_t* (*create_texture)(const void *data, int width, int height, texture_format_t format);
+    void (*destroy_texture)(texture_t *texture);
+    void (*bind_texture)(const texture_t *texture, int unit);
+    
+    /* Drawing operations */
+    void (*clear)(float r, float g, float b, float a);
+    void (*draw_layer)(const texture_t *texture, float x, float y, 
+                      float opacity, float blur_amount);
+    
+    /* Configuration */
+    void (*resize)(int width, int height);
+    void (*set_vsync)(bool enabled);
+    uint32_t (*get_capabilities)(void);
+    
+    /* Debug */
+    const char* (*get_name)(void);
+    const char* (*get_version)(void);
+} renderer_ops_t;
+
+/* Renderer instance */
+typedef struct renderer {
+    const renderer_ops_t *ops;
+    renderer_config_t config;
+    void *private_data;
+    bool initialized;
+} renderer_t;
+
+/* Global renderer management */
+int renderer_create(renderer_t **renderer, const char *backend_name);
+void renderer_destroy(renderer_t *renderer);
+
+/* Convenience macros for calling renderer operations */
+#define RENDERER_INIT(r, display, window, config) \
+    ((r)->ops->init((display), (window), (config)))
+#define RENDERER_BEGIN_FRAME(r) \
+    ((r)->ops->begin_frame())
+#define RENDERER_END_FRAME(r) \
+    ((r)->ops->end_frame())
+#define RENDERER_PRESENT(r) \
+    ((r)->ops->present())
+#define RENDERER_CLEAR(r, red, green, blue, alpha) \
+    ((r)->ops->clear((red), (green), (blue), (alpha)))
+
+/* Available renderer backends */
+extern const renderer_ops_t renderer_gles2_ops;
+/* Future: renderer_gl3_ops, renderer_vulkan_ops */
+
+#endif /* HYPRLAX_RENDERER_H */

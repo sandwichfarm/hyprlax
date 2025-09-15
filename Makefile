@@ -38,8 +38,11 @@ PROTOCOL_HDRS = protocols/xdg-shell-client-protocol.h protocols/wlr-layer-shell-
 # Core module sources
 CORE_SRCS = src/core/easing.c src/core/animation.c src/core/layer.c src/core/config.c
 
+# Renderer module sources
+RENDERER_SRCS = src/renderer/renderer.c src/renderer/shader.c src/renderer/gles2.c
+
 # Source files
-SRCS = src/hyprlax.c src/ipc.c $(CORE_SRCS) $(PROTOCOL_SRCS)
+SRCS = src/hyprlax.c src/ipc.c $(CORE_SRCS) $(RENDERER_SRCS) $(PROTOCOL_SRCS)
 OBJS = $(SRCS:.c=.o)
 TARGET = hyprlax
 
