@@ -1,10 +1,10 @@
 CC = gcc
 # Use generic architecture for CI compatibility
 ifdef CI
-CFLAGS = -Wall -Wextra -O2 -Isrc
+CFLAGS = -Wall -Wextra -O2 -Isrc -Isrc/include
 LDFLAGS =
 else
-CFLAGS = -Wall -Wextra -O3 -march=native -flto -Isrc
+CFLAGS = -Wall -Wextra -O3 -march=native -flto -Isrc -Isrc/include
 LDFLAGS = -flto
 endif
 
@@ -35,8 +35,11 @@ LAYER_SHELL_PROTOCOL = protocols/wlr-layer-shell-unstable-v1.xml
 PROTOCOL_SRCS = protocols/xdg-shell-protocol.c protocols/wlr-layer-shell-protocol.c
 PROTOCOL_HDRS = protocols/xdg-shell-client-protocol.h protocols/wlr-layer-shell-client-protocol.h
 
+# Core module sources
+CORE_SRCS = src/core/easing.c src/core/animation.c src/core/layer.c src/core/config.c
+
 # Source files
-SRCS = src/hyprlax.c src/ipc.c $(PROTOCOL_SRCS)
+SRCS = src/hyprlax.c src/ipc.c $(CORE_SRCS) $(PROTOCOL_SRCS)
 OBJS = $(SRCS:.c=.o)
 TARGET = hyprlax
 

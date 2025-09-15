@@ -17,7 +17,8 @@ protocols/*.h
 .idea/
 
 # Debug files
-core
+# Core dumps but not src/core directory
+/core
 vgcore.*
 *.log
 

@@ -36,21 +36,8 @@
 #include "stb_image.h"
 
 #include "ipc.h"
+#include "include/core.h"
 
-// Easing functions
-typedef enum {
-    EASE_LINEAR,
-    EASE_QUAD_OUT,
-    EASE_CUBIC_OUT,
-    EASE_QUART_OUT,
-    EASE_QUINT_OUT,
-    EASE_SINE_OUT,
-    EASE_EXPO_OUT,
-    EASE_CIRC_OUT,
-    EASE_BACK_OUT,
-    EASE_ELASTIC_OUT,
-    EASE_CUSTOM_SNAP  // Extra snappy custom easing
-} easing_type_t;
 
 // Layer structure for multi-layer parallax
 struct layer {
@@ -168,60 +155,6 @@ struct {
     // Running state
     int running;
 } state = {0};
-
-// Easing functions implementation
-float apply_easing(float t, easing_type_t type) {
-    switch (type) {
-        case EASE_LINEAR:
-            return t;
-
-        case EASE_QUAD_OUT:
-            return 1.0f - (1.0f - t) * (1.0f - t);
-
-        case EASE_CUBIC_OUT:
-            return 1.0f - powf(1.0f - t, 3.0f);
-
-        case EASE_QUART_OUT:
-            return 1.0f - powf(1.0f - t, 4.0f);
-
-        case EASE_QUINT_OUT:
-            return 1.0f - powf(1.0f - t, 5.0f);
-
-        case EASE_SINE_OUT:
-            return sinf((t * M_PI) / 2.0f);
-
-        case EASE_EXPO_OUT:
-            return t == 1.0f ? 1.0f : 1.0f - powf(2.0f, -10.0f * t);
-
-        case EASE_CIRC_OUT:
-            return sqrtf(1.0f - powf(t - 1.0f, 2.0f));
-
-        case EASE_BACK_OUT: {
-            float c1 = 1.70158f;
-            float c3 = c1 + 1.0f;
-            return 1.0f + c3 * powf(t - 1.0f, 3.0f) + c1 * powf(t - 1.0f, 2.0f);
-        }
-
-        case EASE_ELASTIC_OUT: {
-            float c4 = (2.0f * M_PI) / 3.0f;
-            return t == 0 ? 0 : t == 1 ? 1 : powf(2.0f, -10.0f * t) * sinf((t * 10.0f - 0.75f) * c4) + 1.0f;
-        }
-
-        case EASE_CUSTOM_SNAP: {
-            // Custom extra snappy easing - fast start, very quick deceleration at the end
-            if (t < 0.4f) {
-                // Accelerate quickly for first 40% of time
-                return 1.0f - powf(1.0f - (t * 2.5f), 6.0f);
-            } else {
-                // Then ease out more gently
-                return 1.0f - powf(1.0f - t, 8.0f);
-            }
-        }
-
-        default:
-            return t;
-    }
-}
 
 // Shader sources with better precision
 const char *vertex_shader_src =
