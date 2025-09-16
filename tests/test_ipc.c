@@ -13,7 +13,7 @@
 #include "../src/ipc.h"
 
 // Helper function to get socket path
-static void get_test_socket_path(char* buffer, size_t size) {
+__attribute__((unused)) static void get_test_socket_path(char* buffer, size_t size) {
     const char* user = getenv("USER");
     if (!user) {
         struct passwd* pw = getpwuid(getuid());
@@ -59,10 +59,15 @@ START_TEST(test_ipc_init)
     // Check socket exists
     ck_assert_int_eq(access(ctx->socket_path, F_OK), 0);
     
+    // Save socket path before cleanup to avoid use-after-free
+    char socket_path[256];
+    strncpy(socket_path, ctx->socket_path, sizeof(socket_path) - 1);
+    socket_path[sizeof(socket_path) - 1] = '\0';
+    
     ipc_cleanup(ctx);
     
     // Check socket is removed after cleanup
-    ck_assert_int_ne(access(ctx->socket_path, F_OK), 0);
+    ck_assert_int_ne(access(socket_path, F_OK), 0);
 }
 END_TEST
 
