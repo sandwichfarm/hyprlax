@@ -1007,6 +1007,11 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                 struct timespec ts;
                 ts.tv_sec = (time_t)(sleep_time);  /* Integer seconds (usually 0) */
                 ts.tv_nsec = (long)((sleep_time - (time_t)sleep_time) * 1e9);  /* Fractional part in nanoseconds */
+                if (ts.tv_nsec > 999999999) {
+                    ts.tv_nsec = 999999999;
+                } else if (ts.tv_nsec < 0) {
+                    ts.tv_nsec = 0;
+                }
                 nanosleep(&ts, NULL);
             }
         }

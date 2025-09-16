@@ -160,7 +160,7 @@ int hyprlax_ctl_main(int argc, char **argv) {
         if (offset > 0) {
             command[offset++] = ' ';
         }
-        strcpy(command + offset, argv[i]);
+        memcpy(command + offset, argv[i], len);
         offset += len;
     }
     command[offset] = '\n';

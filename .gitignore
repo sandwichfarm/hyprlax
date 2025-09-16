@@ -22,6 +22,10 @@ protocols/*.h
 vgcore.*
 *.log
 
+# Valgrind output files
+*.valgrind.log.*
+*.valgrind.log.core.*
+
 # Test files
 tests/test_hyprlax
 tests/test_ipc

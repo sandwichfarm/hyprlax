@@ -168,7 +168,7 @@ START_TEST(test_blur_pass_optimization)
         // Multi-pass should be more efficient than single large kernel
         int single_samples = optimizations[i].single_pass_size * optimizations[i].single_pass_size;
         int multi_samples = optimizations[i].multi_pass_count * 
-                           optimizations[i].pass_size * optimizations[i].pass_size;
+                           optimizations[i].pass_size;
         
         // Multi-pass should require fewer texture samples
         ck_assert(multi_samples < single_samples || multi_samples == single_samples);

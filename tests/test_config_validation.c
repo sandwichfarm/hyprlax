@@ -171,15 +171,21 @@ START_TEST(test_config_special_characters)
     };
     
     for (int i = 0; i < sizeof(test_cases)/sizeof(test_cases[0]); i++) {
-        // Should sanitize or reject dangerous inputs
+        // Should sanitize or reject dangerous inputs using whitelist approach
         char sanitized[256];
-        strcpy(sanitized, test_cases[i]);
-        
-        // Remove dangerous characters
-        char *dangerous = strpbrk(sanitized, "\n\t\"'#$;`|&(){}[]*? ");
-        if (dangerous) {
-            *dangerous = '\0';
+        int j = 0;
+        for (int k = 0; test_cases[i][k] != '\0' && j < 255; k++) {
+            // Whitelist: allow alphanumeric and _-. characters only
+            if ((test_cases[i][k] >= 'A' && test_cases[i][k] <= 'Z') ||
+                (test_cases[i][k] >= 'a' && test_cases[i][k] <= 'z') ||
+                (test_cases[i][k] >= '0' && test_cases[i][k] <= '9') ||
+                test_cases[i][k] == '_' ||
+                test_cases[i][k] == '-' ||
+                test_cases[i][k] == '.') {
+                sanitized[j++] = test_cases[i][k];
+            }
         }
+        sanitized[j] = '\0';
         
         ck_assert(strlen(sanitized) <= strlen(test_cases[i]));
     }

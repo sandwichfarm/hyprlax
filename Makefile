@@ -244,6 +244,6 @@ lint-fix:
 	fi
 
 clean-tests:
-	rm -f $(ALL_TEST_TARGETS) tests/*.valgrind.log
+	rm -f $(ALL_TEST_TARGETS) tests/*.valgrind.log tests/*.valgrind.log.* tests/*.valgrind.log.core.*
 
 .PHONY: all clean install install-user uninstall uninstall-user test memcheck clean-tests lint lint-fix

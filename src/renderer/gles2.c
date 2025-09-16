@@ -381,8 +381,8 @@ static void gles2_draw_layer(const texture_t *texture, float x, float y,
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
     
-    GLint pos_attrib = glGetAttribLocation(g_gles2_data->basic_shader->id, "a_position");
-    GLint tex_attrib = glGetAttribLocation(g_gles2_data->basic_shader->id, "a_texcoord");
+    GLint pos_attrib = glGetAttribLocation(shader->id, "a_position");
+    GLint tex_attrib = glGetAttribLocation(shader->id, "a_texcoord");
     
     if (draw_count < 5 && getenv("HYPRLAX_DEBUG")) {
         fprintf(stderr, "[DEBUG] Attrib locations: pos=%d, tex=%d\n", pos_attrib, tex_attrib);

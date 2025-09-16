@@ -87,8 +87,8 @@ static void layer_surface_configure(void *data,
         wl_egl_window_resize(wl_data->egl_window, width, height, 0, 0);
     }
     
-    /* Update OpenGL viewport */
-    glViewport(0, 0, width, height);
+    /* TODO: Notify renderer of viewport change through callback mechanism
+     * Platform should not make direct OpenGL calls */
 }
 
 static void layer_surface_closed(void *data,
