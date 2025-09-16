@@ -282,8 +282,13 @@ static int river_connect_ipc(const char *socket_path) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
     
-    /* Connect control socket */
-    g_river_data->control_fd = connect_river_socket(g_river_data->socket_path);
+    /* Connect control socket with retries for startup race condition */
+    g_river_data->control_fd = compositor_connect_socket_with_retry(
+        g_river_data->socket_path,
+        "River",
+        30,     /* max retries */
+        500     /* delay ms */
+    );
     if (g_river_data->control_fd < 0) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }

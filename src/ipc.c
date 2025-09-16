@@ -46,7 +46,26 @@ ipc_context_t* ipc_init(void) {
 
     get_socket_path(ctx->socket_path, sizeof(ctx->socket_path));
 
-    // Remove existing socket if it exists
+    // Check if another instance is already running by trying to connect to the socket
+    int test_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (test_fd >= 0) {
+        struct sockaddr_un test_addr;
+        memset(&test_addr, 0, sizeof(test_addr));
+        test_addr.sun_family = AF_UNIX;
+        strncpy(test_addr.sun_path, ctx->socket_path, sizeof(test_addr.sun_path) - 1);
+        
+        if (connect(test_fd, (struct sockaddr*)&test_addr, sizeof(test_addr)) == 0) {
+            // Successfully connected - another instance is running
+            fprintf(stderr, "Error: Another instance of hyprlax is already running\n");
+            fprintf(stderr, "Socket: %s\n", ctx->socket_path);
+            close(test_fd);
+            free(ctx);
+            return NULL;
+        }
+        close(test_fd);
+    }
+
+    // Remove existing socket if it exists (stale from a crash)
     unlink(ctx->socket_path);
 
     // Create Unix domain socket

@@ -8,6 +8,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
+#include <time.h>
 #include <wayland-client.h>
 #include <wayland-egl.h>
 #include <GLES2/gl2.h>
@@ -34,6 +36,11 @@ typedef struct {
     int height;
     bool configured;
     bool running;
+    
+    /* Pending resize event */
+    bool has_pending_resize;
+    int pending_width;
+    int pending_height;
 } wayland_data_t;
 
 /* Global instance (simplified for now) */
@@ -71,13 +78,16 @@ static void layer_surface_configure(void *data,
                                    uint32_t width, uint32_t height) {
     wayland_data_t *wl_data = (wayland_data_t *)data;
     
-    if (getenv("HYPRLAX_DEBUG")) {
-        fprintf(stderr, "[DEBUG] Layer surface configured: %ux%u\n", width, height);
-    }
+    fprintf(stderr, "[DEBUG] Layer surface configure called: %ux%u\n", width, height);
     
-    wl_data->width = width;
-    wl_data->height = height;
-    wl_data->configured = true;
+    if (width > 0 && height > 0) {
+        wl_data->width = width;
+        wl_data->height = height;
+        wl_data->configured = true;
+        fprintf(stderr, "[DEBUG] Layer surface dimensions set: %ux%u\n", width, height);
+    } else {
+        fprintf(stderr, "[WARNING] Layer surface configure with invalid dimensions: %ux%u\n", width, height);
+    }
     
     /* Acknowledge the configure event */
     zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
@@ -85,10 +95,13 @@ static void layer_surface_configure(void *data,
     /* Resize EGL window if it exists */
     if (wl_data->egl_window) {
         wl_egl_window_resize(wl_data->egl_window, width, height, 0, 0);
+        
+        /* Store pending resize event to be picked up in poll_events */
+        wl_data->has_pending_resize = true;
+        wl_data->pending_width = width;
+        wl_data->pending_height = height;
+        fprintf(stderr, "[DEBUG] Pending resize event stored: %dx%d\n", width, height);
     }
-    
-    /* TODO: Notify renderer of viewport change through callback mechanism
-     * Platform should not make direct OpenGL calls */
 }
 
 static void layer_surface_closed(void *data,
@@ -130,9 +143,31 @@ static int wayland_connect(const char *display_name) {
         return HYPRLAX_ERROR_NO_MEMORY;
     }
     
-    /* Connect to Wayland display */
-    g_wayland_data->display = wl_display_connect(display_name);
+    /* Try to connect to Wayland display with retries for startup race condition */
+    int max_retries = 30;  /* 30 retries = up to 15 seconds */
+    int retry_delay_ms = 500;  /* 500ms between retries */
+    bool first_attempt = true;
+    
+    for (int i = 0; i < max_retries; i++) {
+        g_wayland_data->display = wl_display_connect(display_name);
+        if (g_wayland_data->display) {
+            break;  /* Successfully connected */
+        }
+        
+        if (first_attempt) {
+            fprintf(stderr, "Waiting for Wayland display to be ready...\n");
+            first_attempt = false;
+        }
+        
+        /* Sleep before retry using nanosleep for consistency */
+        struct timespec ts;
+        ts.tv_sec = 0;
+        ts.tv_nsec = retry_delay_ms * 1000000L;  /* Convert ms to ns */
+        nanosleep(&ts, NULL);
+    }
+    
     if (!g_wayland_data->display) {
+        fprintf(stderr, "Failed to connect to Wayland display after %d attempts\n", max_retries);
         free(g_wayland_data);
         g_wayland_data = NULL;
         return HYPRLAX_ERROR_NO_DISPLAY;
@@ -240,11 +275,19 @@ static int wayland_create_window(const window_config_t *config) {
         }
     }
     
-    /* Create EGL window */
-    g_wayland_data->width = config->width;
-    g_wayland_data->height = config->height;
+    /* Create EGL window - use configured dimensions if available, otherwise use config */
+    if (!g_wayland_data->configured) {
+        g_wayland_data->width = config->width;
+        g_wayland_data->height = config->height;
+        fprintf(stderr, "[DEBUG] Using config dimensions: %dx%d\n", 
+                g_wayland_data->width, g_wayland_data->height);
+    } else {
+        fprintf(stderr, "[DEBUG] Using configured dimensions: %dx%d\n", 
+                g_wayland_data->width, g_wayland_data->height);
+    }
     g_wayland_data->egl_window = wl_egl_window_create(g_wayland_data->surface,
-                                                      config->width, config->height);
+                                                      g_wayland_data->width, 
+                                                      g_wayland_data->height);
     if (!g_wayland_data->egl_window) {
         if (g_wayland_data->layer_surface) {
             zwlr_layer_surface_v1_destroy(g_wayland_data->layer_surface);
@@ -305,6 +348,17 @@ static int wayland_poll_events(platform_event_t *event) {
         wl_display_dispatch_pending(g_wayland_data->display);
         /* Then flush any pending requests */
         wl_display_flush(g_wayland_data->display);
+    }
+    
+    /* Check for pending resize event */
+    if (g_wayland_data && g_wayland_data->has_pending_resize) {
+        event->type = PLATFORM_EVENT_RESIZE;
+        event->data.resize.width = g_wayland_data->pending_width;
+        event->data.resize.height = g_wayland_data->pending_height;
+        g_wayland_data->has_pending_resize = false;
+        fprintf(stderr, "[DEBUG] Returning resize event: %dx%d\n", 
+                g_wayland_data->pending_width, g_wayland_data->pending_height);
+        return HYPRLAX_SUCCESS;
     }
     
     event->type = PLATFORM_EVENT_NONE;

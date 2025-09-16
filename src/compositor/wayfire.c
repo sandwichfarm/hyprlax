@@ -272,8 +272,13 @@ static int wayfire_connect_ipc(const char *socket_path) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
     
-    /* Connect to IPC socket */
-    g_wayfire_data->ipc_fd = connect_wayfire_socket(g_wayfire_data->socket_path);
+    /* Connect to IPC socket with retries for startup race condition */
+    g_wayfire_data->ipc_fd = compositor_connect_socket_with_retry(
+        g_wayfire_data->socket_path,
+        "Wayfire",
+        30,     /* max retries */
+        500     /* delay ms */
+    );
     if (g_wayfire_data->ipc_fd < 0) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }

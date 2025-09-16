@@ -444,9 +444,9 @@ static int hyprlax_init_ipc(hyprlax_context_t *ctx) {
     
     ctx->ipc_ctx = ipc_init();
     if (!ctx->ipc_ctx) {
-        fprintf(stderr, "Warning: Failed to initialize IPC server\n");
-        /* Non-fatal - continue without IPC */
-        return HYPRLAX_SUCCESS;
+        /* Check if failure was due to another instance running */
+        /* The ipc_init() function already printed the error message */
+        return HYPRLAX_ERROR_ALREADY_RUNNING;
     }
     
     /* Link IPC context to main context for runtime settings */
@@ -471,21 +471,27 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
     /* Initialize modules in order */
     int ret;
     
-    /* 1. Platform (windowing system) */
+    /* 1. Initialize IPC server first to check for existing instances */
+    ret = hyprlax_init_ipc(ctx);
+    if (ret != HYPRLAX_SUCCESS) {
+        return ret;  /* Exit if another instance is running */
+    }
+    
+    /* 2. Platform (windowing system) */
     ret = hyprlax_init_platform(ctx);
     if (ret != HYPRLAX_SUCCESS) {
         fprintf(stderr, "Platform initialization failed\n");
         return ret;
     }
     
-    /* 2. Compositor (IPC and features) */
+    /* 3. Compositor (IPC and features) */
     ret = hyprlax_init_compositor(ctx);
     if (ret != HYPRLAX_SUCCESS) {
         fprintf(stderr, "Compositor initialization failed\n");
         return ret;
     }
     
-    /* 3. Create window */
+    /* 4. Create window */
     window_config_t window_config = {
         .width = 1920,
         .height = 1080,
@@ -503,28 +509,21 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
         return ret;
     }
     
-    /* 4. Renderer (OpenGL context) */
+    /* 5. Renderer (OpenGL context) */
     ret = hyprlax_init_renderer(ctx);
     if (ret != HYPRLAX_SUCCESS) {
         fprintf(stderr, "Renderer initialization failed\n");
         return ret;
     }
     
-    /* 5. Load textures for all layers now that GL is initialized */
+    /* 6. Load textures for all layers now that GL is initialized */
     ret = hyprlax_load_layer_textures(ctx);
     if (ret != HYPRLAX_SUCCESS) {
         fprintf(stderr, "Warning: Some textures failed to load\n");
         /* Continue anyway - we can still run with missing textures */
     }
     
-    /* 6. Initialize IPC server for runtime control */
-    ret = hyprlax_init_ipc(ctx);
-    if (ret != HYPRLAX_SUCCESS) {
-        fprintf(stderr, "Warning: IPC server initialization failed\n");
-        /* Non-fatal - continue without IPC */
-    }
-    
-    /* 6. Create layer surface if using Wayland */
+    /* 7. Create layer surface if using Wayland */
     if (ctx->platform->type == PLATFORM_WAYLAND && ctx->compositor->ops->create_layer_surface) {
         layer_surface_config_t layer_config = {
             .layer = LAYER_BACKGROUND,

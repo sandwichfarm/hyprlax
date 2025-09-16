@@ -41,6 +41,7 @@ typedef enum {
     HYPRLAX_ERROR_FILE_NOT_FOUND = -6,
     HYPRLAX_ERROR_LOAD_FAILED = -7,
     HYPRLAX_ERROR_NO_DATA = -8,
+    HYPRLAX_ERROR_ALREADY_RUNNING = -9,
 } hyprlax_error_t;
 
 /* Forward declarations for cross-module types */

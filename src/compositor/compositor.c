@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -30,7 +32,10 @@ int compositor_connect_socket_with_retry(const char *socket_path,
         int fd = socket(AF_UNIX, SOCK_STREAM, 0);
         if (fd < 0) {
             if (i < max_retries - 1) {
-                usleep(retry_delay_ms * 1000);
+                struct timespec ts;
+            ts.tv_sec = 0;
+            ts.tv_nsec = retry_delay_ms * 1000000L;
+            nanosleep(&ts, NULL);
                 continue;
             }
             return -1;
@@ -59,7 +64,10 @@ int compositor_connect_socket_with_retry(const char *socket_path,
         }
         
         if (i < max_retries - 1) {
-            usleep(retry_delay_ms * 1000);
+            struct timespec ts;
+            ts.tv_sec = 0;
+            ts.tv_nsec = retry_delay_ms * 1000000L;
+            nanosleep(&ts, NULL);
         }
     }
     

@@ -309,8 +309,13 @@ static int niri_connect_ipc(const char *socket_path) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
     
-    /* Connect to IPC socket */
-    g_niri_data->ipc_fd = connect_niri_socket(g_niri_data->socket_path);
+    /* Connect to IPC socket with retries for startup race condition */
+    g_niri_data->ipc_fd = compositor_connect_socket_with_retry(
+        g_niri_data->socket_path,
+        "Niri",
+        30,     /* max retries */
+        500     /* delay ms */
+    );
     if (g_niri_data->ipc_fd < 0) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }

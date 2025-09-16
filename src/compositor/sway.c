@@ -440,8 +440,13 @@ static int sway_connect_ipc(const char *socket_path) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
     
-    /* Connect command socket */
-    g_sway_data->cmd_fd = connect_sway_socket(g_sway_data->socket_path);
+    /* Connect command socket with retries for startup race condition */
+    g_sway_data->cmd_fd = compositor_connect_socket_with_retry(
+        g_sway_data->socket_path,
+        "Sway",
+        30,     /* max retries */
+        500     /* delay ms */
+    );
     if (g_sway_data->cmd_fd < 0) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
