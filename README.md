@@ -9,6 +9,10 @@ Dynamic parallax wallpaper engine with multi-compositor support for Linux.
   <img src="https://img.shields.io/badge/Multi--Compositor-Support-purple" alt="Multi-Compositor">
 </p>
 
+<p align="center">
+  <img src="/assets/hyprlax-demo.gif" alt="hyprlax parallax wallpaper animation demo" width="80%">
+</p>
+
 ## Features
 
 - 🎬 **Buttery smooth animations** - GPU-accelerated rendering with configurable FPS
