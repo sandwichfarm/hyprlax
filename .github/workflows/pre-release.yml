@@ -42,8 +42,8 @@ jobs:
         include:
           - arch: x86_64
             cc: gcc
-          - arch: aarch64
-            cc: aarch64-linux-gnu-gcc
+          # ARM64 cross-compilation disabled for now - requires more complex setup
+          # Can be added back when properly configured with sysroot
     
     steps:
       - name: Checkout code
@@ -51,8 +51,7 @@ jobs:
         with:
           fetch-depth: 0
       
-      - name: Install dependencies (x86_64)
-        if: matrix.arch == 'x86_64'
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -67,15 +66,6 @@ jobs:
             libxext-dev \
             check
       
-      - name: Install cross-compilation tools (aarch64)
-        if: matrix.arch == 'aarch64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            gcc-aarch64-linux-gnu \
-            g++-aarch64-linux-gnu \
-            pkg-config
-      
       - name: Build binary
         env:
           CC: ${{ matrix.cc }}
@@ -86,14 +76,8 @@ jobs:
           echo "Building pre-release version: $VERSION"
           echo "#define HYPRLAX_VERSION \"$VERSION-PRE\"" > src/version.h
           
-          if [ "${{ matrix.arch }}" = "x86_64" ]; then
-            make clean
-            make
-          else
-            # Cross-compile for ARM64
-            make clean
-            make CC=${{ matrix.cc }} ARCH=aarch64
-          fi
+          make clean
+          make
       
       - name: Run tests (x86_64 only)
         if: matrix.arch == 'x86_64'
@@ -240,7 +224,8 @@ jobs:
           ### 📦 Available Builds
           
           - \`hyprlax-${VERSION}-linux-x86_64.tar.gz\` - Intel/AMD 64-bit
-          - \`hyprlax-${VERSION}-linux-aarch64.tar.gz\` - ARM 64-bit
+          
+          *Note: ARM64 builds not available for pre-releases. Please build from source.*
           
           ### 🧪 Testing Focus
           
