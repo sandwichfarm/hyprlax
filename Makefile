@@ -17,7 +17,7 @@ endif
 endif
 
 # Package dependencies
-PKG_DEPS = wayland-client wayland-protocols wayland-egl egl glesv2
+PKG_DEPS = wayland-client wayland-protocols wayland-egl egl glesv2 x11 xext
 
 # Get package flags
 PKG_CFLAGS = $(shell pkg-config --cflags $(PKG_DEPS))
@@ -123,7 +123,7 @@ VALGRIND_FLAGS = --leak-check=full --show-leak-kinds=definite,indirect --track-o
 # For Arch Linux, enable debuginfod for symbol resolution
 export DEBUGINFOD_URLS ?= https://debuginfod.archlinux.org
 
-TEST_TARGETS = tests/test_integration tests/test_ipc tests/test_blur tests/test_config tests/test_animation tests/test_easing tests/test_shader tests/test_platform tests/test_compositor tests/test_modules tests/test_renderer tests/test_workspace_changes tests/test_animation_state tests/test_config_validation
+TEST_TARGETS = tests/test_integration tests/test_ipc tests/test_blur tests/test_config tests/test_animation tests/test_easing tests/test_shader tests/test_platform tests/test_compositor tests/test_modules tests/test_renderer tests/test_workspace_changes tests/test_animation_state tests/test_config_validation tests/test_x11_platform
 ALL_TESTS = $(filter tests/test_%, $(wildcard tests/test_*.c))
 ALL_TEST_TARGETS = $(ALL_TESTS:.c=)
 
@@ -171,6 +171,9 @@ tests/test_animation_state: tests/test_animation_state.c
 	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
 
 tests/test_config_validation: tests/test_config_validation.c
+	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
+
+tests/test_x11_platform: tests/test_x11_platform.c
 	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
 
 # Run all tests

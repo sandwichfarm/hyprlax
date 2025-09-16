@@ -94,6 +94,9 @@ hyprlax --config ~/.config/hyprlax/parallax.conf
 
 # Force specific compositor
 HYPRLAX_COMPOSITOR=sway hyprlax ~/Pictures/wallpaper.jpg
+
+# X11 window managers (i3, bspwm, awesome, etc.)
+hyprlax --platform x11 ~/Pictures/wallpaper.jpg
 ```
 
 ### Key Options
@@ -101,6 +104,8 @@ HYPRLAX_COMPOSITOR=sway hyprlax ~/Pictures/wallpaper.jpg
 - `-s, --shift` - Pixels to shift per workspace (default: 200)
 - `-d, --duration` - Animation duration in seconds (default: 1.0)
 - `-e, --easing` - Animation curve: linear, sine, expo, elastic, etc.
+- `-p, --platform` - Platform backend: `wayland`, `x11`, or `auto` (default: auto)
+- `-C, --compositor` - Compositor: `hyprland`, `sway`, `generic`, `auto` (default: auto)
 - `--layer` - Add layer: `image:shift:opacity[:easing[:delay[:duration[:blur]]]]`
 - `--config` - Load from config file
 
@@ -124,6 +129,24 @@ exec_always pkill hyprlax; hyprlax ~/Pictures/wallpaper.jpg
 Add to your River init script:
 ```bash
 riverctl spawn "pkill hyprlax; hyprlax ~/Pictures/wallpaper.jpg"
+```
+
+### X11 Window Managers
+For i3, bspwm, awesome, xmonad, dwm, or other EWMH-compatible window managers, add to your config:
+
+**i3/Sway:**
+```bash
+exec_always pkill hyprlax; hyprlax --platform x11 ~/Pictures/wallpaper.jpg
+```
+
+**bspwm (bspwmrc):**
+```bash
+pkill hyprlax; hyprlax --platform x11 ~/Pictures/wallpaper.jpg &
+```
+
+**awesome (rc.lua):**
+```lua
+awful.spawn.with_shell("pkill hyprlax; hyprlax --platform x11 ~/Pictures/wallpaper.jpg")
 ```
 
 ### Other Compositors

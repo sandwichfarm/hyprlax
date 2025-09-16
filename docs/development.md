@@ -324,6 +324,7 @@ make test
 ./tests/test_animation
 ./tests/test_config
 ./tests/test_compositor
+./tests/test_x11_platform
 
 # Run with memory checking
 make memcheck
@@ -351,6 +352,8 @@ make coverage
 - [ ] Multi-layer with different opacities
 - [ ] All easing functions
 - [ ] Workspace switching in each compositor
+- [ ] X11 window manager integration (i3, bspwm, awesome, etc.)
+- [ ] Wayland and X11 platform detection
 - [ ] Blur effects (where supported)
 - [ ] Config file loading
 - [ ] IPC commands via hyprlax-ctl
