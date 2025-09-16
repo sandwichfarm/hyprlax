@@ -14,8 +14,10 @@
 #include <limits.h>
 #include <errno.h>
 #include <math.h>
+#include <poll.h>
 #include "include/hyprlax.h"
 #include "include/hyprlax_internal.h"
+#include "ipc.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -436,6 +438,27 @@ int hyprlax_init_renderer(hyprlax_context_t *ctx) {
     return HYPRLAX_SUCCESS;
 }
 
+/* Initialize IPC server */
+static int hyprlax_init_ipc(hyprlax_context_t *ctx) {
+    if (!ctx) return HYPRLAX_ERROR_INVALID_ARGS;
+    
+    ctx->ipc_ctx = ipc_init();
+    if (!ctx->ipc_ctx) {
+        fprintf(stderr, "Warning: Failed to initialize IPC server\n");
+        /* Non-fatal - continue without IPC */
+        return HYPRLAX_SUCCESS;
+    }
+    
+    /* Link IPC context to main context for runtime settings */
+    ((ipc_context_t*)ctx->ipc_ctx)->app_context = ctx;
+    
+    if (ctx->config.debug) {
+        printf("IPC server initialized\n");
+    }
+    
+    return HYPRLAX_SUCCESS;
+}
+
 /* Initialize application */
 int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
     if (!ctx) return HYPRLAX_ERROR_INVALID_ARGS;
@@ -492,6 +515,13 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
     if (ret != HYPRLAX_SUCCESS) {
         fprintf(stderr, "Warning: Some textures failed to load\n");
         /* Continue anyway - we can still run with missing textures */
+    }
+    
+    /* 6. Initialize IPC server for runtime control */
+    ret = hyprlax_init_ipc(ctx);
+    if (ret != HYPRLAX_SUCCESS) {
+        fprintf(stderr, "Warning: IPC server initialization failed\n");
+        /* Non-fatal - continue without IPC */
     }
     
     /* 6. Create layer surface if using Wayland */
@@ -897,6 +927,14 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             }
         }
         
+        /* Poll IPC commands */
+        if (ctx->ipc_ctx && ipc_process_commands((ipc_context_t*)ctx->ipc_ctx)) {
+            /* IPC processed - layers may have changed */
+            if (ctx->config.debug) {
+                printf("[DEBUG] IPC command processed\n");
+            }
+        }
+        
         /* Poll compositor events */
         if (ctx->compositor && ctx->compositor->ops->poll_events) {
             compositor_event_t comp_event;
@@ -1004,6 +1042,12 @@ void hyprlax_shutdown(hyprlax_context_t *ctx) {
     }
     
     /* Shutdown modules in reverse order */
+    
+    /* IPC server */
+    if (ctx->ipc_ctx) {
+        ipc_cleanup((ipc_context_t*)ctx->ipc_ctx);
+        ctx->ipc_ctx = NULL;
+    }
     
     /* Renderer */
     if (ctx->renderer) {

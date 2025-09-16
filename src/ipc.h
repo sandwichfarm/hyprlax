@@ -8,6 +8,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #define IPC_SOCKET_PATH_PREFIX "/tmp/hyprlax-"
 #define IPC_MAX_MESSAGE_SIZE 4096
@@ -21,6 +22,8 @@ typedef enum {
     IPC_CMD_CLEAR_LAYERS,
     IPC_CMD_RELOAD_CONFIG,
     IPC_CMD_GET_STATUS,
+    IPC_CMD_SET_PROPERTY,
+    IPC_CMD_GET_PROPERTY,
     IPC_CMD_UNKNOWN
 } ipc_command_t;
 
@@ -47,6 +50,7 @@ typedef struct {
     layer_t* layers[IPC_MAX_LAYERS];
     int layer_count;
     uint32_t next_layer_id;
+    void* app_context;  /* Pointer to hyprlax_context_t for runtime settings */
 } ipc_context_t;
 
 // IPC lifecycle functions
@@ -64,6 +68,9 @@ void ipc_clear_layers(ipc_context_t* ctx);
 // Helper functions
 layer_t* ipc_find_layer(ipc_context_t* ctx, uint32_t layer_id);
 void ipc_sort_layers(ipc_context_t* ctx);
+
+// Request handling function for tests
+int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, size_t response_size);
 
 #endif // HYPRLAX_IPC_H
 

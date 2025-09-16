@@ -45,26 +45,17 @@ jobs:
       id: binary
       run: |
         echo "hyprlax_name=hyprlax-${{ matrix.arch }}" >> $GITHUB_OUTPUT
-        echo "ctl_name=hyprlax-ctl-${{ matrix.arch }}" >> $GITHUB_OUTPUT
 
-    - name: Rename binaries
+    - name: Rename binary
       run: |
         mv hyprlax ${{ steps.binary.outputs.hyprlax_name }}
-        mv hyprlax-ctl ${{ steps.binary.outputs.ctl_name }}
         chmod +x ${{ steps.binary.outputs.hyprlax_name }}
-        chmod +x ${{ steps.binary.outputs.ctl_name }}
 
     - name: Upload hyprlax artifact
       uses: actions/upload-artifact@v4
       with:
         name: ${{ steps.binary.outputs.hyprlax_name }}
         path: ${{ steps.binary.outputs.hyprlax_name }}
-        
-    - name: Upload hyprlax-ctl artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ steps.binary.outputs.ctl_name }}
-        path: ${{ steps.binary.outputs.ctl_name }}
 
   release:
     needs: build
@@ -84,14 +75,9 @@ jobs:
         # Move all binaries to root
         find ./binaries -type f -name 'hyprlax-*' -exec mv {} . \;
         
-        # Check if we have the x86_64 binaries
+        # Check if we have the x86_64 binary
         if [ ! -f hyprlax-x86_64 ]; then
           echo "Error: hyprlax-x86_64 binary not found!"
-          exit 1
-        fi
-        
-        if [ ! -f hyprlax-ctl-x86_64 ]; then
-          echo "Error: hyprlax-ctl-x86_64 binary not found!"
           exit 1
         fi
         
@@ -127,24 +113,23 @@ jobs:
         body: |
           ## Release ${{ steps.version.outputs.version }}
           
-          Smooth parallax wallpaper animations for Hyprland.
+          Multi-compositor parallax wallpaper engine for Linux.
           
           ### Installation
           
-          Download the binaries:
-          - `hyprlax-x86_64` - Main hyprlax binary for x86_64 systems
-          - `hyprlax-ctl-x86_64` - Control client for x86_64 systems
+          Download the binary:
+          - `hyprlax-x86_64` - hyprlax binary for x86_64 systems (control interface integrated)
           
           ```bash
-          # Download both binaries
+          # Download binary
           wget https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/hyprlax-x86_64
-          wget https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/hyprlax-ctl-x86_64
           
           # Make executable and install
-          chmod +x hyprlax-x86_64 hyprlax-ctl-x86_64
+          chmod +x hyprlax-x86_64
           sudo mv hyprlax-x86_64 /usr/local/bin/hyprlax
-          sudo mv hyprlax-ctl-x86_64 /usr/local/bin/hyprlax-ctl
           ```
+          
+          **Note:** The control interface is now integrated. Use `hyprlax ctl <command>` for runtime control.
           
           For ARM64 and other architectures, please build from source.
           
@@ -158,7 +143,6 @@ jobs:
           
         files: |
           hyprlax-x86_64
-          hyprlax-ctl-x86_64
           SHA256SUMS
         draft: false
         prerelease: ${{ contains(steps.version.outputs.version, '-') }}

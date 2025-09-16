@@ -211,7 +211,9 @@ backup_existing() {
 # Build hyprlax
 build() {
     # First get the version from source before building
-    if [ -f "src/hyprlax.c" ]; then
+    if [ -f "src/include/hyprlax_internal.h" ]; then
+        NEW_VERSION=$(grep -oP '#define HYPRLAX_VERSION "\K[^"]+' src/include/hyprlax_internal.h 2>/dev/null || echo "unknown")
+    elif [ -f "src/hyprlax.c" ]; then
         NEW_VERSION=$(grep -oP '#define HYPRLAX_VERSION "\K[^"]+' src/hyprlax.c 2>/dev/null || echo "unknown")
     fi
     
@@ -282,7 +284,8 @@ build() {
 # Install hyprlax
 install() {
     if [ $BUILD_ONLY -eq 1 ]; then
-        print_success "Build complete. Binaries available at: ./hyprlax and ./hyprlax-ctl"
+        print_success "Build complete. Binary available at: ./hyprlax"
+        print_info "Note: hyprlax-ctl is now integrated as 'hyprlax ctl'"
         return
     fi
     
@@ -312,7 +315,8 @@ install() {
         fi
         
         if sudo make install; then
-            print_success "Installed to /usr/local/bin/hyprlax and /usr/local/bin/hyprlax-ctl"
+            print_success "Installed to /usr/local/bin/hyprlax"
+            print_info "Control interface: hyprlax ctl <command>"
         else
             print_error "Installation failed!"
             exit 1
@@ -328,7 +332,8 @@ install() {
         mkdir -p ~/.local/bin
         
         if make install-user; then
-            print_success "Installed to ~/.local/bin/hyprlax and ~/.local/bin/hyprlax-ctl"
+            print_success "Installed to ~/.local/bin/hyprlax"
+            print_info "Control interface: hyprlax ctl <command>"
             
             # Check if ~/.local/bin is in PATH
             if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
@@ -479,7 +484,9 @@ main() {
             print_info "Existing installation detected"
             
             # Get the new version from source before asking to upgrade
-            if [ -f "src/hyprlax.c" ]; then
+            if [ -f "src/include/hyprlax_internal.h" ]; then
+                NEW_VERSION=$(grep -oP '#define HYPRLAX_VERSION "\K[^"]+' src/include/hyprlax_internal.h 2>/dev/null || echo "unknown")
+            elif [ -f "src/hyprlax.c" ]; then
                 NEW_VERSION=$(grep -oP '#define HYPRLAX_VERSION "\K[^"]+' src/hyprlax.c 2>/dev/null || echo "unknown")
             fi
             

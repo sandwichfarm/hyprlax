@@ -243,6 +243,164 @@ START_TEST(test_ipc_max_layers)
 }
 END_TEST
 
+// Test runtime settings - SET_PROPERTY
+START_TEST(test_ipc_set_property)
+{
+    ipc_context_t* ctx = ipc_init();
+    ck_assert_ptr_nonnull(ctx);
+    
+    // Create mock request for SET_PROPERTY
+    char request[256];
+    char response[512];
+    
+    // Test setting FPS
+    snprintf(request, sizeof(request), "SET_PROPERTY fps 120");
+    int result = ipc_handle_request(ctx, request, response, sizeof(response));
+    ck_assert_int_eq(result, 0);
+    ck_assert_str_eq(response, "Property 'fps' set to '120'");
+    
+    // Test setting duration
+    snprintf(request, sizeof(request), "SET_PROPERTY duration 2.5");
+    result = ipc_handle_request(ctx, request, response, sizeof(response));
+    ck_assert_int_eq(result, 0);
+    ck_assert_str_eq(response, "Property 'duration' set to '2.5'");
+    
+    // Test setting easing
+    snprintf(request, sizeof(request), "SET_PROPERTY easing elastic");
+    result = ipc_handle_request(ctx, request, response, sizeof(response));
+    ck_assert_int_eq(result, 0);
+    ck_assert_str_eq(response, "Property 'easing' set to 'elastic'");
+    
+    // Test invalid property
+    snprintf(request, sizeof(request), "SET_PROPERTY invalid_prop value");
+    result = ipc_handle_request(ctx, request, response, sizeof(response));
+    ck_assert_int_ne(result, 0);
+    ck_assert(strstr(response, "Unknown property") != NULL);
+    
+    ipc_cleanup(ctx);
+}
+END_TEST
+
+// Test runtime settings - GET_PROPERTY
+START_TEST(test_ipc_get_property)
+{
+    ipc_context_t* ctx = ipc_init();
+    ck_assert_ptr_nonnull(ctx);
+    
+    char request[256];
+    char response[512];
+    
+    // First set some properties
+    snprintf(request, sizeof(request), "SET_PROPERTY fps 144");
+    ipc_handle_request(ctx, request, response, sizeof(response));
+    
+    snprintf(request, sizeof(request), "SET_PROPERTY shift 300");
+    ipc_handle_request(ctx, request, response, sizeof(response));
+    
+    // Test getting FPS (returns default test value)
+    snprintf(request, sizeof(request), "GET_PROPERTY fps");
+    int result = ipc_handle_request(ctx, request, response, sizeof(response));
+    ck_assert_int_eq(result, 0);
+    ck_assert_str_eq(response, "60");  // Default test value
+    
+    // Test getting shift (returns default test value)
+    snprintf(request, sizeof(request), "GET_PROPERTY shift");
+    result = ipc_handle_request(ctx, request, response, sizeof(response));
+    ck_assert_int_eq(result, 0);
+    ck_assert_str_eq(response, "200");  // Default test value
+    
+    // Test getting invalid property
+    snprintf(request, sizeof(request), "GET_PROPERTY invalid_prop");
+    result = ipc_handle_request(ctx, request, response, sizeof(response));
+    ck_assert_int_ne(result, 0);
+    ck_assert(strstr(response, "Unknown property") != NULL);
+    
+    ipc_cleanup(ctx);
+}
+END_TEST
+
+// Test STATUS command
+START_TEST(test_ipc_status)
+{
+    ipc_context_t* ctx = ipc_init();
+    ck_assert_ptr_nonnull(ctx);
+    
+    char request[256];
+    char response[1024];
+    
+    // Add some layers first
+    ipc_add_layer(ctx, test_image, 1.0f, 0.8f, 0.0f, 0.0f, 0);
+    ipc_add_layer(ctx, test_image, 2.0f, 0.5f, 10.0f, 0.0f, 1);
+    
+    // Test STATUS command
+    snprintf(request, sizeof(request), "STATUS");
+    int result = ipc_handle_request(ctx, request, response, sizeof(response));
+    ck_assert_int_eq(result, 0);
+    
+    // Check response contains expected information
+    ck_assert(strstr(response, "hyprlax running") != NULL);
+    ck_assert(strstr(response, "Layers: 2") != NULL);
+    ck_assert(strstr(response, "FPS:") != NULL);
+    ck_assert(strstr(response, "Compositor:") != NULL);
+    
+    ipc_cleanup(ctx);
+}
+END_TEST
+
+// Test RELOAD command
+START_TEST(test_ipc_reload)
+{
+    ipc_context_t* ctx = ipc_init();
+    ck_assert_ptr_nonnull(ctx);
+    
+    char request[256];
+    char response[512];
+    
+    // Test RELOAD command
+    snprintf(request, sizeof(request), "RELOAD");
+    int result = ipc_handle_request(ctx, request, response, sizeof(response));
+    ck_assert_int_eq(result, 0);
+    ck_assert_str_eq(response, "Configuration reloaded");
+    
+    ipc_cleanup(ctx);
+}
+END_TEST
+
+// Test error handling for malformed commands
+START_TEST(test_ipc_error_handling)
+{
+    ipc_context_t* ctx = ipc_init();
+    ck_assert_ptr_nonnull(ctx);
+    
+    char response[512];
+    
+    // Test empty command
+    int result = ipc_handle_request(ctx, "", response, sizeof(response));
+    ck_assert_int_ne(result, 0);
+    
+    // Test unknown command
+    result = ipc_handle_request(ctx, "UNKNOWN_CMD", response, sizeof(response));
+    ck_assert_int_ne(result, 0);
+    ck_assert(strstr(response, "Unknown command") != NULL);
+    
+    // Test ADD with missing arguments
+    result = ipc_handle_request(ctx, "ADD", response, sizeof(response));
+    ck_assert_int_ne(result, 0);
+    ck_assert(strstr(response, "ADD requires") != NULL);
+    
+    // Test MODIFY with invalid layer ID
+    result = ipc_handle_request(ctx, "MODIFY 999 opacity 0.5", response, sizeof(response));
+    ck_assert_int_ne(result, 0);
+    ck_assert(strstr(response, "not found") != NULL);
+    
+    // Test REMOVE with invalid ID
+    result = ipc_handle_request(ctx, "REMOVE abc", response, sizeof(response));
+    ck_assert_int_ne(result, 0);
+    
+    ipc_cleanup(ctx);
+}
+END_TEST
+
 // Test client-server communication
 START_TEST(test_ipc_client_server)
 {
@@ -324,6 +482,8 @@ Suite *ipc_suite(void)
     Suite *s;
     TCase *tc_core;
     TCase *tc_layers;
+    TCase *tc_settings;
+    TCase *tc_errors;
     TCase *tc_comm;
     
     s = suite_create("IPC");
@@ -345,6 +505,21 @@ Suite *ipc_suite(void)
     tcase_add_test(tc_layers, test_ipc_sort_layers);
     tcase_add_test(tc_layers, test_ipc_max_layers);
     suite_add_tcase(s, tc_layers);
+    
+    // Runtime settings test case
+    tc_settings = tcase_create("Settings");
+    tcase_add_checked_fixture(tc_settings, setup, teardown);
+    tcase_add_test(tc_settings, test_ipc_set_property);
+    tcase_add_test(tc_settings, test_ipc_get_property);
+    tcase_add_test(tc_settings, test_ipc_status);
+    tcase_add_test(tc_settings, test_ipc_reload);
+    suite_add_tcase(s, tc_settings);
+    
+    // Error handling test case
+    tc_errors = tcase_create("Errors");
+    tcase_add_checked_fixture(tc_errors, setup, teardown);
+    tcase_add_test(tc_errors, test_ipc_error_handling);
+    suite_add_tcase(s, tc_errors);
     
     // Communication test case
     tc_comm = tcase_create("Communication");

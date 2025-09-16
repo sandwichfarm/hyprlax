@@ -129,22 +129,45 @@ riverctl spawn "pkill hyprlax; hyprlax ~/Pictures/wallpaper.jpg"
 ### Other Compositors
 See [Compositor Configuration Guide](docs/compositors.md) for specific setup instructions.
 
-## Dynamic Layer Management
+## Runtime Control
 
-Control layers at runtime using `hyprlax-ctl`:
+Control layers and settings at runtime using the integrated `ctl` subcommand:
 
+### Layer Management
 ```bash
 # Add a new layer
-hyprlax-ctl add /path/to/image.png scale=1.5 opacity=0.8
+hyprlax ctl add /path/to/image.png 1.5 0.8 10
 
 # Modify layer properties
-hyprlax-ctl modify 1 opacity 0.5
+hyprlax ctl modify 1 opacity 0.5
 
 # Remove a layer
-hyprlax-ctl remove 1
+hyprlax ctl remove 1
 
 # List all layers
-hyprlax-ctl list
+hyprlax ctl list
+
+# Clear all layers
+hyprlax ctl clear
+```
+
+### Runtime Settings
+```bash
+# Change FPS
+hyprlax ctl set fps 120
+
+# Change animation duration
+hyprlax ctl set duration 2.0
+
+# Change easing function
+hyprlax ctl set easing elastic
+
+# Query current settings
+hyprlax ctl get fps
+hyprlax ctl get duration
+
+# Get daemon status
+hyprlax ctl status
 ```
 
 **Full guide:** [Dynamic Layer Management](docs/IPC.md)

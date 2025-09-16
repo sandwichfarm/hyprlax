@@ -51,7 +51,7 @@ COMPOSITOR_SRCS = src/compositor/compositor.c src/compositor/hyprland.c \
                   src/compositor/generic_wayland.c src/compositor/x11_ewmh.c
 
 # Main module sources
-MAIN_SRCS = src/main.c src/hyprlax_main.c
+MAIN_SRCS = src/main.c src/hyprlax_main.c src/hyprlax_ctl.c
 
 # Source files - Choose between legacy monolithic or new modular
 ifdef USE_LEGACY
@@ -64,12 +64,7 @@ endif
 OBJS = $(SRCS:.c=.o)
 TARGET = hyprlax
 
-# hyprlax-ctl client
-CTL_SRCS = src/hyprlax-ctl.c
-CTL_OBJS = $(CTL_SRCS:.c=.o)
-CTL_TARGET = hyprlax-ctl
-
-all: $(TARGET) $(CTL_TARGET)
+all: $(TARGET)
 
 # Generate protocol files
 protocols/xdg-shell-protocol.c: $(XDG_SHELL_PROTOCOL)
@@ -96,32 +91,25 @@ protocols/wlr-layer-shell-client-protocol.h: $(LAYER_SHELL_PROTOCOL)
 $(TARGET): $(OBJS)
 	$(CC) $(LDFLAGS) $(OBJS) $(PKG_LIBS) -lm -lX11 -o $@
 
-$(CTL_TARGET): $(CTL_OBJS)
-	$(CC) $(LDFLAGS) $(CTL_OBJS) -o $@
-
 clean:
-	rm -f $(TARGET) $(CTL_TARGET) $(OBJS) $(CTL_OBJS) $(PROTOCOL_SRCS) $(PROTOCOL_HDRS)
+	rm -f $(TARGET) $(OBJS) $(PROTOCOL_SRCS) $(PROTOCOL_HDRS)
 	rm -rf protocols/*.o src/*.o
 
 PREFIX ?= /usr/local
 BINDIR = $(PREFIX)/bin
 DESTDIR ?=
 
-install: $(TARGET) $(CTL_TARGET)
+install: $(TARGET)
 	install -Dm755 $(TARGET) $(DESTDIR)$(BINDIR)/$(TARGET)
-	install -Dm755 $(CTL_TARGET) $(DESTDIR)$(BINDIR)/$(CTL_TARGET)
 
-install-user: $(TARGET) $(CTL_TARGET)
+install-user: $(TARGET)
 	install -Dm755 $(TARGET) ~/.local/bin/$(TARGET)
-	install -Dm755 $(CTL_TARGET) ~/.local/bin/$(CTL_TARGET)
 
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/$(TARGET)
-	rm -f $(DESTDIR)$(BINDIR)/$(CTL_TARGET)
 
 uninstall-user:
 	rm -f ~/.local/bin/$(TARGET)
-	rm -f ~/.local/bin/$(CTL_TARGET)
 
 # Test suite with Check framework
 CHECK_CFLAGS = $(shell pkg-config --cflags check 2>/dev/null)
@@ -140,7 +128,10 @@ ALL_TESTS = $(filter tests/test_%, $(wildcard tests/test_*.c))
 ALL_TEST_TARGETS = $(ALL_TESTS:.c=)
 
 # Individual test rules - updated for Check framework
-tests/test_integration: tests/test_integration.c
+tests/test_integration: tests/test_integration.c src/ipc.c
+	$(CC) $(TEST_CFLAGS) $^ $(TEST_LIBS) -lpthread -o $@
+
+tests/test_ctl: tests/test_ctl.c
 	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
 
 tests/test_renderer: tests/test_renderer.c

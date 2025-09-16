@@ -91,4 +91,7 @@ void hyprlax_handle_resize(hyprlax_context_t *ctx, int width, int height);
 /* Rendering */
 void hyprlax_render_frame(hyprlax_context_t *ctx);
 
+/* Control interface */
+int hyprlax_ctl_main(int argc, char **argv);
+
 #endif /* HYPRLAX_H */

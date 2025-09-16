@@ -23,10 +23,16 @@ static void signal_handler(int sig) {
 }
 
 int main(int argc, char **argv) {
+    /* Check for ctl subcommand first */
+    if (argc >= 2 && strcmp(argv[1], "ctl") == 0) {
+        return hyprlax_ctl_main(argc - 1, argv + 1);
+    }
+    
     /* Check for help/version early */
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printf("Usage: %s [OPTIONS] [--layer <image:shift:opacity:blur>...]\n", argv[0]);
+            printf("       %s ctl <command> [args...]\n", argv[0]);
             printf("\nOptions:\n");
             printf("  -h, --help                Show this help message\n");
             printf("  -v, --version             Show version information\n");
@@ -39,6 +45,18 @@ int main(int argc, char **argv) {
             printf("  -r, --renderer <backend>  Renderer backend (gles2, auto)\n");
             printf("  -p, --platform <backend>  Platform backend (wayland, x11, auto)\n");
             printf("  -C, --compositor <backend> Compositor (hyprland, sway, generic, auto)\n");
+            printf("\nControl Commands:\n");
+            printf("  ctl add <image> [shift] [opacity] [blur]  Add a layer\n");
+            printf("  ctl remove <id>                           Remove a layer\n");
+            printf("  ctl modify <id> <property> <value>        Modify a layer\n");
+            printf("  ctl list                                  List all layers\n");
+            printf("  ctl clear                                 Clear all layers\n");
+            printf("  ctl set <property> <value>                Set runtime property\n");
+            printf("  ctl get <property>                        Get runtime property\n");
+            printf("  ctl status                                Show daemon status\n");
+            printf("  ctl reload                                Reload configuration\n");
+            printf("\nRuntime Properties:\n");
+            printf("  fps, shift, duration, easing, blur_passes, blur_size, debug\n");
             printf("\nEasing types:\n");
             printf("  linear, quad, cubic, quart, quint, sine, expo, circ,\n");
             printf("  back, elastic, bounce, snap\n");
