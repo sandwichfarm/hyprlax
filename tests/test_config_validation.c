@@ -176,7 +176,7 @@ START_TEST(test_config_special_characters)
         strcpy(sanitized, test_cases[i]);
         
         // Remove dangerous characters
-        char *dangerous = strpbrk(sanitized, "\n\t\"'#$;`");
+        char *dangerous = strpbrk(sanitized, "\n\t\"'#$;`|&(){}[]*? ");
         if (dangerous) {
             *dangerous = '\0';
         }
