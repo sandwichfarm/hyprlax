@@ -201,8 +201,8 @@ static int hyprland_list_monitors(monitor_info_t **monitors, int *count) {
     return HYPRLAX_SUCCESS;
 }
 
-/* Connect socket helper */
-static int connect_hyprland_socket(const char *path) {
+/* Simple socket connect for command socket (no retry needed) */
+static int connect_simple_socket(const char *path) {
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) {
         return -1;
@@ -217,10 +217,6 @@ static int connect_hyprland_socket(const char *path) {
         close(fd);
         return -1;
     }
-    
-    /* Make event socket non-blocking */
-    int flags = fcntl(fd, F_GETFL, 0);
-    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
     
     return fd;
 }
@@ -247,11 +243,21 @@ static int hyprland_connect_ipc(const char *socket_path) {
     /* Note: Command socket is created per-command in hyprland_send_command */
     g_hyprland_data->ipc_fd = -1;  /* Not used for persistent connection */
     
-    /* Connect event socket (stays open for event monitoring) */
-    g_hyprland_data->event_fd = connect_hyprland_socket(g_hyprland_data->event_socket_path);
+    /* Connect event socket with retries (stays open for event monitoring) */
+    g_hyprland_data->event_fd = compositor_connect_socket_with_retry(
+        g_hyprland_data->event_socket_path,
+        "Hyprland",
+        30,    /* max_retries: 3 seconds total */
+        100    /* retry_delay_ms */
+    );
+    
     if (g_hyprland_data->event_fd < 0) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
+    
+    /* Make event socket non-blocking */
+    int flags = fcntl(g_hyprland_data->event_fd, F_GETFL, 0);
+    fcntl(g_hyprland_data->event_fd, F_SETFL, flags | O_NONBLOCK);
     
     g_hyprland_data->connected = true;
     
@@ -393,7 +399,7 @@ static int hyprland_send_command(const char *command, char *response,
     }
     
     /* Connect a new command socket for each command */
-    int cmd_fd = connect_hyprland_socket(g_hyprland_data->socket_path);
+    int cmd_fd = connect_simple_socket(g_hyprland_data->socket_path);
     if (cmd_fd < 0) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }

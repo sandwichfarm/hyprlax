@@ -7,8 +7,64 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <errno.h>
 #include "../include/compositor.h"
 #include "../include/hyprlax_internal.h"
+
+/* Utility function for connecting to Unix socket with retries
+ * Used by all compositors to wait for compositor readiness at startup
+ */
+int compositor_connect_socket_with_retry(const char *socket_path, 
+                                         const char *compositor_name,
+                                         int max_retries,
+                                         int retry_delay_ms) {
+    if (!socket_path) return -1;
+    
+    bool first_attempt = true;
+    
+    for (int i = 0; i < max_retries; i++) {
+        /* Try to connect */
+        int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (fd < 0) {
+            if (i < max_retries - 1) {
+                usleep(retry_delay_ms * 1000);
+                continue;
+            }
+            return -1;
+        }
+        
+        struct sockaddr_un addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sun_family = AF_UNIX;
+        strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
+        
+        if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
+            /* Success */
+            if (!first_attempt && compositor_name) {
+                fprintf(stderr, "Connected to %s after %d retries\n", 
+                        compositor_name, i);
+            }
+            return fd;
+        }
+        
+        /* Connection failed */
+        close(fd);
+        
+        if (first_attempt && compositor_name) {
+            fprintf(stderr, "Waiting for %s to be ready...\n", compositor_name);
+            first_attempt = false;
+        }
+        
+        if (i < max_retries - 1) {
+            usleep(retry_delay_ms * 1000);
+        }
+    }
+    
+    return -1;
+}
 
 /* Detect compositor type */
 compositor_type_t compositor_detect(void) {

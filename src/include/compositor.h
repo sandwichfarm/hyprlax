@@ -149,6 +149,12 @@ typedef struct compositor_adapter {
 int compositor_create(compositor_adapter_t **adapter, compositor_type_t type);
 void compositor_destroy(compositor_adapter_t *adapter);
 
+/* Utility function for socket connection with retry (for startup readiness) */
+int compositor_connect_socket_with_retry(const char *socket_path, 
+                                         const char *compositor_name,
+                                         int max_retries,
+                                         int retry_delay_ms);
+
 /* Auto-detect compositor */
 compositor_type_t compositor_detect(void);
 
