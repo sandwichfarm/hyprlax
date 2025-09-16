@@ -16,6 +16,21 @@
 #include "../include/platform.h"
 #include "../include/hyprlax_internal.h"
 #include "../../protocols/wlr-layer-shell-client-protocol.h"
+#include "../include/hyprlax.h"
+#include "../core/monitor.h"
+
+/* Output info tracking */
+typedef struct output_info {
+    struct wl_output *output;
+    uint32_t global_id;
+    char name[64];
+    int width, height;
+    int refresh_rate;
+    int scale;
+    int transform;
+    int global_x, global_y;
+    struct output_info *next;
+} output_info_t;
 
 /* Wayland platform private data */
 typedef struct {
@@ -23,13 +38,18 @@ typedef struct {
     struct wl_display *display;
     struct wl_registry *registry;
     struct wl_compositor *compositor;
-    struct wl_surface *surface;
-    struct wl_egl_window *egl_window;
-    struct wl_output *output;
+    struct wl_surface *surface;          /* Legacy single surface */
+    struct wl_egl_window *egl_window;    /* Legacy single window */
+    struct wl_output *output;            /* Legacy primary output */
+    
+    /* Multi-monitor support */
+    output_info_t *outputs;              /* All detected outputs */
+    int output_count;
+    hyprlax_context_t *ctx;              /* Back reference to context */
     
     /* Layer shell protocol */
     struct zwlr_layer_shell_v1 *layer_shell;
-    struct zwlr_layer_surface_v1 *layer_surface;
+    struct zwlr_layer_surface_v1 *layer_surface;  /* Legacy single surface */
     
     /* Window state */
     int width;
@@ -46,6 +66,37 @@ typedef struct {
 /* Global instance (simplified for now) */
 static wayland_data_t *g_wayland_data = NULL;
 
+/* Store context for monitor detection - set by platform init */
+void wayland_set_context(hyprlax_context_t *ctx) {
+    if (g_wayland_data) {
+        g_wayland_data->ctx = ctx;
+    }
+}
+
+/* Forward declarations */
+static void output_handle_geometry(void *data, struct wl_output *output,
+                                  int32_t x, int32_t y,
+                                  int32_t physical_width, int32_t physical_height,
+                                  int32_t subpixel, const char *make, const char *model,
+                                  int32_t transform);
+static void output_handle_mode(void *data, struct wl_output *output,
+                              uint32_t flags, int32_t width, int32_t height,
+                              int32_t refresh);
+static void output_handle_done(void *data, struct wl_output *output);
+static void output_handle_scale(void *data, struct wl_output *output, int32_t scale);
+static void output_handle_name(void *data, struct wl_output *output, const char *name);
+static void output_handle_description(void *data, struct wl_output *output, const char *description);
+
+/* Output listener */
+static const struct wl_output_listener output_listener = {
+    .geometry = output_handle_geometry,
+    .mode = output_handle_mode,
+    .done = output_handle_done,
+    .scale = output_handle_scale,
+    .name = output_handle_name,
+    .description = output_handle_description,
+};
+
 /* Registry listener callbacks */
 static void registry_global(void *data, struct wl_registry *registry,
                            uint32_t id, const char *interface, uint32_t version) {
@@ -54,9 +105,34 @@ static void registry_global(void *data, struct wl_registry *registry,
     if (strcmp(interface, "wl_compositor") == 0) {
         wl_data->compositor = wl_registry_bind(registry, id,
                                               &wl_compositor_interface, 1);
-    } else if (strcmp(interface, "wl_output") == 0 && !wl_data->output) {
-        wl_data->output = wl_registry_bind(registry, id,
-                                          &wl_output_interface, 1);
+    } else if (strcmp(interface, "wl_output") == 0) {
+        /* Bind to ALL outputs for multi-monitor support */
+        struct wl_output *output = wl_registry_bind(registry, id,
+                                                   &wl_output_interface, 4);
+        
+        /* Create output info */
+        output_info_t *info = calloc(1, sizeof(output_info_t));
+        if (info) {
+            info->output = output;
+            info->global_id = id;
+            info->scale = 1;  /* Default scale */
+            snprintf(info->name, sizeof(info->name), "output-%u", id);
+            
+            /* Add listener to get output details */
+            wl_output_add_listener(output, &output_listener, info);
+            
+            /* Add to list */
+            info->next = wl_data->outputs;
+            wl_data->outputs = info;
+            wl_data->output_count++;
+            
+            /* Keep first as primary for legacy */
+            if (!wl_data->output) {
+                wl_data->output = output;
+            }
+            
+            fprintf(stderr, "Detected output %u (total: %d)\n", id, wl_data->output_count);
+        }
     } else if (strcmp(interface, "zwlr_layer_shell_v1") == 0) {
         wl_data->layer_shell = wl_registry_bind(registry, id,
                                                &zwlr_layer_shell_v1_interface, 1);
@@ -330,6 +406,77 @@ static void wayland_show_window(void) {
     }
 }
 
+/* Create surface for a specific monitor */
+int wayland_create_monitor_surface(monitor_instance_t *monitor) {
+    if (!monitor || !g_wayland_data || !g_wayland_data->compositor) {
+        return HYPRLAX_ERROR_INVALID_ARGS;
+    }
+    
+    /* Create surface for this monitor */
+    monitor->wl_surface = wl_compositor_create_surface(g_wayland_data->compositor);
+    if (!monitor->wl_surface) {
+        fprintf(stderr, "Failed to create surface for monitor %s\n", monitor->name);
+        return HYPRLAX_ERROR_NO_MEMORY;
+    }
+    
+    /* Create layer surface bound to specific output */
+    if (g_wayland_data->layer_shell && monitor->wl_output) {
+        monitor->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
+            g_wayland_data->layer_shell,
+            monitor->wl_surface,
+            monitor->wl_output,  /* Bind to specific output */
+            ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND,
+            "hyprlax");
+        
+        if (monitor->layer_surface) {
+            /* Configure as fullscreen background */
+            zwlr_layer_surface_v1_set_exclusive_zone(monitor->layer_surface, -1);
+            zwlr_layer_surface_v1_set_anchor(monitor->layer_surface,
+                ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
+                ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
+                ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
+                ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
+            
+            /* Set size to 0,0 to let compositor decide */
+            zwlr_layer_surface_v1_set_size(monitor->layer_surface, 0, 0);
+            
+            /* TODO: Add per-monitor layer surface listener */
+            
+            /* Commit to get configure event */
+            wl_surface_commit(monitor->wl_surface);
+            
+            fprintf(stderr, "Created layer surface for monitor %s\n", monitor->name);
+        } else {
+            fprintf(stderr, "Failed to create layer surface for monitor %s\n", monitor->name);
+            wl_surface_destroy(monitor->wl_surface);
+            monitor->wl_surface = NULL;
+            return HYPRLAX_ERROR_NO_MEMORY;
+        }
+    }
+    
+    /* Create EGL window for this surface */
+    if (monitor->wl_surface) {
+        monitor->wl_egl_window = wl_egl_window_create(
+            monitor->wl_surface,
+            monitor->width * monitor->scale,
+            monitor->height * monitor->scale);
+        
+        if (!monitor->wl_egl_window) {
+            fprintf(stderr, "Failed to create EGL window for monitor %s\n", monitor->name);
+            /* Clean up */
+            if (monitor->layer_surface) {
+                zwlr_layer_surface_v1_destroy(monitor->layer_surface);
+                monitor->layer_surface = NULL;
+            }
+            wl_surface_destroy(monitor->wl_surface);
+            monitor->wl_surface = NULL;
+            return HYPRLAX_ERROR_NO_MEMORY;
+        }
+    }
+    
+    return HYPRLAX_SUCCESS;
+}
+
 /* Hide window */
 static void wayland_hide_window(void) {
     /* Hiding is typically done by unmapping, but for layer-shell
@@ -426,6 +573,99 @@ static bool wayland_supports_transparency(void) {
 static bool wayland_supports_blur(void) {
     /* Depends on compositor, but generally supported */
     return true;
+}
+
+/* Output listener callbacks */
+static void output_handle_geometry(void *data, struct wl_output *output,
+                                  int32_t x, int32_t y,
+                                  int32_t physical_width, int32_t physical_height,
+                                  int32_t subpixel, const char *make, const char *model,
+                                  int32_t transform) {
+    output_info_t *info = (output_info_t *)data;
+    if (info) {
+        info->global_x = x;
+        info->global_y = y;
+        info->transform = transform;
+        fprintf(stderr, "Output geometry: %s at (%d,%d) transform=%d\n",
+                info->name, x, y, transform);
+    }
+}
+
+static void output_handle_mode(void *data, struct wl_output *output,
+                              uint32_t flags, int32_t width, int32_t height,
+                              int32_t refresh) {
+    output_info_t *info = (output_info_t *)data;
+    if (info && (flags & WL_OUTPUT_MODE_CURRENT)) {
+        info->width = width;
+        info->height = height;
+        info->refresh_rate = refresh / 1000;  /* mHz to Hz */
+        fprintf(stderr, "Output mode: %s %dx%d@%dHz\n",
+                info->name, width, height, info->refresh_rate);
+    }
+}
+
+static void output_handle_done(void *data, struct wl_output *output) {
+    output_info_t *info = (output_info_t *)data;
+    if (!info || !g_wayland_data) return;
+    
+    /* When output configuration is complete, create monitor instance if context exists */
+    if (g_wayland_data->ctx && g_wayland_data->ctx->monitors) {
+        /* Check if monitor already exists */
+        monitor_instance_t *mon = monitor_list_find_by_output(g_wayland_data->ctx->monitors, output);
+        if (!mon) {
+            /* Create new monitor instance */
+            mon = monitor_instance_create(info->name);
+            if (mon) {
+                mon->wl_output = output;
+                monitor_update_geometry(mon, info->width, info->height,
+                                      info->scale, info->refresh_rate);
+                monitor_set_global_position(mon, info->global_x, info->global_y);
+                
+                /* Resolve and apply config */
+                config_t *config = monitor_resolve_config(mon, &g_wayland_data->ctx->config);
+                monitor_apply_config(mon, config);
+                
+                /* Add to monitor list */
+                monitor_list_add(g_wayland_data->ctx->monitors, mon);
+                
+                /* Create surface for this monitor if in multi-monitor mode */
+                if (g_wayland_data->ctx->monitor_mode == MULTI_MON_ALL ||
+                    (g_wayland_data->ctx->monitor_mode == MULTI_MON_PRIMARY && mon->is_primary)) {
+                    /* Create surface for this monitor */
+                    int ret = wayland_create_monitor_surface(mon);
+                    if (ret == HYPRLAX_SUCCESS) {
+                        fprintf(stderr, "Successfully created surface for monitor %s\n", mon->name);
+                    } else {
+                        fprintf(stderr, "Failed to create surface for monitor %s\n", mon->name);
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void output_handle_scale(void *data, struct wl_output *output, int32_t scale) {
+    output_info_t *info = (output_info_t *)data;
+    if (info) {
+        info->scale = scale;
+        fprintf(stderr, "Output scale: %s scale=%d\n", info->name, scale);
+    }
+}
+
+static void output_handle_name(void *data, struct wl_output *output, const char *name) {
+    output_info_t *info = (output_info_t *)data;
+    if (info && name) {
+        strncpy(info->name, name, sizeof(info->name) - 1);
+        info->name[sizeof(info->name) - 1] = '\0';
+        fprintf(stderr, "Output name: %s\n", info->name);
+    }
+}
+
+static void output_handle_description(void *data, struct wl_output *output, const char *description) {
+    /* Optional: Store description if needed */
+    (void)data;
+    (void)output;
+    (void)description;
 }
 
 /* Get platform name */

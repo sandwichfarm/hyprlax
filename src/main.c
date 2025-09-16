@@ -11,6 +11,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <errno.h>
 #include "include/hyprlax.h"
 #include "include/hyprlax_internal.h"
 
@@ -26,8 +27,9 @@ static void signal_handler(int sig) {
 }
 
 int main(int argc, char **argv) {
-    /* Ensure stdout/stderr are valid - reopen to /dev/null if closed */
-    if (!isatty(STDOUT_FILENO)) {
+    /* Ensure stdout/stderr are valid - reopen to /dev/null ONLY if closed */
+    /* Check if file descriptors are actually closed (fcntl will fail with EBADF) */
+    if (fcntl(STDOUT_FILENO, F_GETFD) == -1 && errno == EBADF) {
         int fd = open("/dev/null", O_WRONLY);
         if (fd >= 0) {
             if (fd != STDOUT_FILENO) {
@@ -37,7 +39,7 @@ int main(int argc, char **argv) {
         }
     }
     
-    if (!isatty(STDERR_FILENO)) {
+    if (fcntl(STDERR_FILENO, F_GETFD) == -1 && errno == EBADF) {
         int fd = open("/dev/null", O_WRONLY);
         if (fd >= 0) {
             if (fd != STDERR_FILENO) {
@@ -82,6 +84,10 @@ int main(int argc, char **argv) {
             printf("  -r, --renderer <backend>  Renderer backend (gles2, auto)\n");
             printf("  -p, --platform <backend>  Platform backend (wayland, x11, auto)\n");
             printf("  -C, --compositor <backend> Compositor (hyprland, sway, generic, auto)\n");
+            printf("\nMulti-monitor options:\n");
+            printf("  --primary-only            Only use primary monitor\n");
+            printf("  --monitor <name>          Use specific monitor(s)\n");
+            printf("  --disable-monitor <name>  Exclude specific monitor\n");
             printf("\nControl Commands:\n");
             printf("  ctl add <image> [shift] [opacity] [blur]  Add a layer\n");
             printf("  ctl remove <id>                           Remove a layer\n");

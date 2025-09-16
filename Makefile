@@ -36,7 +36,7 @@ PROTOCOL_SRCS = protocols/xdg-shell-protocol.c protocols/wlr-layer-shell-protoco
 PROTOCOL_HDRS = protocols/xdg-shell-client-protocol.h protocols/wlr-layer-shell-client-protocol.h
 
 # Core module sources
-CORE_SRCS = src/core/easing.c src/core/animation.c src/core/layer.c src/core/config.c
+CORE_SRCS = src/core/easing.c src/core/animation.c src/core/layer.c src/core/config.c src/core/monitor.c
 
 # Renderer module sources
 RENDERER_SRCS = src/renderer/renderer.c src/renderer/shader.c src/renderer/gles2.c
