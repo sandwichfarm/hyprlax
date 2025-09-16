@@ -222,7 +222,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 
             case 'v':
                 printf("hyprlax %s\n", HYPRLAX_VERSION);
-                printf("Modular parallax wallpaper for multiple compositors\n");
+                printf("Buttery-smooth parallax wallpaper daemon with support for multiple compositors, platforms and renderers\n");
                 exit(0);  /* Exit successfully for version */
                 
             case 'f':

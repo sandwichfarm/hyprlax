@@ -46,7 +46,7 @@ int main(int argc, char **argv) {
         }
         if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
             printf("hyprlax %s\n", HYPRLAX_VERSION);
-            printf("Modular parallax wallpaper for multiple compositors\n");
+            printf("Buttery-smooth parallax wallpaper daemon with support for multiple compositors, platforms and renderers\n");
             return 0;
         }
     }

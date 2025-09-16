@@ -70,13 +70,17 @@ END_TEST
 START_TEST(test_compositor_detection_sway)
 {
     char *orig = getenv("SWAYSOCK");
+    char *orig_hypr = getenv("HYPRLAND_INSTANCE_SIGNATURE");
     
+    // Clear other compositor hints
+    unsetenv("HYPRLAND_INSTANCE_SIGNATURE");
     setenv("SWAYSOCK", "/run/user/1000/sway-ipc.sock", 1);
     compositor_type_t detected = detect_compositor();
     ck_assert_int_eq(detected, COMPOSITOR_SWAY);
     
     if (orig) setenv("SWAYSOCK", orig, 1);
     else unsetenv("SWAYSOCK");
+    if (orig_hypr) setenv("HYPRLAND_INSTANCE_SIGNATURE", orig_hypr, 1);
 }
 END_TEST
 
@@ -84,7 +88,12 @@ START_TEST(test_compositor_detection_i3)
 {
     char *orig_i3 = getenv("I3SOCK");
     char *orig_wl = getenv("WAYLAND_DISPLAY");
+    char *orig_hypr = getenv("HYPRLAND_INSTANCE_SIGNATURE");
+    char *orig_sway = getenv("SWAYSOCK");
     
+    // Clear all compositor hints
+    unsetenv("HYPRLAND_INSTANCE_SIGNATURE");
+    unsetenv("SWAYSOCK");
     setenv("I3SOCK", "/run/user/1000/i3-ipc.sock", 1);
     unsetenv("WAYLAND_DISPLAY");  // Ensure X11 mode
     
@@ -94,6 +103,8 @@ START_TEST(test_compositor_detection_i3)
     if (orig_i3) setenv("I3SOCK", orig_i3, 1);
     else unsetenv("I3SOCK");
     if (orig_wl) setenv("WAYLAND_DISPLAY", orig_wl, 1);
+    if (orig_hypr) setenv("HYPRLAND_INSTANCE_SIGNATURE", orig_hypr, 1);
+    if (orig_sway) setenv("SWAYSOCK", orig_sway, 1);
 }
 END_TEST
 
@@ -119,6 +130,14 @@ END_TEST
 START_TEST(test_compositor_xdg_desktop_detection)
 {
     char *orig = getenv("XDG_CURRENT_DESKTOP");
+    char *orig_hypr = getenv("HYPRLAND_INSTANCE_SIGNATURE");
+    char *orig_sway = getenv("SWAYSOCK");
+    char *orig_i3 = getenv("I3SOCK");
+    
+    // Clear all specific compositor hints
+    unsetenv("HYPRLAND_INSTANCE_SIGNATURE");
+    unsetenv("SWAYSOCK");
+    unsetenv("I3SOCK");
     
     // Test various desktop environments
     const struct {
@@ -140,6 +159,9 @@ START_TEST(test_compositor_xdg_desktop_detection)
     
     if (orig) setenv("XDG_CURRENT_DESKTOP", orig, 1);
     else unsetenv("XDG_CURRENT_DESKTOP");
+    if (orig_hypr) setenv("HYPRLAND_INSTANCE_SIGNATURE", orig_hypr, 1);
+    if (orig_sway) setenv("SWAYSOCK", orig_sway, 1);
+    if (orig_i3) setenv("I3SOCK", orig_i3, 1);
 }
 END_TEST
 
