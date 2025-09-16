@@ -1,0 +1,291 @@
+name: Pre-Release
+
+on:
+  push:
+    tags:
+      # Matches pre-release tags like v1.0.0-alpha.1, v2.1.0-beta.2, v3.0.0-rc.1
+      - 'v*-*'
+
+jobs:
+  validate-branch:
+    runs-on: ubuntu-latest
+    outputs:
+      branch: ${{ steps.get-branch.outputs.branch }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Get branch name
+        id: get-branch
+        run: |
+          # Get the branch that contains this tag
+          BRANCH=$(git branch -r --contains ${{ github.ref_name }} | grep -v HEAD | head -1 | sed 's/.*origin\///')
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "Pre-release tag ${{ github.ref_name }} is on branch: $BRANCH"
+          
+          # Fail if tag is on master/main branch
+          if [[ "$BRANCH" == "master" ]] || [[ "$BRANCH" == "main" ]]; then
+            echo "::error::Pre-release tags cannot be created from master/main branch!"
+            echo "Pre-releases must be created from feature/development branches."
+            exit 1
+          fi
+          
+          echo "✅ Pre-release tag is correctly on branch: $BRANCH (not master)"
+
+  build-pre-release:
+    needs: validate-branch
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            cc: gcc
+          - arch: aarch64
+            cc: aarch64-linux-gnu-gcc
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Install dependencies (x86_64)
+        if: matrix.arch == 'x86_64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libwayland-dev \
+            libwayland-egl1 \
+            wayland-protocols \
+            libegl1-mesa-dev \
+            libgles2-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            check
+      
+      - name: Install cross-compilation tools (aarch64)
+        if: matrix.arch == 'aarch64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            pkg-config
+      
+      - name: Build binary
+        env:
+          CC: ${{ matrix.cc }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          # Add pre-release version info to build
+          VERSION=${{ github.ref_name }}
+          echo "Building pre-release version: $VERSION"
+          echo "#define HYPRLAX_VERSION \"$VERSION-PRE\"" > src/version.h
+          
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            make clean
+            make
+          else
+            # Cross-compile for ARM64
+            make clean
+            make CC=${{ matrix.cc }} ARCH=aarch64
+          fi
+      
+      - name: Run tests (x86_64 only)
+        if: matrix.arch == 'x86_64'
+        run: |
+          make test || echo "::warning::Some tests failed in pre-release build"
+      
+      - name: Package binary
+        run: |
+          VERSION=${{ github.ref_name }}
+          ARCH=${{ matrix.arch }}
+          BRANCH=${{ needs.validate-branch.outputs.branch }}
+          
+          # Create package directory
+          mkdir -p hyprlax-${VERSION}-linux-${ARCH}
+          
+          # Copy files
+          cp hyprlax hyprlax-${VERSION}-linux-${ARCH}/
+          cp README.md hyprlax-${VERSION}-linux-${ARCH}/
+          cp LICENSE hyprlax-${VERSION}-linux-${ARCH}/
+          
+          # Add pre-release warning
+          cat > hyprlax-${VERSION}-linux-${ARCH}/PRE-RELEASE-WARNING.txt << EOF
+          ⚠️ PRE-RELEASE VERSION WARNING ⚠️
+          
+          Version: ${VERSION}
+          Branch: ${BRANCH}
+          Architecture: ${ARCH}
+          
+          This is a PRE-RELEASE version built from a development branch.
+          It is NOT recommended for production use and may contain:
+          - Unstable features
+          - Known bugs
+          - Performance issues
+          - Breaking changes
+          
+          Please report issues at: https://github.com/sandwichfarm/hyprlax/issues
+          Tag your issue with [PRE-RELEASE] for priority handling.
+          EOF
+          
+          # Create tarball
+          tar -czf hyprlax-${VERSION}-linux-${ARCH}.tar.gz hyprlax-${VERSION}-linux-${ARCH}
+          
+          # Generate checksum
+          sha256sum hyprlax-${VERSION}-linux-${ARCH}.tar.gz > hyprlax-${VERSION}-linux-${ARCH}.tar.gz.sha256
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyprlax-${{ github.ref_name }}-linux-${{ matrix.arch }}
+          path: |
+            hyprlax-*.tar.gz
+            hyprlax-*.tar.gz.sha256
+
+  create-pre-release:
+    needs: [validate-branch, build-pre-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+      
+      - name: Prepare release assets
+        run: |
+          mkdir release-assets
+          mv artifacts/*/* release-assets/
+          ls -la release-assets/
+      
+      - name: Extract version info
+        id: version
+        run: |
+          VERSION=${{ github.ref_name }}
+          # Remove 'v' prefix
+          VERSION_NUM=${VERSION#v}
+          
+          # Determine pre-release stage (alpha/beta/rc)
+          if [[ "$VERSION" == *"-alpha"* ]]; then
+            STAGE="Alpha"
+            STABILITY="⚠️ Very Unstable"
+          elif [[ "$VERSION" == *"-beta"* ]]; then
+            STAGE="Beta"
+            STABILITY="⚡ Testing Phase"
+          elif [[ "$VERSION" == *"-rc"* ]]; then
+            STAGE="Release Candidate"
+            STABILITY="🔍 Final Testing"
+          else
+            STAGE="Development"
+            STABILITY="🧪 Experimental"
+          fi
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version_num=$VERSION_NUM" >> $GITHUB_OUTPUT
+          echo "stage=$STAGE" >> $GITHUB_OUTPUT
+          echo "stability=$STABILITY" >> $GITHUB_OUTPUT
+      
+      - name: Generate release notes
+        id: notes
+        run: |
+          BRANCH=${{ needs.validate-branch.outputs.branch }}
+          VERSION=${{ steps.version.outputs.version }}
+          STAGE="${{ steps.version.outputs.stage }}"
+          STABILITY="${{ steps.version.outputs.stability }}"
+          
+          # Get recent commits since last tag
+          LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$LAST_TAG" ]; then
+            COMMITS=$(git log --oneline ${LAST_TAG}..HEAD --pretty=format:"- %s" | head -20)
+          else
+            COMMITS=$(git log --oneline HEAD~20..HEAD --pretty=format:"- %s")
+          fi
+          
+          cat > release-notes.md << EOF
+          # ${VERSION} ${STAGE} Release
+          
+          ## ${STABILITY} Pre-Release Warning
+          
+          This is a **pre-release** version built from the \`${BRANCH}\` branch.
+          
+          **⚠️ NOT RECOMMENDED FOR PRODUCTION USE**
+          
+          ### 🔧 Installation (Testing Only)
+          
+          \`\`\`bash
+          # Download and extract
+          wget https://github.com/sandwichfarm/hyprlax/releases/download/${VERSION}/hyprlax-${VERSION}-linux-x86_64.tar.gz
+          tar -xzf hyprlax-${VERSION}-linux-x86_64.tar.gz
+          cd hyprlax-${VERSION}-linux-x86_64
+          
+          # Read the warning
+          cat PRE-RELEASE-WARNING.txt
+          
+          # Install (at your own risk)
+          sudo cp hyprlax /usr/local/bin/
+          \`\`\`
+          
+          ### 📦 Available Builds
+          
+          - \`hyprlax-${VERSION}-linux-x86_64.tar.gz\` - Intel/AMD 64-bit
+          - \`hyprlax-${VERSION}-linux-aarch64.tar.gz\` - ARM 64-bit
+          
+          ### 🧪 Testing Focus
+          
+          Please help test:
+          - [ ] New features in this pre-release
+          - [ ] Stability on different compositors
+          - [ ] Performance compared to stable version
+          - [ ] Migration from stable version
+          
+          ### 📝 Recent Changes
+          
+          ${COMMITS}
+          
+          ### 🐛 Reporting Issues
+          
+          Please report pre-release issues with the \`[PRE-RELEASE]\` prefix:
+          https://github.com/sandwichfarm/hyprlax/issues/new?labels=pre-release,bug&title=[PRE-RELEASE]%20
+          
+          ### ⚠️ Known Limitations
+          
+          - Built from development branch \`${BRANCH}\`
+          - May contain incomplete features
+          - Performance may not be optimized
+          - Configuration format may change before stable release
+          
+          ---
+          
+          **Branch:** \`${BRANCH}\`  
+          **Commit:** \`$(git rev-parse --short HEAD)\`  
+          **Build Date:** \`$(date -u +%Y-%m-%d)\`
+          EOF
+      
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ steps.version.outputs.version }} - ${{ steps.version.outputs.stage }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: true  # ALWAYS true for pre-releases
+          files: release-assets/*
+          fail_on_unmatched_files: true
+          generate_release_notes: false  # We generate our own
+      
+      - name: Post warnings
+        run: |
+          echo "::warning::Pre-release ${{ github.ref_name }} created from branch ${{ needs.validate-branch.outputs.branch }}"
+          echo "::warning::This is not a stable release and should not be used in production"
