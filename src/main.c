@@ -8,6 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include <time.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include "include/hyprlax.h"
 #include "include/hyprlax_internal.h"
 
@@ -23,6 +26,40 @@ static void signal_handler(int sig) {
 }
 
 int main(int argc, char **argv) {
+    /* Ensure stdout/stderr are valid - reopen to /dev/null if closed */
+    if (!isatty(STDOUT_FILENO)) {
+        int fd = open("/dev/null", O_WRONLY);
+        if (fd >= 0) {
+            if (fd != STDOUT_FILENO) {
+                dup2(fd, STDOUT_FILENO);
+                close(fd);
+            }
+        }
+    }
+    
+    if (!isatty(STDERR_FILENO)) {
+        int fd = open("/dev/null", O_WRONLY);
+        if (fd >= 0) {
+            if (fd != STDERR_FILENO) {
+                dup2(fd, STDERR_FILENO);
+                close(fd);
+            }
+        }
+    }
+    
+    /* Log startup immediately to see if we're even running */
+    FILE *startup_log = fopen("/tmp/hyprlax-exec.log", "a");
+    if (startup_log) {
+        fprintf(startup_log, "[%ld] hyprlax started with %d args\n", (long)time(NULL), argc);
+        for (int i = 0; i < argc; i++) {
+            fprintf(startup_log, "  arg[%d]: %s\n", i, argv[i]);
+        }
+        fprintf(startup_log, "  stdin: %s\n", isatty(0) ? "tty" : "not-tty");
+        fprintf(startup_log, "  stdout: %s\n", isatty(1) ? "tty" : "not-tty");
+        fprintf(startup_log, "  stderr: %s\n", isatty(2) ? "tty" : "not-tty");
+        fclose(startup_log);
+    }
+    
     /* Check for ctl subcommand first */
     if (argc >= 2 && strcmp(argv[1], "ctl") == 0) {
         return hyprlax_ctl_main(argc - 1, argv + 1);
@@ -70,23 +107,28 @@ int main(int argc, char **argv) {
     }
     
     /* Create application context */
+    fprintf(stderr, "[MAIN] Creating application context\n");
     hyprlax_context_t *ctx = hyprlax_create();
     if (!ctx) {
-        fprintf(stderr, "Failed to create application context\n");
+        fprintf(stderr, "[MAIN] Failed to create application context\n");
         return 1;
     }
     
     /* Set up signal handlers */
+    fprintf(stderr, "[MAIN] Setting up signal handlers\n");
     g_ctx = ctx;
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
     
     /* Initialize application */
+    fprintf(stderr, "[MAIN] Starting initialization\n");
     int ret = hyprlax_init(ctx, argc, argv);
     if (ret != 0) {
+        fprintf(stderr, "[MAIN] Initialization failed with code %d\n", ret);
         hyprlax_destroy(ctx);
         return 1;
     }
+    fprintf(stderr, "[MAIN] Initialization complete\n");
     
     /* Run main loop */
     ret = hyprlax_run(ctx);

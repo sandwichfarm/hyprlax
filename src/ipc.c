@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <pwd.h>
+#include <time.h>
 
 static void get_socket_path(char* buffer, size_t size) {
     const char* user = getenv("USER");
@@ -38,13 +39,16 @@ static ipc_command_t parse_command(const char* cmd) {
 }
 
 ipc_context_t* ipc_init(void) {
+    fprintf(stderr, "[IPC] Initializing IPC subsystem\n");
+    
     ipc_context_t* ctx = calloc(1, sizeof(ipc_context_t));
     if (!ctx) {
-        fprintf(stderr, "Failed to allocate IPC context\n");
+        fprintf(stderr, "[IPC] Failed to allocate IPC context\n");
         return NULL;
     }
 
     get_socket_path(ctx->socket_path, sizeof(ctx->socket_path));
+    fprintf(stderr, "[IPC] Socket path: %s\n", ctx->socket_path);
 
     // Check if another instance is already running by trying to connect to the socket
     int test_fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -56,20 +60,40 @@ ipc_context_t* ipc_init(void) {
         
         if (connect(test_fd, (struct sockaddr*)&test_addr, sizeof(test_addr)) == 0) {
             // Successfully connected - another instance is running
-            fprintf(stderr, "Error: Another instance of hyprlax is already running\n");
-            fprintf(stderr, "Socket: %s\n", ctx->socket_path);
+            fprintf(stderr, "[IPC] Error: Another instance of hyprlax is already running\n");
+            fprintf(stderr, "[IPC] Socket: %s\n", ctx->socket_path);
             close(test_fd);
             free(ctx);
             return NULL;
         }
         close(test_fd);
+        fprintf(stderr, "[IPC] No existing instance detected\n");
     }
 
     // Remove existing socket if it exists (stale from a crash)
     unlink(ctx->socket_path);
 
-    // Create Unix domain socket
-    ctx->socket_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0);
+    // Create Unix domain socket with retries for early boot scenario
+    int max_retries = 10;
+    int retry_delay_ms = 200;
+    ctx->socket_fd = -1;
+    
+    for (int i = 0; i < max_retries; i++) {
+        ctx->socket_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0);
+        if (ctx->socket_fd >= 0) {
+            fprintf(stderr, "[IPC] Socket created successfully\n");
+            break;
+        }
+        
+        if (i == 0) {
+            fprintf(stderr, "[IPC] Failed to create socket: %s, retrying...\n", strerror(errno));
+        }
+        
+        struct timespec ts;
+        ts.tv_sec = 0;
+        ts.tv_nsec = retry_delay_ms * 1000000L;
+        nanosleep(&ts, NULL);
+    }
     if (ctx->socket_fd < 0) {
         fprintf(stderr, "Failed to create IPC socket: %s\n", strerror(errno));
         free(ctx);
@@ -81,15 +105,17 @@ ipc_context_t* ipc_init(void) {
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, ctx->socket_path, sizeof(addr.sun_path) - 1);
 
+    fprintf(stderr, "[IPC] Binding socket to %s\n", ctx->socket_path);
     if (bind(ctx->socket_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        fprintf(stderr, "Failed to bind IPC socket: %s\n", strerror(errno));
+        fprintf(stderr, "[IPC] Failed to bind IPC socket: %s\n", strerror(errno));
         close(ctx->socket_fd);
         free(ctx);
         return NULL;
     }
 
+    fprintf(stderr, "[IPC] Starting to listen on socket\n");
     if (listen(ctx->socket_fd, 5) < 0) {
-        fprintf(stderr, "Failed to listen on IPC socket: %s\n", strerror(errno));
+        fprintf(stderr, "[IPC] Failed to listen on IPC socket: %s\n", strerror(errno));
         close(ctx->socket_fd);
         unlink(ctx->socket_path);
         free(ctx);
@@ -102,7 +128,7 @@ ipc_context_t* ipc_init(void) {
     ctx->active = true;
     ctx->next_layer_id = 1;
 
-    printf("IPC socket listening at: %s\n", ctx->socket_path);
+    fprintf(stderr, "[IPC] Socket successfully listening at: %s\n", ctx->socket_path);
     return ctx;
 }
 
