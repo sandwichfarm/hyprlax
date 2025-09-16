@@ -84,52 +84,25 @@ jobs:
         run: |
           make test || echo "::warning::Some tests failed in pre-release build"
       
-      - name: Package binary
+      - name: Prepare binaries
         run: |
-          VERSION=${{ github.ref_name }}
-          ARCH=${{ matrix.arch }}
-          BRANCH=${{ needs.validate-branch.outputs.branch }}
-          
-          # Create package directory
-          mkdir -p hyprlax-${VERSION}-linux-${ARCH}
-          
-          # Copy files
-          cp hyprlax hyprlax-${VERSION}-linux-${ARCH}/
-          cp README.md hyprlax-${VERSION}-linux-${ARCH}/
-          cp LICENSE hyprlax-${VERSION}-linux-${ARCH}/
-          
-          # Add pre-release warning
-          cat > hyprlax-${VERSION}-linux-${ARCH}/PRE-RELEASE-WARNING.txt << EOF
-          ⚠️ PRE-RELEASE VERSION WARNING ⚠️
-          
-          Version: ${VERSION}
-          Branch: ${BRANCH}
-          Architecture: ${ARCH}
-          
-          This is a PRE-RELEASE version built from a development branch.
-          It is NOT recommended for production use and may contain:
-          - Unstable features
-          - Known bugs
-          - Performance issues
-          - Breaking changes
-          
-          Please report issues at: https://github.com/sandwichfarm/hyprlax/issues
-          Tag your issue with [PRE-RELEASE] for priority handling.
-          EOF
-          
-          # Create tarball
-          tar -czf hyprlax-${VERSION}-linux-${ARCH}.tar.gz hyprlax-${VERSION}-linux-${ARCH}
-          
-          # Generate checksum
-          sha256sum hyprlax-${VERSION}-linux-${ARCH}.tar.gz > hyprlax-${VERSION}-linux-${ARCH}.tar.gz.sha256
+          # Rename binaries to match release workflow naming
+          mv hyprlax hyprlax-${{ matrix.arch }}
+          mv hyprlax-ctl hyprlax-ctl-${{ matrix.arch }}
+          chmod +x hyprlax-${{ matrix.arch }}
+          chmod +x hyprlax-ctl-${{ matrix.arch }}
       
-      - name: Upload artifacts
+      - name: Upload hyprlax artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hyprlax-${{ github.ref_name }}-linux-${{ matrix.arch }}
-          path: |
-            hyprlax-*.tar.gz
-            hyprlax-*.tar.gz.sha256
+          name: hyprlax-${{ matrix.arch }}
+          path: hyprlax-${{ matrix.arch }}
+      
+      - name: Upload hyprlax-ctl artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyprlax-ctl-${{ matrix.arch }}
+          path: hyprlax-ctl-${{ matrix.arch }}
 
   create-pre-release:
     needs: [validate-branch, build-pre-release]
@@ -150,9 +123,14 @@ jobs:
       
       - name: Prepare release assets
         run: |
-          mkdir release-assets
-          mv artifacts/*/* release-assets/
-          ls -la release-assets/
+          # Move all binaries to root
+          find ./artifacts -type f -name 'hyprlax-*' -exec mv {} . \;
+          
+          # Create checksums
+          sha256sum hyprlax-* > SHA256SUMS
+          
+          # List files for verification
+          ls -la hyprlax-* SHA256SUMS
       
       - name: Extract version info
         id: version
@@ -209,21 +187,20 @@ jobs:
           ### 🔧 Installation (Testing Only)
           
           \`\`\`bash
-          # Download and extract
-          wget https://github.com/sandwichfarm/hyprlax/releases/download/${VERSION}/hyprlax-${VERSION}-linux-x86_64.tar.gz
-          tar -xzf hyprlax-${VERSION}-linux-x86_64.tar.gz
-          cd hyprlax-${VERSION}-linux-x86_64
+          # Download binaries
+          wget https://github.com/sandwichfarm/hyprlax/releases/download/${VERSION}/hyprlax-x86_64
+          wget https://github.com/sandwichfarm/hyprlax/releases/download/${VERSION}/hyprlax-ctl-x86_64
           
-          # Read the warning
-          cat PRE-RELEASE-WARNING.txt
-          
-          # Install (at your own risk)
-          sudo cp hyprlax /usr/local/bin/
+          # Make executable and install (at your own risk)
+          chmod +x hyprlax-x86_64 hyprlax-ctl-x86_64
+          sudo mv hyprlax-x86_64 /usr/local/bin/hyprlax
+          sudo mv hyprlax-ctl-x86_64 /usr/local/bin/hyprlax-ctl
           \`\`\`
           
           ### 📦 Available Builds
           
-          - \`hyprlax-${VERSION}-linux-x86_64.tar.gz\` - Intel/AMD 64-bit
+          - \`hyprlax-x86_64\` - Main hyprlax binary for Intel/AMD 64-bit
+          - \`hyprlax-ctl-x86_64\` - Control client for Intel/AMD 64-bit
           
           *Note: ARM64 builds not available for pre-releases. Please build from source.*
           
@@ -266,7 +243,10 @@ jobs:
           body_path: release-notes.md
           draft: false
           prerelease: true  # ALWAYS true for pre-releases
-          files: release-assets/*
+          files: |
+            hyprlax-x86_64
+            hyprlax-ctl-x86_64
+            SHA256SUMS
           fail_on_unmatched_files: true
           generate_release_notes: false  # We generate our own
       
