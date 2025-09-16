@@ -16,7 +16,10 @@
 /* Compositor types */
 typedef enum {
     COMPOSITOR_HYPRLAND,
+    COMPOSITOR_WAYFIRE,          /* Wayfire (2D workspace grid) */
+    COMPOSITOR_NIRI,             /* Niri (scrollable workspaces) */
     COMPOSITOR_SWAY,
+    COMPOSITOR_RIVER,            /* River (tag-based workspaces) */
     COMPOSITOR_GENERIC_WAYLAND,  /* Generic wlr-layer-shell */
     COMPOSITOR_X11_EWMH,         /* X11 with EWMH support */
     COMPOSITOR_AUTO,             /* Auto-detect */
@@ -44,6 +47,8 @@ typedef struct {
     char name[64];
     bool active;
     bool visible;
+    bool occupied;  /* Whether workspace has windows */
+    int x, y;  /* Grid position for 2D workspace layouts */
 } workspace_info_t;
 
 /* Monitor information */
@@ -70,6 +75,9 @@ typedef struct {
         struct {
             int from_workspace;
             int to_workspace;
+            /* 2D workspace grid support */
+            int from_x, from_y;
+            int to_x, to_y;
         } workspace;
         struct {
             int monitor_id;
@@ -154,7 +162,10 @@ compositor_type_t compositor_detect(void);
 
 /* Available compositor adapters */
 extern const compositor_ops_t compositor_hyprland_ops;
+extern const compositor_ops_t compositor_wayfire_ops;
+extern const compositor_ops_t compositor_niri_ops;
 extern const compositor_ops_t compositor_sway_ops;
+extern const compositor_ops_t compositor_river_ops;
 extern const compositor_ops_t compositor_generic_wayland_ops;
 extern const compositor_ops_t compositor_x11_ewmh_ops;
 

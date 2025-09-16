@@ -46,8 +46,9 @@ PLATFORM_SRCS = src/platform/platform.c src/platform/wayland.c src/platform/x11.
 
 # Compositor module sources
 COMPOSITOR_SRCS = src/compositor/compositor.c src/compositor/hyprland.c \
-                  src/compositor/sway.c src/compositor/generic_wayland.c \
-                  src/compositor/x11_ewmh.c
+                  src/compositor/wayfire.c src/compositor/niri.c \
+                  src/compositor/sway.c src/compositor/river.c \
+                  src/compositor/generic_wayland.c src/compositor/x11_ewmh.c
 
 # Main module sources
 MAIN_SRCS = src/main.c src/hyprlax_main.c
@@ -93,7 +94,7 @@ protocols/wlr-layer-shell-client-protocol.h: $(LAYER_SHELL_PROTOCOL)
 	$(CC) $(CFLAGS) $(PKG_CFLAGS) -c $< -o $@
 
 $(TARGET): $(OBJS)
-	$(CC) $(LDFLAGS) $(OBJS) $(PKG_LIBS) -lm -o $@
+	$(CC) $(LDFLAGS) $(OBJS) $(PKG_LIBS) -lm -lX11 -o $@
 
 $(CTL_TARGET): $(CTL_OBJS)
 	$(CC) $(LDFLAGS) $(CTL_OBJS) -o $@
@@ -134,12 +135,15 @@ VALGRIND_FLAGS = --leak-check=full --show-leak-kinds=definite,indirect --track-o
 # For Arch Linux, enable debuginfod for symbol resolution
 export DEBUGINFOD_URLS ?= https://debuginfod.archlinux.org
 
-TEST_TARGETS = tests/test_hyprlax tests/test_ipc tests/test_blur tests/test_config tests/test_animation tests/test_easing tests/test_shader
+TEST_TARGETS = tests/test_integration tests/test_ipc tests/test_blur tests/test_config tests/test_animation tests/test_easing tests/test_shader tests/test_platform tests/test_compositor tests/test_modules tests/test_renderer
 ALL_TESTS = $(filter tests/test_%, $(wildcard tests/test_*.c))
 ALL_TEST_TARGETS = $(ALL_TESTS:.c=)
 
 # Individual test rules - updated for Check framework
-tests/test_hyprlax: tests/test_hyprlax.c
+tests/test_integration: tests/test_integration.c
+	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
+
+tests/test_renderer: tests/test_renderer.c
 	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
 
 tests/test_ipc: tests/test_ipc.c src/ipc.c
@@ -158,6 +162,15 @@ tests/test_easing: tests/test_easing.c
 	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
 
 tests/test_shader: tests/test_shader.c
+	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
+
+tests/test_platform: tests/test_platform.c
+	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
+
+tests/test_compositor: tests/test_compositor.c
+	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
+
+tests/test_modules: tests/test_modules.c
 	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
 
 # Run all tests

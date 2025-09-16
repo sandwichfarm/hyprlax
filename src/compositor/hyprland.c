@@ -244,17 +244,12 @@ static int hyprland_connect_ipc(const char *socket_path) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
     
-    /* Connect command socket */
-    g_hyprland_data->ipc_fd = connect_hyprland_socket(g_hyprland_data->socket_path);
-    if (g_hyprland_data->ipc_fd < 0) {
-        return HYPRLAX_ERROR_NO_DISPLAY;
-    }
+    /* Note: Command socket is created per-command in hyprland_send_command */
+    g_hyprland_data->ipc_fd = -1;  /* Not used for persistent connection */
     
-    /* Connect event socket */
+    /* Connect event socket (stays open for event monitoring) */
     g_hyprland_data->event_fd = connect_hyprland_socket(g_hyprland_data->event_socket_path);
     if (g_hyprland_data->event_fd < 0) {
-        close(g_hyprland_data->ipc_fd);
-        g_hyprland_data->ipc_fd = -1;
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
     
@@ -303,41 +298,84 @@ static int hyprland_poll_events(compositor_event_t *event) {
         .events = POLLIN
     };
     
-    if (poll(&pfd, 1, 0) <= 0) {
+    int poll_result = poll(&pfd, 1, 0);
+    if (poll_result < 0) {
+        if (getenv("HYPRLAX_DEBUG")) {
+            fprintf(stderr, "[DEBUG] Hyprland poll error: %s\n", strerror(errno));
+        }
+        return HYPRLAX_ERROR_NO_DATA;
+    } else if (poll_result == 0) {
+        /* No events available */
         return HYPRLAX_ERROR_NO_DATA;
     }
     
     /* Read event data */
-    char buffer[1024];
+    char buffer[4096];
     ssize_t n = read(g_hyprland_data->event_fd, buffer, sizeof(buffer) - 1);
     if (n <= 0) {
+        if (getenv("HYPRLAX_DEBUG") && n < 0) {
+            fprintf(stderr, "[DEBUG] Hyprland read error: %s\n", strerror(errno));
+        }
         return HYPRLAX_ERROR_NO_DATA;
     }
     buffer[n] = '\0';
     
-    /* Parse Hyprland event format: "event_name>>data" */
-    if (strncmp(buffer, "workspace>>", 11) == 0) {
-        int new_workspace = atoi(buffer + 11);
-        if (new_workspace != g_hyprland_data->current_workspace) {
-            event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
-            event->data.workspace.from_workspace = g_hyprland_data->current_workspace;
-            event->data.workspace.to_workspace = new_workspace;
-            g_hyprland_data->current_workspace = new_workspace;
-            return HYPRLAX_SUCCESS;
+    if (getenv("HYPRLAX_DEBUG")) {
+        fprintf(stderr, "[DEBUG] Hyprland event received: %s\n", buffer);
+    }
+    
+    /* Parse Hyprland events - multiple events may be in buffer separated by newlines */
+    char *line = buffer;
+    char *next_line;
+    
+    while (line && *line) {
+        next_line = strchr(line, '\n');
+        if (next_line) {
+            *next_line = '\0';
+            next_line++;
         }
-    } else if (strncmp(buffer, "focusedmon>>", 12) == 0) {
-        /* Parse monitor change: "focusedmon>>monitor_name,workspace_id" */
-        char *comma = strchr(buffer + 12, ',');
-        if (comma) {
-            int new_workspace = atoi(comma + 1);
+        
+        /* Parse Hyprland event format: "event_name>>data" */
+        if (strncmp(line, "workspace>>", 11) == 0) {
+            int new_workspace = atoi(line + 11);
             if (new_workspace != g_hyprland_data->current_workspace) {
                 event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
                 event->data.workspace.from_workspace = g_hyprland_data->current_workspace;
                 event->data.workspace.to_workspace = new_workspace;
+                /* Hyprland uses linear workspaces, set x/y to 0 */
+                event->data.workspace.from_x = 0;
+                event->data.workspace.from_y = 0;
+                event->data.workspace.to_x = 0;
+                event->data.workspace.to_y = 0;
                 g_hyprland_data->current_workspace = new_workspace;
+                if (getenv("HYPRLAX_DEBUG")) {
+                    fprintf(stderr, "[DEBUG] Workspace change detected: %d -> %d\n",
+                            event->data.workspace.from_workspace,
+                            event->data.workspace.to_workspace);
+                }
                 return HYPRLAX_SUCCESS;
             }
+        } else if (strncmp(line, "focusedmon>>", 12) == 0) {
+            /* Parse monitor change: "focusedmon>>monitor_name,workspace_id" */
+            char *comma = strchr(line + 12, ',');
+            if (comma) {
+                int new_workspace = atoi(comma + 1);
+                if (new_workspace != g_hyprland_data->current_workspace) {
+                    event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
+                    event->data.workspace.from_workspace = g_hyprland_data->current_workspace;
+                    event->data.workspace.to_workspace = new_workspace;
+                    g_hyprland_data->current_workspace = new_workspace;
+                    if (getenv("HYPRLAX_DEBUG")) {
+                        fprintf(stderr, "[DEBUG] Workspace change detected (monitor): %d -> %d\n",
+                                event->data.workspace.from_workspace,
+                                event->data.workspace.to_workspace);
+                    }
+                    return HYPRLAX_SUCCESS;
+                }
+            }
         }
+        
+        line = next_line;
     }
     
     return HYPRLAX_ERROR_NO_DATA;
@@ -346,7 +384,7 @@ static int hyprland_poll_events(compositor_event_t *event) {
 /* Send IPC command */
 static int hyprland_send_command(const char *command, char *response, 
                                 size_t response_size) {
-    if (!g_hyprland_data || !g_hyprland_data->connected) {
+    if (!g_hyprland_data) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
     
@@ -354,19 +392,27 @@ static int hyprland_send_command(const char *command, char *response,
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
     
+    /* Connect a new command socket for each command */
+    int cmd_fd = connect_hyprland_socket(g_hyprland_data->socket_path);
+    if (cmd_fd < 0) {
+        return HYPRLAX_ERROR_NO_DISPLAY;
+    }
+    
     /* Send command */
-    if (write(g_hyprland_data->ipc_fd, command, strlen(command)) < 0) {
+    if (write(cmd_fd, command, strlen(command)) < 0) {
+        close(cmd_fd);
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
     
     /* Read response if buffer provided */
     if (response && response_size > 0) {
-        ssize_t n = read(g_hyprland_data->ipc_fd, response, response_size - 1);
+        ssize_t n = read(cmd_fd, response, response_size - 1);
         if (n > 0) {
             response[n] = '\0';
         }
     }
     
+    close(cmd_fd);
     return HYPRLAX_SUCCESS;
 }
 

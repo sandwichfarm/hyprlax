@@ -148,11 +148,30 @@ static int gles2_init(void *native_display, void *native_window,
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
     
     /* Compile shaders */
+    if (getenv("HYPRLAX_DEBUG")) {
+        fprintf(stderr, "[DEBUG] Compiling basic shader\n");
+    }
     data->basic_shader = shader_create_program("basic");
     if (shader_compile(data->basic_shader, shader_vertex_basic, 
                       shader_fragment_basic) != HYPRLAX_SUCCESS) {
         fprintf(stderr, "Failed to compile basic shader\n");
         /* Continue anyway - we need at least basic rendering */
+    } else if (getenv("HYPRLAX_DEBUG")) {
+        fprintf(stderr, "[DEBUG] Basic shader compiled successfully, id=%u\n", data->basic_shader->id);
+    }
+    
+    /* Compile blur shader */
+    if (getenv("HYPRLAX_DEBUG")) {
+        fprintf(stderr, "[DEBUG] Compiling blur shader\n");
+    }
+    data->blur_shader = shader_create_program("blur");
+    if (shader_compile_blur(data->blur_shader) != HYPRLAX_SUCCESS) {
+        fprintf(stderr, "Warning: Failed to compile blur shader - blur effects disabled\n");
+        shader_destroy_program(data->blur_shader);
+        data->blur_shader = NULL;
+    } else if (getenv("HYPRLAX_DEBUG")) {
+        fprintf(stderr, "[DEBUG] Blur shader compiled successfully, id=%u\n", 
+                data->blur_shader->id);
     }
     
     /* Store configuration */
@@ -297,22 +316,118 @@ static void gles2_bind_texture(const texture_t *texture, int unit) {
 /* Draw layer */
 static void gles2_draw_layer(const texture_t *texture, float x, float y,
                             float opacity, float blur_amount) {
-    if (!texture) return;
+    static int draw_count = 0;
+    if (draw_count < 5 && getenv("HYPRLAX_DEBUG")) {
+        fprintf(stderr, "[DEBUG] gles2_draw_layer %d: tex=%u, x=%.3f, opacity=%.3f, blur=%.3f\n",
+                draw_count, texture ? texture->id : 0, x, opacity, blur_amount);
+    }
     
-    /* This is a simplified implementation */
-    /* In real implementation, we'd use the shader programs and set uniforms */
+    if (!texture || !g_gles2_data || !g_gles2_data->basic_shader) {
+        if (draw_count < 5 && getenv("HYPRLAX_DEBUG")) {
+            fprintf(stderr, "[DEBUG] gles2_draw_layer: Missing %s\n",
+                    !texture ? "texture" : !g_gles2_data ? "gles2_data" : "shader");
+        }
+        draw_count++;
+        return;
+    }
+    
+    /* Setup vertices for a fullscreen quad */
+    GLfloat vertices[] = {
+        -1.0f, -1.0f,  0.0f, 1.0f,  /* Bottom-left */
+         1.0f, -1.0f,  1.0f, 1.0f,  /* Bottom-right */
+        -1.0f,  1.0f,  0.0f, 0.0f,  /* Top-left */
+         1.0f,  1.0f,  1.0f, 0.0f   /* Top-right */
+    };
+    
+    /* Adjust texture coordinates based on x and y offset */
+    vertices[2] = x;          /* Bottom-left U */
+    vertices[3] = 1.0f - y;   /* Bottom-left V (inverted) */
+    vertices[6] = 1.0f + x;   /* Bottom-right U */
+    vertices[7] = 1.0f - y;   /* Bottom-right V (inverted) */
+    vertices[10] = x;         /* Top-left U */
+    vertices[11] = 0.0f - y;  /* Top-left V (inverted) */
+    vertices[14] = 1.0f + x;  /* Top-right U */
+    vertices[15] = 0.0f - y;  /* Top-right V (inverted) */
+    
+    /* Choose shader based on blur amount */
+    shader_program_t *shader = g_gles2_data->basic_shader;
+    if (blur_amount > 0.01f && g_gles2_data->blur_shader) {
+        shader = g_gles2_data->blur_shader;
+        if (draw_count < 5 && getenv("HYPRLAX_DEBUG")) {
+            fprintf(stderr, "[DEBUG] Using blur shader for layer with blur=%.3f\n", blur_amount);
+        }
+    }
+    
+    /* Use selected shader */
+    shader_use(shader);
+    
+    /* Set uniforms */
+    shader_set_uniform_float(shader, "u_opacity", opacity);
+    
+    /* Set blur-specific uniforms if using blur shader */
+    if (shader == g_gles2_data->blur_shader) {
+        shader_set_uniform_float(shader, "u_blur_amount", blur_amount);
+        shader_set_uniform_vec2(shader, "u_resolution", 
+                               (float)g_gles2_data->width, (float)g_gles2_data->height);
+    }
     
     /* Bind texture */
     gles2_bind_texture(texture, 0);
+    shader_set_uniform_int(shader, "u_texture", 0);
+    
+    /* Setup vertex attributes */
+    GLuint vbo;
+    glGenBuffers(1, &vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    
+    GLint pos_attrib = glGetAttribLocation(g_gles2_data->basic_shader->id, "a_position");
+    GLint tex_attrib = glGetAttribLocation(g_gles2_data->basic_shader->id, "a_texcoord");
+    
+    if (draw_count < 5 && getenv("HYPRLAX_DEBUG")) {
+        fprintf(stderr, "[DEBUG] Attrib locations: pos=%d, tex=%d\n", pos_attrib, tex_attrib);
+    }
+    
+    if (pos_attrib >= 0) {
+        glEnableVertexAttribArray(pos_attrib);
+        glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (void*)0);
+    }
+    
+    if (tex_attrib >= 0) {
+        glEnableVertexAttribArray(tex_attrib);
+        glVertexAttribPointer(tex_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (void*)(2 * sizeof(GLfloat)));
+    }
     
     /* Draw quad */
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    
+    /* Check for GL errors */
+    if (draw_count < 5 && getenv("HYPRLAX_DEBUG")) {
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            fprintf(stderr, "[DEBUG] GL Error after draw: 0x%x\n", err);
+        }
+    }
+    
+    /* Cleanup */
+    if (pos_attrib >= 0) glDisableVertexAttribArray(pos_attrib);
+    if (tex_attrib >= 0) glDisableVertexAttribArray(tex_attrib);
+    glDeleteBuffers(1, &vbo);
+    
+    if (draw_count < 5 && getenv("HYPRLAX_DEBUG")) {
+        fprintf(stderr, "[DEBUG] gles2_draw_layer %d: Complete\n", draw_count);
+    }
+    draw_count++;
 }
 
 /* Resize viewport */
 static void gles2_resize(int width, int height) {
     glViewport(0, 0, width, height);
     /* Store new size in private data */
+    if (g_gles2_data) {
+        g_gles2_data->width = width;
+        g_gles2_data->height = height;
+    }
 }
 
 /* Set vsync */

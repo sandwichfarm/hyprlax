@@ -10,8 +10,10 @@
 #include <string.h>
 #include <wayland-client.h>
 #include <wayland-egl.h>
+#include <GLES2/gl2.h>
 #include "../include/platform.h"
 #include "../include/hyprlax_internal.h"
+#include "../../protocols/wlr-layer-shell-client-protocol.h"
 
 /* Wayland platform private data */
 typedef struct {
@@ -23,9 +25,9 @@ typedef struct {
     struct wl_egl_window *egl_window;
     struct wl_output *output;
     
-    /* Shell objects - will be moved to compositor adapter later */
-    void *shell;  /* Generic shell pointer */
-    void *shell_surface;  /* Generic shell surface */
+    /* Layer shell protocol */
+    struct zwlr_layer_shell_v1 *layer_shell;
+    struct zwlr_layer_surface_v1 *layer_surface;
     
     /* Window state */
     int width;
@@ -48,8 +50,10 @@ static void registry_global(void *data, struct wl_registry *registry,
     } else if (strcmp(interface, "wl_output") == 0 && !wl_data->output) {
         wl_data->output = wl_registry_bind(registry, id,
                                           &wl_output_interface, 1);
+    } else if (strcmp(interface, "zwlr_layer_shell_v1") == 0) {
+        wl_data->layer_shell = wl_registry_bind(registry, id,
+                                               &zwlr_layer_shell_v1_interface, 1);
     }
-    /* Shell interfaces will be handled by compositor adapters */
 }
 
 static void registry_global_remove(void *data, struct wl_registry *registry,
@@ -59,6 +63,45 @@ static void registry_global_remove(void *data, struct wl_registry *registry,
     (void)registry;
     (void)id;
 }
+
+/* Layer surface listener callbacks */
+static void layer_surface_configure(void *data,
+                                   struct zwlr_layer_surface_v1 *layer_surface,
+                                   uint32_t serial,
+                                   uint32_t width, uint32_t height) {
+    wayland_data_t *wl_data = (wayland_data_t *)data;
+    
+    if (getenv("HYPRLAX_DEBUG")) {
+        fprintf(stderr, "[DEBUG] Layer surface configured: %ux%u\n", width, height);
+    }
+    
+    wl_data->width = width;
+    wl_data->height = height;
+    wl_data->configured = true;
+    
+    /* Acknowledge the configure event */
+    zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
+    
+    /* Resize EGL window if it exists */
+    if (wl_data->egl_window) {
+        wl_egl_window_resize(wl_data->egl_window, width, height, 0, 0);
+    }
+    
+    /* Update OpenGL viewport */
+    glViewport(0, 0, width, height);
+}
+
+static void layer_surface_closed(void *data,
+                                struct zwlr_layer_surface_v1 *layer_surface) {
+    wayland_data_t *wl_data = (wayland_data_t *)data;
+    wl_data->running = false;
+    (void)layer_surface;
+}
+
+static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
+    .configure = layer_surface_configure,
+    .closed = layer_surface_closed,
+};
 
 static const struct wl_registry_listener registry_listener = {
     .global = registry_global,
@@ -121,9 +164,18 @@ static void wayland_disconnect(void) {
         g_wayland_data->egl_window = NULL;
     }
     
+    if (g_wayland_data->layer_surface) {
+        zwlr_layer_surface_v1_destroy(g_wayland_data->layer_surface);
+        g_wayland_data->layer_surface = NULL;
+    }
+    
     if (g_wayland_data->surface) {
         wl_surface_destroy(g_wayland_data->surface);
         g_wayland_data->surface = NULL;
+    }
+    
+    if (g_wayland_data->layer_shell) {
+        zwlr_layer_shell_v1_destroy(g_wayland_data->layer_shell);
     }
     
     if (g_wayland_data->compositor) {
@@ -159,19 +211,51 @@ static int wayland_create_window(const window_config_t *config) {
         return HYPRLAX_ERROR_NO_MEMORY;
     }
     
+    /* Create layer surface if layer shell is available */
+    if (g_wayland_data->layer_shell) {
+        g_wayland_data->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
+            g_wayland_data->layer_shell,
+            g_wayland_data->surface,
+            g_wayland_data->output,  /* NULL means default output */
+            ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND,
+            "hyprlax");
+        
+        if (g_wayland_data->layer_surface) {
+            /* Configure as fullscreen background */
+            zwlr_layer_surface_v1_set_exclusive_zone(g_wayland_data->layer_surface, -1);
+            zwlr_layer_surface_v1_set_anchor(g_wayland_data->layer_surface,
+                ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
+                ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
+                ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
+                ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
+            
+            /* Add listener with g_wayland_data as user data */
+            zwlr_layer_surface_v1_add_listener(g_wayland_data->layer_surface,
+                                              &layer_surface_listener,
+                                              g_wayland_data);
+            
+            /* Commit to get configure event */
+            wl_surface_commit(g_wayland_data->surface);
+            wl_display_roundtrip(g_wayland_data->display);
+        }
+    }
+    
     /* Create EGL window */
     g_wayland_data->width = config->width;
     g_wayland_data->height = config->height;
     g_wayland_data->egl_window = wl_egl_window_create(g_wayland_data->surface,
                                                       config->width, config->height);
     if (!g_wayland_data->egl_window) {
+        if (g_wayland_data->layer_surface) {
+            zwlr_layer_surface_v1_destroy(g_wayland_data->layer_surface);
+        }
         wl_surface_destroy(g_wayland_data->surface);
         g_wayland_data->surface = NULL;
         return HYPRLAX_ERROR_NO_MEMORY;
     }
     
-    /* Note: Layer shell setup will be done by compositor adapter */
-    g_wayland_data->configured = true;
+    /* Commit the surface */
+    wl_surface_commit(g_wayland_data->surface);
     
     return HYPRLAX_SUCCESS;
 }
@@ -183,6 +267,11 @@ static void wayland_destroy_window(void) {
     if (g_wayland_data->egl_window) {
         wl_egl_window_destroy(g_wayland_data->egl_window);
         g_wayland_data->egl_window = NULL;
+    }
+    
+    if (g_wayland_data->layer_surface) {
+        zwlr_layer_surface_v1_destroy(g_wayland_data->layer_surface);
+        g_wayland_data->layer_surface = NULL;
     }
     
     if (g_wayland_data->surface) {
@@ -210,7 +299,14 @@ static int wayland_poll_events(platform_event_t *event) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
     
-    /* In real implementation, dispatch Wayland events */
+    /* Dispatch pending Wayland events */
+    if (g_wayland_data && g_wayland_data->display) {
+        /* First dispatch any pending events */
+        wl_display_dispatch_pending(g_wayland_data->display);
+        /* Then flush any pending requests */
+        wl_display_flush(g_wayland_data->display);
+    }
+    
     event->type = PLATFORM_EVENT_NONE;
     
     return HYPRLAX_SUCCESS;
@@ -230,8 +326,12 @@ static int wayland_wait_events(platform_event_t *event, int timeout_ms) {
 
 /* Flush pending events */
 static void wayland_flush_events(void) {
-    /* TODO: Implement wayland_flush_events - flush display */
     if (g_wayland_data && g_wayland_data->display) {
+        /* Commit the surface to show rendered content */
+        if (g_wayland_data->surface) {
+            wl_surface_commit(g_wayland_data->surface);
+        }
+        /* Flush display to send all pending requests */
         wl_display_flush(g_wayland_data->display);
     }
 }
@@ -250,6 +350,17 @@ static void* wayland_get_native_window(void) {
         return g_wayland_data->egl_window;
     }
     return NULL;
+}
+
+/* Get window dimensions - global helper */
+void wayland_get_window_size(int *width, int *height) {
+    if (g_wayland_data) {
+        if (width) *width = g_wayland_data->width;
+        if (height) *height = g_wayland_data->height;
+    } else {
+        if (width) *width = 1920;
+        if (height) *height = 1080;
+    }
 }
 
 /* Check transparency support */

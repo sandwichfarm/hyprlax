@@ -13,6 +13,7 @@
 #include <libgen.h>
 #include <limits.h>
 #include <errno.h>
+#include <math.h>
 #include "include/hyprlax.h"
 #include "include/hyprlax_internal.h"
 
@@ -22,6 +23,9 @@
 #include <GLES2/gl2.h>
 
 #define MAX_CONFIG_LINE_SIZE 512
+
+/* Forward declarations */
+static int hyprlax_load_layer_textures(hyprlax_context_t *ctx);
 
 /* Create application context */
 hyprlax_context_t* hyprlax_create(void) {
@@ -483,7 +487,14 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
         return ret;
     }
     
-    /* 5. Create layer surface if using Wayland */
+    /* 5. Load textures for all layers now that GL is initialized */
+    ret = hyprlax_load_layer_textures(ctx);
+    if (ret != HYPRLAX_SUCCESS) {
+        fprintf(stderr, "Warning: Some textures failed to load\n");
+        /* Continue anyway - we can still run with missing textures */
+    }
+    
+    /* 6. Create layer surface if using Wayland */
     if (ctx->platform->type == PLATFORM_WAYLAND && ctx->compositor->ops->create_layer_surface) {
         layer_surface_config_t layer_config = {
             .layer = LAYER_BACKGROUND,
@@ -549,26 +560,61 @@ int hyprlax_add_layer(hyprlax_context_t *ctx, const char *image_path,
         return HYPRLAX_ERROR_NO_MEMORY;
     }
     
-    /* Load the texture */
-    int img_width, img_height;
-    GLuint texture = load_texture(image_path, &img_width, &img_height);
-    if (texture == 0) {
-        layer_destroy(new_layer);
-        return HYPRLAX_ERROR_LOAD_FAILED;
+    /* Load texture if OpenGL is initialized */
+    if (ctx->renderer && ctx->renderer->initialized) {
+        int img_width, img_height;
+        GLuint texture = load_texture(image_path, &img_width, &img_height);
+        if (texture != 0) {
+            new_layer->texture_id = texture;
+            new_layer->width = img_width;
+            new_layer->height = img_height;
+            new_layer->texture_width = img_width;
+            new_layer->texture_height = img_height;
+        }
     }
-    
-    /* Store texture info in layer */
-    new_layer->texture_id = texture;
-    new_layer->width = img_width;
-    new_layer->height = img_height;
     new_layer->blur_amount = blur;
     
     ctx->layers = layer_list_add(ctx->layers, new_layer);
     ctx->layer_count = layer_list_count(ctx->layers);
     
     if (ctx->config.debug) {
-        printf("Added layer: %s (%dx%d, shift=%.1f, opacity=%.1f, blur=%.1f)\n",
-               image_path, img_width, img_height, shift_multiplier, opacity, blur);
+        printf("Added layer: %s (shift=%.1f, opacity=%.1f, blur=%.1f)\n",
+               image_path, shift_multiplier, opacity, blur);
+    }
+    
+    return HYPRLAX_SUCCESS;
+}
+
+/* Load textures for all layers (called after GL init) */
+static int hyprlax_load_layer_textures(hyprlax_context_t *ctx) {
+    if (!ctx) return HYPRLAX_ERROR_INVALID_ARGS;
+    
+    int loaded = 0;
+    parallax_layer_t *layer = ctx->layers;
+    while (layer) {
+        if (layer->texture_id == 0 && layer->image_path) {
+            int img_width, img_height;
+            GLuint texture = load_texture(layer->image_path, &img_width, &img_height);
+            if (texture != 0) {
+                layer->texture_id = texture;
+                layer->width = img_width;
+                layer->height = img_height;
+                layer->texture_width = img_width;
+                layer->texture_height = img_height;
+                loaded++;
+                if (ctx->config.debug) {
+                    printf("Loaded texture for layer: %s (%dx%d)\n",
+                           layer->image_path, img_width, img_height);
+                }
+            } else {
+                fprintf(stderr, "Failed to load texture for layer: %s\n", layer->image_path);
+            }
+        }
+        layer = layer->next;
+    }
+    
+    if (ctx->config.debug && loaded > 0) {
+        printf("Loaded %d layer textures\n", loaded);
     }
     
     return HYPRLAX_SUCCESS;
@@ -579,13 +625,64 @@ void hyprlax_handle_workspace_change(hyprlax_context_t *ctx, int new_workspace) 
     if (!ctx) return;
     
     int delta = new_workspace - ctx->current_workspace;
+    
+    if (ctx->config.debug) {
+        printf("[DEBUG] Workspace change: %d -> %d (delta=%d)\n", 
+               ctx->current_workspace, new_workspace, delta);
+    }
+    
     ctx->current_workspace = new_workspace;
     
     /* Calculate target offset */
     float target_x = ctx->workspace_offset_x + (delta * ctx->config.shift_pixels);
     float target_y = ctx->workspace_offset_y;
     
+    if (ctx->config.debug) {
+        printf("[DEBUG] Target offset: %.1f, %.1f (shift=%.1f)\n", 
+               target_x, target_y, ctx->config.shift_pixels);
+    }
+    
     /* Update all layers with animation */
+    parallax_layer_t *layer = ctx->layers;
+    while (layer) {
+        float layer_target_x = target_x * layer->shift_multiplier;
+        float layer_target_y = target_y * layer->shift_multiplier;
+        
+        layer_update_offset(layer, layer_target_x, layer_target_y,
+                          ctx->config.animation_duration,
+                          ctx->config.default_easing);
+        
+        layer = layer->next;
+    }
+    
+    ctx->workspace_offset_x = target_x;
+    ctx->workspace_offset_y = target_y;
+}
+
+/* Handle 2D workspace change (for Wayfire, Niri, etc.) */
+void hyprlax_handle_workspace_change_2d(hyprlax_context_t *ctx, 
+                                       int from_x, int from_y,
+                                       int to_x, int to_y) {
+    if (!ctx) return;
+    
+    int delta_x = to_x - from_x;
+    int delta_y = to_y - from_y;
+    
+    if (ctx->config.debug) {
+        printf("[DEBUG] 2D Workspace change: (%d,%d) -> (%d,%d) (delta=%d,%d)\n", 
+               from_x, from_y, to_x, to_y, delta_x, delta_y);
+    }
+    
+    /* Calculate target offset for both axes */
+    float target_x = ctx->workspace_offset_x + (delta_x * ctx->config.shift_pixels);
+    float target_y = ctx->workspace_offset_y + (delta_y * ctx->config.shift_pixels);
+    
+    if (ctx->config.debug) {
+        printf("[DEBUG] Target offset: (%.1f, %.1f) shift=%.1f\n", 
+               target_x, target_y, ctx->config.shift_pixels);
+    }
+    
+    /* Update all layers with animation for both axes */
     parallax_layer_t *layer = ctx->layers;
     while (layer) {
         float layer_target_x = target_x * layer->shift_multiplier;
@@ -609,6 +706,18 @@ static double get_time(void) {
     return ts.tv_sec + ts.tv_nsec / 1000000000.0;
 }
 
+/* Calculate optimal scale factor for parallax effect */
+static float calculate_scale_factor(float shift_pixels, int max_workspaces, int viewport_width) {
+    /* Scale factor determines how much larger the image is than the viewport
+     * We need: image_width = viewport_width * scale_factor
+     * And: (scale_factor - 1) * viewport_width >= total_shift_needed */
+    float total_shift_needed = (max_workspaces - 1) * shift_pixels;
+    float min_scale_factor = 1.0f + (total_shift_needed / (float)viewport_width);
+    
+    /* Return at least 1.5x for a nice parallax effect */
+    return fmaxf(min_scale_factor, 1.5f);
+}
+
 /* Update layers */
 void hyprlax_update_layers(hyprlax_context_t *ctx, double current_time) {
     if (!ctx) return;
@@ -622,7 +731,17 @@ void hyprlax_update_layers(hyprlax_context_t *ctx, double current_time) {
 
 /* Render frame */
 void hyprlax_render_frame(hyprlax_context_t *ctx) {
-    if (!ctx || !ctx->renderer) return;
+    if (!ctx || !ctx->renderer) {
+        if (ctx && ctx->config.debug) {
+            printf("[DEBUG] render_frame: No renderer available\n");
+        }
+        return;
+    }
+    
+    static int render_count = 0;
+    if (ctx->config.debug && render_count < 5) {
+        printf("[DEBUG] render_frame %d: Starting\n", render_count);
+    }
     
     RENDERER_BEGIN_FRAME(ctx->renderer);
     RENDERER_CLEAR(ctx->renderer, 0.0f, 0.0f, 0.0f, 1.0f);
@@ -633,38 +752,88 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
     }
     
-    /* Calculate viewport dimensions */
-    int viewport_width = 1920;  /* TODO: Get from platform */
+    /* Get actual viewport dimensions */
+    int viewport_width = 1920;
+    int viewport_height = 1080;
+    
+    /* Get dimensions from platform if available */
+    if (ctx->platform && ctx->platform->type == PLATFORM_WAYLAND) {
+        extern void wayland_get_window_size(int *width, int *height);
+        wayland_get_window_size(&viewport_width, &viewport_height);
+    }
+    
+    /* Calculate optimal scale factor if not set */
+    if (ctx->config.scale_factor <= 1.0f) {
+        ctx->config.scale_factor = calculate_scale_factor(
+            ctx->config.shift_pixels, 10, viewport_width);
+        if (ctx->config.debug) {
+            printf("[DEBUG] Calculated scale factor: %.2f\n", ctx->config.scale_factor);
+        }
+    }
+    
     float scale_factor = ctx->config.scale_factor;
+    
+    if (ctx->config.debug && render_count < 5) {
+        printf("[DEBUG] Rendering %d layers\n", ctx->layer_count);
+    }
     
     /* Render each layer */
     parallax_layer_t *layer = ctx->layers;
+    int layer_num = 0;
     while (layer) {
         if (layer->texture_id == 0) {
+            if (ctx->config.debug && render_count < 5) {
+                printf("[DEBUG] Layer %d: No texture (id=0)\n", layer_num);
+            }
             layer = layer->next;
+            layer_num++;
             continue;
         }
         
         /* Calculate texture offset based on layer animation */
         float viewport_width_in_texture = 1.0f / scale_factor;
-        float max_texture_offset = 1.0f - viewport_width_in_texture;
-        float max_pixel_offset = (scale_factor - 1.0f) * viewport_width;
-        float tex_offset = 0.0f;
+        float viewport_height_in_texture = 1.0f / scale_factor;
+        float max_texture_offset_x = 1.0f - viewport_width_in_texture;
+        float max_texture_offset_y = 1.0f - viewport_height_in_texture;
+        float max_pixel_offset_x = (scale_factor - 1.0f) * viewport_width;
+        float max_pixel_offset_y = (scale_factor - 1.0f) * viewport_height;
+        float tex_offset_x = 0.0f;
+        float tex_offset_y = 0.0f;
         
-        if (max_pixel_offset > 0) {
-            tex_offset = (layer->offset_x / max_pixel_offset) * max_texture_offset;
+        if (max_pixel_offset_x > 0) {
+            tex_offset_x = (layer->offset_x / max_pixel_offset_x) * max_texture_offset_x;
+        }
+        if (max_pixel_offset_y > 0) {
+            tex_offset_y = (layer->offset_y / max_pixel_offset_y) * max_texture_offset_y;
         }
         
         /* Clamp to valid range */
-        if (tex_offset > max_texture_offset) tex_offset = max_texture_offset;
-        if (tex_offset < 0.0f) tex_offset = 0.0f;
+        if (tex_offset_x > max_texture_offset_x) tex_offset_x = max_texture_offset_x;
+        if (tex_offset_x < 0.0f) tex_offset_x = 0.0f;
+        if (tex_offset_y > max_texture_offset_y) tex_offset_y = max_texture_offset_y;
+        if (tex_offset_y < 0.0f) tex_offset_y = 0.0f;
         
         /* Render the layer texture */
-        /* TODO: Implement full quad rendering with vertices */
-        /* For now, just bind the texture - rendering will be completed in next phase */
-        glBindTexture(GL_TEXTURE_2D, layer->texture_id);
+        if (ctx->renderer->ops->draw_layer) {
+            if (ctx->config.debug && render_count < 5) {
+                printf("[DEBUG] Layer %d: Drawing texture %u (%dx%d) at offset (%.3f, %.3f)\n", 
+                       layer_num, layer->texture_id, layer->width, layer->height, 
+                       tex_offset_x, tex_offset_y);
+            }
+            texture_t tex = {
+                .id = layer->texture_id,
+                .width = layer->width,
+                .height = layer->height,
+                .format = TEXTURE_FORMAT_RGBA
+            };
+            ctx->renderer->ops->draw_layer(&tex, tex_offset_x, tex_offset_y, 
+                                          layer->opacity, layer->blur_amount);
+        } else if (ctx->config.debug && render_count < 5) {
+            printf("[DEBUG] Layer %d: No draw_layer function!\n", layer_num);
+        }
         
         layer = layer->next;
+        layer_num++;
     }
     
     if (ctx->layer_count > 1) {
@@ -673,21 +842,46 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
     
     RENDERER_END_FRAME(ctx->renderer);
     RENDERER_PRESENT(ctx->renderer);
+    
+    if (ctx->config.debug && render_count < 5) {
+        printf("[DEBUG] render_frame %d: Complete, flushing\n", render_count);
+    }
+    
+    /* Commit Wayland surface after rendering */
+    if (ctx->platform->type == PLATFORM_WAYLAND && ctx->platform->ops->flush_events) {
+        ctx->platform->ops->flush_events();
+    }
+    
+    render_count++;
 }
 
 /* Main run loop */
 int hyprlax_run(hyprlax_context_t *ctx) {
     if (!ctx) return HYPRLAX_ERROR_INVALID_ARGS;
     
+    if (ctx->config.debug) {
+        printf("[DEBUG] Starting main loop (target FPS: %d)\n", ctx->config.target_fps);
+    }
+    
     double last_time = get_time();
     double frame_time = 1.0 / ctx->config.target_fps;
+    int frame_count = 0;
+    double debug_timer = 0.0;
     
     while (ctx->running) {
         double current_time = get_time();
         ctx->delta_time = current_time - last_time;
         
+        if (ctx->config.debug && frame_count < 5) {
+            printf("[DEBUG] Frame %d: delta=%.4f, frame_time=%.4f\n", 
+                   frame_count, ctx->delta_time, frame_time);
+        }
+        
         /* Poll platform events */
         platform_event_t platform_event;
+        if (ctx->config.debug && frame_count < 5) {
+            printf("[DEBUG] Polling platform events\n");
+        }
         if (PLATFORM_POLL_EVENTS(ctx->platform, &platform_event) == HYPRLAX_SUCCESS) {
             switch (platform_event.type) {
                 case PLATFORM_EVENT_CLOSE:
@@ -706,33 +900,75 @@ int hyprlax_run(hyprlax_context_t *ctx) {
         /* Poll compositor events */
         if (ctx->compositor && ctx->compositor->ops->poll_events) {
             compositor_event_t comp_event;
-            while (ctx->compositor->ops->poll_events(&comp_event) == HYPRLAX_SUCCESS) {
+            int poll_result = ctx->compositor->ops->poll_events(&comp_event);
+            if (poll_result == HYPRLAX_SUCCESS) {
                 if (comp_event.type == COMPOSITOR_EVENT_WORKSPACE_CHANGE) {
-                    if (ctx->config.debug) {
-                        printf("Workspace changed to %d\n", 
-                               comp_event.data.workspace.to_workspace);
+                    /* Check if this is a 2D workspace change */
+                    if (comp_event.data.workspace.from_x != 0 || 
+                        comp_event.data.workspace.from_y != 0 ||
+                        comp_event.data.workspace.to_x != 0 || 
+                        comp_event.data.workspace.to_y != 0) {
+                        /* 2D workspace change */
+                        if (ctx->config.debug) {
+                            printf("[DEBUG] Main loop: 2D Workspace changed from (%d,%d) to (%d,%d)\n", 
+                                   comp_event.data.workspace.from_x,
+                                   comp_event.data.workspace.from_y,
+                                   comp_event.data.workspace.to_x,
+                                   comp_event.data.workspace.to_y);
+                        }
+                        hyprlax_handle_workspace_change_2d(ctx,
+                                                         comp_event.data.workspace.from_x,
+                                                         comp_event.data.workspace.from_y,
+                                                         comp_event.data.workspace.to_x,
+                                                         comp_event.data.workspace.to_y);
+                    } else {
+                        /* Linear workspace change (Hyprland, Sway, etc.) */
+                        if (ctx->config.debug) {
+                            printf("[DEBUG] Main loop: Workspace changed from %d to %d\n", 
+                                   comp_event.data.workspace.from_workspace,
+                                   comp_event.data.workspace.to_workspace);
+                        }
+                        hyprlax_handle_workspace_change(ctx, 
+                                                      comp_event.data.workspace.to_workspace);
                     }
-                    hyprlax_handle_workspace_change(ctx, 
-                                                  comp_event.data.workspace.to_workspace);
                 }
             }
         }
         
         /* Update animations */
+        if (ctx->config.debug && frame_count < 5) {
+            printf("[DEBUG] Updating layer animations\n");
+        }
         hyprlax_update_layers(ctx, current_time);
         
         /* Render frame if enough time has passed */
         if (ctx->delta_time >= frame_time) {
+            if (ctx->config.debug && frame_count < 5) {
+                printf("[DEBUG] Rendering frame %d\n", frame_count);
+            }
             hyprlax_render_frame(ctx);
             ctx->fps = 1.0 / ctx->delta_time;
             last_time = current_time;
+            frame_count++;
+            
+            /* Print FPS every second in debug mode */
+            if (ctx->config.debug) {
+                debug_timer += ctx->delta_time;
+                if (debug_timer >= 1.0) {
+                    printf("[DEBUG] FPS: %.1f, Layers: %d\n", ctx->fps, ctx->layer_count);
+                    debug_timer = 0.0;
+                }
+            }
         } else {
             /* Sleep to maintain target FPS using nanosleep for better precision */
             double sleep_time = frame_time - ctx->delta_time;
+            if (ctx->config.debug && frame_count < 5) {
+                printf("[DEBUG] Sleeping for %.4f seconds\n", sleep_time);
+            }
             if (sleep_time > 0) {
                 struct timespec ts;
-                ts.tv_sec = (time_t)sleep_time;
-                ts.tv_nsec = (long)((sleep_time - ts.tv_sec) * 1e9);
+                ts.tv_sec = (time_t)(sleep_time);  /* Integer seconds (usually 0) */
+                ts.tv_nsec = (long)((sleep_time - (time_t)sleep_time) * 1e9);  /* Fractional part in nanoseconds */
                 nanosleep(&ts, NULL);
             }
         }

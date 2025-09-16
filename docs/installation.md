@@ -50,38 +50,126 @@ sudo mv hyprlax-aarch64 /usr/local/bin/hyprlax
 ## Building from Source
 
 ### Dependencies
-_Only Arch Linux has been thorougly tested, if you find issues with dependency installations on your system, please open an issue_
+_Only Arch Linux has been thoroughly tested. If you find issues with dependency installations on your system, please open an issue_
 
 #### Core Dependencies
 
+hyprlax now supports both Wayland and X11. Install the dependencies for your platform:
+
 ##### Arch Linux
 ```bash
+# Wayland + X11 support (recommended)
+sudo pacman -S base-devel wayland wayland-protocols mesa libx11 libxext
+
+# Wayland only
 sudo pacman -S base-devel wayland wayland-protocols mesa
+
+# X11 only
+sudo pacman -S base-devel libx11 libxext mesa
 ```
 
 ##### Ubuntu/Debian
 ```bash
+# Wayland + X11 support (recommended)
 sudo apt update
 sudo apt install build-essential libwayland-dev wayland-protocols \
+                 libegl1-mesa-dev libgles2-mesa-dev pkg-config \
+                 libx11-dev libxext-dev
+
+# Wayland only
+sudo apt install build-essential libwayland-dev wayland-protocols \
+                 libegl1-mesa-dev libgles2-mesa-dev pkg-config
+
+# X11 only
+sudo apt install build-essential libx11-dev libxext-dev \
                  libegl1-mesa-dev libgles2-mesa-dev pkg-config
 ```
 
 ##### Fedora
 ```bash
+# Wayland + X11 support (recommended)
 sudo dnf install gcc make wayland-devel wayland-protocols-devel \
+                 mesa-libEGL-devel mesa-libGLES-devel pkg-config \
+                 libX11-devel libXext-devel
+
+# Wayland only
+sudo dnf install gcc make wayland-devel wayland-protocols-devel \
+                 mesa-libEGL-devel mesa-libGLES-devel pkg-config
+
+# X11 only
+sudo dnf install gcc make libX11-devel libXext-devel \
                  mesa-libEGL-devel mesa-libGLES-devel pkg-config
 ```
 
 ##### openSUSE
 ```bash
+# Wayland + X11 support (recommended)
 sudo zypper install gcc make wayland-devel wayland-protocols-devel \
+                     Mesa-libEGL-devel Mesa-libGLES-devel pkg-config \
+                     libX11-devel libXext-devel
+
+# Wayland only
+sudo zypper install gcc make wayland-devel wayland-protocols-devel \
+                     Mesa-libEGL-devel Mesa-libGLES-devel pkg-config
+
+# X11 only
+sudo zypper install gcc make libX11-devel libXext-devel \
                      Mesa-libEGL-devel Mesa-libGLES-devel pkg-config
 ```
 
 ##### Void Linux
 ```bash
+# Wayland + X11 support (recommended)
+sudo xbps-install base-devel wayland wayland-protocols \
+                  MesaLib-devel pkg-config \
+                  libX11-devel libXext-devel
+
+# Wayland only
 sudo xbps-install base-devel wayland wayland-protocols \
                   MesaLib-devel pkg-config
+
+# X11 only
+sudo xbps-install base-devel libX11-devel libXext-devel \
+                  MesaLib-devel pkg-config
+```
+
+##### NixOS
+```nix
+# In configuration.nix or shell.nix
+environment.systemPackages = with pkgs; [
+  # Build tools
+  gcc gnumake pkg-config
+  
+  # Wayland support
+  wayland wayland-protocols
+  
+  # X11 support
+  xorg.libX11 xorg.libXext
+  
+  # OpenGL
+  mesa libGL libGLU
+];
+```
+
+#### Compositor-Specific Dependencies
+
+Some compositors may require additional packages:
+
+##### For X11 Window Managers
+If using X11 window managers (i3, bspwm, awesome, etc.), you may want a compositor for transparency and blur effects:
+
+```bash
+# Arch Linux
+sudo pacman -S picom
+
+# Ubuntu/Debian
+sudo apt install picom
+
+# Fedora
+sudo dnf install picom
+
+# Others
+# Build picom from source: https://github.com/yshui/picom
 ```
 
 #### Optional Dependencies for Development
@@ -166,8 +254,19 @@ hyprlax --version
 
 You should see:
 ```
-hyprlax 1.2.0
-Smooth parallax wallpaper animations for Hyprland
+hyprlax 1.3.0
+Dynamic parallax wallpaper engine with multi-compositor support
+Detected compositor: Hyprland  (or your current compositor)
+Platform: Wayland  (or X11)
+```
+
+To check supported features:
+```bash
+# Check compositor detection
+hyprlax --detect-compositor
+
+# List capabilities
+hyprlax --capabilities
 ```
 
 ## Upgrading

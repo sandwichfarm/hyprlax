@@ -14,12 +14,12 @@
 /* Built-in shader sources */
 const char *shader_vertex_basic =
     "precision highp float;\n"
-    "attribute vec2 position;\n"
-    "attribute vec2 texcoord;\n"
+    "attribute vec2 a_position;\n"
+    "attribute vec2 a_texcoord;\n"
     "varying vec2 v_texcoord;\n"
     "void main() {\n"
-    "    gl_Position = vec4(position, 0.0, 1.0);\n"
-    "    v_texcoord = texcoord;\n"
+    "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
+    "    v_texcoord = a_texcoord;\n"
     "}\n";
 
 const char *shader_fragment_basic =
@@ -183,6 +183,23 @@ int shader_compile(shader_program_t *program,
     program->compiled = true;
     
     return HYPRLAX_SUCCESS;
+}
+
+/* Compile blur shader with dynamic generation */
+int shader_compile_blur(shader_program_t *program) {
+    if (!program) return HYPRLAX_ERROR_INVALID_ARGS;
+    
+    /* Build the blur fragment shader dynamically */
+    char *blur_fragment_src = shader_build_blur_fragment(5.0f, BLUR_KERNEL_SIZE);
+    if (!blur_fragment_src) {
+        return HYPRLAX_ERROR_NO_MEMORY;
+    }
+    
+    /* Compile with the basic vertex shader and blur fragment shader */
+    int result = shader_compile(program, shader_vertex_basic, blur_fragment_src);
+    
+    free(blur_fragment_src);
+    return result;
 }
 
 /* Use shader program */

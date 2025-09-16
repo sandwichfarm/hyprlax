@@ -20,10 +20,28 @@ compositor_type_t compositor_detect(void) {
         return COMPOSITOR_HYPRLAND;
     }
     
+    /* Wayfire (2D workspace grid) */
+    if (compositor_wayfire_ops.detect && compositor_wayfire_ops.detect()) {
+        DEBUG_LOG("Detected Wayfire compositor");
+        return COMPOSITOR_WAYFIRE;
+    }
+    
+    /* Niri (scrollable workspaces) */
+    if (compositor_niri_ops.detect && compositor_niri_ops.detect()) {
+        DEBUG_LOG("Detected Niri compositor");
+        return COMPOSITOR_NIRI;
+    }
+    
     /* Sway */
     if (compositor_sway_ops.detect && compositor_sway_ops.detect()) {
         DEBUG_LOG("Detected Sway compositor");
         return COMPOSITOR_SWAY;
+    }
+    
+    /* River */
+    if (compositor_river_ops.detect && compositor_river_ops.detect()) {
+        DEBUG_LOG("Detected River compositor");
+        return COMPOSITOR_RIVER;
     }
     
     /* X11/EWMH */
@@ -65,9 +83,24 @@ int compositor_create(compositor_adapter_t **out_adapter, compositor_type_t type
             adapter->type = COMPOSITOR_HYPRLAND;
             break;
             
+        case COMPOSITOR_WAYFIRE:
+            adapter->ops = &compositor_wayfire_ops;
+            adapter->type = COMPOSITOR_WAYFIRE;
+            break;
+            
+        case COMPOSITOR_NIRI:
+            adapter->ops = &compositor_niri_ops;
+            adapter->type = COMPOSITOR_NIRI;
+            break;
+            
         case COMPOSITOR_SWAY:
             adapter->ops = &compositor_sway_ops;
             adapter->type = COMPOSITOR_SWAY;
+            break;
+            
+        case COMPOSITOR_RIVER:
+            adapter->ops = &compositor_river_ops;
+            adapter->type = COMPOSITOR_RIVER;
             break;
             
         case COMPOSITOR_GENERIC_WAYLAND:
