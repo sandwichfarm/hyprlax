@@ -15,6 +15,7 @@
 #include <GLES2/gl2.h>
 #include "../include/platform.h"
 #include "../include/hyprlax_internal.h"
+#include "../include/log.h"
 #include "../../protocols/wlr-layer-shell-client-protocol.h"
 #include "../include/hyprlax.h"
 #include "../core/monitor.h"
@@ -131,7 +132,7 @@ static void registry_global(void *data, struct wl_registry *registry,
                 wl_data->output = output;
             }
             
-            fprintf(stderr, "Detected output %u (total: %d)\n", id, wl_data->output_count);
+            LOG_DEBUG("Detected output %u (total: %d)", id, wl_data->output_count);
         }
     } else if (strcmp(interface, "zwlr_layer_shell_v1") == 0) {
         wl_data->layer_shell = wl_registry_bind(registry, id,
@@ -154,15 +155,15 @@ static void layer_surface_configure(void *data,
                                    uint32_t width, uint32_t height) {
     wayland_data_t *wl_data = (wayland_data_t *)data;
     
-    fprintf(stderr, "[DEBUG] Layer surface configure called: %ux%u\n", width, height);
+    LOG_DEBUG("Layer surface configure called: %ux%u", width, height);
     
     if (width > 0 && height > 0) {
         wl_data->width = width;
         wl_data->height = height;
         wl_data->configured = true;
-        fprintf(stderr, "[DEBUG] Layer surface dimensions set: %ux%u\n", width, height);
+        LOG_DEBUG("Layer surface dimensions set: %ux%u", width, height);
     } else {
-        fprintf(stderr, "[WARNING] Layer surface configure with invalid dimensions: %ux%u\n", width, height);
+        LOG_WARN("Layer surface configure with invalid dimensions: %ux%u", width, height);
     }
     
     /* Acknowledge the configure event */
@@ -176,7 +177,7 @@ static void layer_surface_configure(void *data,
         wl_data->has_pending_resize = true;
         wl_data->pending_width = width;
         wl_data->pending_height = height;
-        fprintf(stderr, "[DEBUG] Pending resize event stored: %dx%d\n", width, height);
+        LOG_DEBUG("Pending resize event stored: %dx%d", width, height);
     }
 }
 
@@ -231,7 +232,7 @@ static int wayland_connect(const char *display_name) {
         }
         
         if (first_attempt) {
-            fprintf(stderr, "Waiting for Wayland display to be ready...\n");
+            LOG_INFO("Waiting for Wayland display to be ready...");
             first_attempt = false;
         }
         
@@ -243,7 +244,7 @@ static int wayland_connect(const char *display_name) {
     }
     
     if (!g_wayland_data->display) {
-        fprintf(stderr, "Failed to connect to Wayland display after %d attempts\n", max_retries);
+        LOG_ERROR("Failed to connect to Wayland display after %d attempts", max_retries);
         free(g_wayland_data);
         g_wayland_data = NULL;
         return HYPRLAX_ERROR_NO_DISPLAY;
@@ -345,25 +346,41 @@ static int wayland_create_window(const window_config_t *config) {
                                               &layer_surface_listener,
                                               g_wayland_data);
             
-            /* Commit to get configure event */
+            /* First commit and roundtrip to let compositor know about the layer surface */
             wl_surface_commit(g_wayland_data->surface);
             wl_display_roundtrip(g_wayland_data->display);
+            
+            /* Now create EGL window with initial 1x1 dimensions (will be resized on configure) */
+            g_wayland_data->egl_window = wl_egl_window_create(g_wayland_data->surface, 1, 1);
+            if (!g_wayland_data->egl_window) {
+                if (g_wayland_data->layer_surface) {
+                    zwlr_layer_surface_v1_destroy(g_wayland_data->layer_surface);
+                }
+                wl_surface_destroy(g_wayland_data->surface);
+                g_wayland_data->surface = NULL;
+                return HYPRLAX_ERROR_NO_MEMORY;
+            }
+            
+            /* Commit again to trigger configuration with the EGL window */
+            wl_surface_commit(g_wayland_data->surface);
+            wl_display_flush(g_wayland_data->display);
+            
+            /* Wait for initial configuration - the configure callback will resize the EGL window */
+            while (!g_wayland_data->configured) {
+                wl_display_dispatch(g_wayland_data->display);
+            }
+            
+            LOG_DEBUG("Configure event received with dimensions: %dx%d", 
+                    g_wayland_data->width, g_wayland_data->height);
+            
+            return HYPRLAX_SUCCESS;
         }
     }
     
-    /* Create EGL window - use configured dimensions if available, otherwise use config */
-    if (!g_wayland_data->configured) {
-        g_wayland_data->width = config->width;
-        g_wayland_data->height = config->height;
-        fprintf(stderr, "[DEBUG] Using config dimensions: %dx%d\n", 
-                g_wayland_data->width, g_wayland_data->height);
-    } else {
-        fprintf(stderr, "[DEBUG] Using configured dimensions: %dx%d\n", 
-                g_wayland_data->width, g_wayland_data->height);
-    }
+    /* Non-layer-shell path - create EGL window with config dimensions */
     g_wayland_data->egl_window = wl_egl_window_create(g_wayland_data->surface,
-                                                      g_wayland_data->width, 
-                                                      g_wayland_data->height);
+                                                      config->width, 
+                                                      config->height);
     if (!g_wayland_data->egl_window) {
         if (g_wayland_data->layer_surface) {
             zwlr_layer_surface_v1_destroy(g_wayland_data->layer_surface);
@@ -415,7 +432,7 @@ int wayland_create_monitor_surface(monitor_instance_t *monitor) {
     /* Create surface for this monitor */
     monitor->wl_surface = wl_compositor_create_surface(g_wayland_data->compositor);
     if (!monitor->wl_surface) {
-        fprintf(stderr, "Failed to create surface for monitor %s\n", monitor->name);
+        LOG_ERROR("Failed to create surface for monitor %s", monitor->name);
         return HYPRLAX_ERROR_NO_MEMORY;
     }
     
@@ -440,14 +457,17 @@ int wayland_create_monitor_surface(monitor_instance_t *monitor) {
             /* Set size to 0,0 to let compositor decide */
             zwlr_layer_surface_v1_set_size(monitor->layer_surface, 0, 0);
             
-            /* TODO: Add per-monitor layer surface listener */
+            /* Add listener for this monitor's layer surface */
+            zwlr_layer_surface_v1_add_listener(monitor->layer_surface,
+                                              &layer_surface_listener,
+                                              g_wayland_data);
             
             /* Commit to get configure event */
             wl_surface_commit(monitor->wl_surface);
             
-            fprintf(stderr, "Created layer surface for monitor %s\n", monitor->name);
+            LOG_DEBUG("Created layer surface for monitor %s", monitor->name);
         } else {
-            fprintf(stderr, "Failed to create layer surface for monitor %s\n", monitor->name);
+            LOG_ERROR("Failed to create layer surface for monitor %s", monitor->name);
             wl_surface_destroy(monitor->wl_surface);
             monitor->wl_surface = NULL;
             return HYPRLAX_ERROR_NO_MEMORY;
@@ -462,7 +482,7 @@ int wayland_create_monitor_surface(monitor_instance_t *monitor) {
             monitor->height * monitor->scale);
         
         if (!monitor->wl_egl_window) {
-            fprintf(stderr, "Failed to create EGL window for monitor %s\n", monitor->name);
+            LOG_ERROR("Failed to create EGL window for monitor %s", monitor->name);
             /* Clean up */
             if (monitor->layer_surface) {
                 zwlr_layer_surface_v1_destroy(monitor->layer_surface);
@@ -471,6 +491,19 @@ int wayland_create_monitor_surface(monitor_instance_t *monitor) {
             wl_surface_destroy(monitor->wl_surface);
             monitor->wl_surface = NULL;
             return HYPRLAX_ERROR_NO_MEMORY;
+        }
+        
+        /* Create EGL surface for this monitor if we have a renderer context */
+        if (g_wayland_data->ctx && g_wayland_data->ctx->renderer) {
+            /* Get the EGL surface creation function from renderer */
+            extern EGLSurface gles2_create_monitor_surface(void *native_window);
+            monitor->egl_surface = gles2_create_monitor_surface(monitor->wl_egl_window);
+            
+            if (monitor->egl_surface) {
+                LOG_DEBUG("Created EGL surface for monitor %s", monitor->name);
+            } else {
+                LOG_WARN("Failed to create EGL surface for monitor %s", monitor->name);
+            }
         }
     }
     
@@ -503,7 +536,7 @@ static int wayland_poll_events(platform_event_t *event) {
         event->data.resize.width = g_wayland_data->pending_width;
         event->data.resize.height = g_wayland_data->pending_height;
         g_wayland_data->has_pending_resize = false;
-        fprintf(stderr, "[DEBUG] Returning resize event: %dx%d\n", 
+        LOG_DEBUG("Returning resize event: %dx%d", 
                 g_wayland_data->pending_width, g_wayland_data->pending_height);
         return HYPRLAX_SUCCESS;
     }
@@ -586,7 +619,7 @@ static void output_handle_geometry(void *data, struct wl_output *output,
         info->global_x = x;
         info->global_y = y;
         info->transform = transform;
-        fprintf(stderr, "Output geometry: %s at (%d,%d) transform=%d\n",
+        LOG_TRACE("Output geometry: %s at (%d,%d) transform=%d",
                 info->name, x, y, transform);
     }
 }
@@ -599,7 +632,7 @@ static void output_handle_mode(void *data, struct wl_output *output,
         info->width = width;
         info->height = height;
         info->refresh_rate = refresh / 1000;  /* mHz to Hz */
-        fprintf(stderr, "Output mode: %s %dx%d@%dHz\n",
+        LOG_TRACE("Output mode: %s %dx%d@%dHz",
                 info->name, width, height, info->refresh_rate);
     }
 }
@@ -634,9 +667,9 @@ static void output_handle_done(void *data, struct wl_output *output) {
                     /* Create surface for this monitor */
                     int ret = wayland_create_monitor_surface(mon);
                     if (ret == HYPRLAX_SUCCESS) {
-                        fprintf(stderr, "Successfully created surface for monitor %s\n", mon->name);
+                        LOG_DEBUG("Successfully created surface for monitor %s", mon->name);
                     } else {
-                        fprintf(stderr, "Failed to create surface for monitor %s\n", mon->name);
+                        LOG_ERROR("Failed to create surface for monitor %s", mon->name);
                     }
                 }
             }
@@ -648,7 +681,7 @@ static void output_handle_scale(void *data, struct wl_output *output, int32_t sc
     output_info_t *info = (output_info_t *)data;
     if (info) {
         info->scale = scale;
-        fprintf(stderr, "Output scale: %s scale=%d\n", info->name, scale);
+        LOG_TRACE("Output scale: %s scale=%d", info->name, scale);
     }
 }
 
@@ -657,7 +690,7 @@ static void output_handle_name(void *data, struct wl_output *output, const char 
     if (info && name) {
         strncpy(info->name, name, sizeof(info->name) - 1);
         info->name[sizeof(info->name) - 1] = '\0';
-        fprintf(stderr, "Output name: %s\n", info->name);
+        LOG_DEBUG("Output name: %s", info->name);
     }
 }
 
@@ -677,6 +710,13 @@ static const char* wayland_get_name(void) {
 static const char* wayland_get_backend_name(void) {
     /* Could query compositor name */
     return "wayland";
+}
+
+/* Commit a monitor's Wayland surface */
+void wayland_commit_monitor_surface(monitor_instance_t *monitor) {
+    if (monitor && monitor->wl_surface) {
+        wl_surface_commit(monitor->wl_surface);
+    }
 }
 
 /* Wayland platform operations */

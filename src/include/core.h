@@ -83,6 +83,7 @@ typedef struct {
     /* Debug settings */
     bool debug;
     bool dry_run;
+    char *debug_log_path;
     
     /* Paths */
     char *config_path;

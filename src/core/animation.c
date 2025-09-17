@@ -57,6 +57,11 @@ float animation_evaluate(animation_state_t *anim, double current_time) {
     // Calculate normalized time [0, 1]
     float t = (float)(elapsed / anim->duration);
     
+    // Smooth completion: treat very close to 1.0 as complete
+    if (t > 0.995f) {
+        t = 1.0f;
+    }
+    
     // Apply easing
     float eased_t = apply_easing(t, anim->easing);
     

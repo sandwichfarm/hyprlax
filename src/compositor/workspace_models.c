@@ -6,6 +6,7 @@
 #include "../include/compositor.h"
 #include "../include/hyprlax.h"
 #include "../core/monitor.h"
+#include "../include/log.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -230,7 +231,7 @@ void workspace_handle_steal(hyprlax_context_t *ctx,
                            const workspace_context_t *workspace) {
     if (!ctx || !from_monitor || !to_monitor || !workspace) return;
     
-    fprintf(stderr, "Workspace steal: %s -> %s\n",
+    LOG_DEBUG("Workspace steal: %s -> %s",
             from_monitor->name, to_monitor->name);
     
     /* Create event for atomic update */
@@ -262,7 +263,7 @@ void workspace_handle_move(hyprlax_context_t *ctx,
                           const workspace_context_t *workspace) {
     if (!ctx || !from_monitor || !to_monitor || !workspace) return;
     
-    fprintf(stderr, "Workspace move: %s -> %s\n",
+    LOG_DEBUG("Workspace move: %s -> %s",
             from_monitor->name, to_monitor->name);
     
     /* Similar to steal but preserves workspace identity */

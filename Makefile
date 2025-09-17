@@ -16,8 +16,65 @@ CFLAGS = -Wall -Wextra -O3 -flto -Isrc
 endif
 endif
 
-# Package dependencies
-PKG_DEPS = wayland-client wayland-protocols wayland-egl egl glesv2 x11 xext
+# Add build defines to CFLAGS
+CFLAGS += $(BUILD_DEFINES)
+
+# Feature flags (all enabled by default)
+ENABLE_WAYLAND ?= 1
+ENABLE_X11 ?= 1
+ENABLE_HYPRLAND ?= 1
+ENABLE_SWAY ?= 1
+ENABLE_WAYFIRE ?= 1
+ENABLE_NIRI ?= 1
+ENABLE_RIVER ?= 1
+ENABLE_GENERIC_WAYLAND ?= 1
+ENABLE_X11_EWMH ?= 1
+ENABLE_GLES2 ?= 1
+
+# Build defines based on feature flags
+BUILD_DEFINES =
+ifeq ($(ENABLE_WAYLAND),1)
+BUILD_DEFINES += -DENABLE_WAYLAND
+endif
+ifeq ($(ENABLE_X11),1)
+BUILD_DEFINES += -DENABLE_X11
+endif
+ifeq ($(ENABLE_HYPRLAND),1)
+BUILD_DEFINES += -DENABLE_HYPRLAND
+endif
+ifeq ($(ENABLE_SWAY),1)
+BUILD_DEFINES += -DENABLE_SWAY
+endif
+ifeq ($(ENABLE_WAYFIRE),1)
+BUILD_DEFINES += -DENABLE_WAYFIRE
+endif
+ifeq ($(ENABLE_NIRI),1)
+BUILD_DEFINES += -DENABLE_NIRI
+endif
+ifeq ($(ENABLE_RIVER),1)
+BUILD_DEFINES += -DENABLE_RIVER
+endif
+ifeq ($(ENABLE_GENERIC_WAYLAND),1)
+BUILD_DEFINES += -DENABLE_GENERIC_WAYLAND
+endif
+ifeq ($(ENABLE_X11_EWMH),1)
+BUILD_DEFINES += -DENABLE_X11_EWMH
+endif
+ifeq ($(ENABLE_GLES2),1)
+BUILD_DEFINES += -DENABLE_GLES2
+endif
+
+# Package dependencies (conditional)
+PKG_DEPS =
+ifeq ($(ENABLE_WAYLAND),1)
+PKG_DEPS += wayland-client wayland-protocols wayland-egl
+endif
+ifeq ($(ENABLE_GLES2),1)
+PKG_DEPS += egl glesv2
+endif
+ifeq ($(ENABLE_X11),1)
+PKG_DEPS += x11 xext
+endif
 
 # Get package flags
 PKG_CFLAGS = $(shell pkg-config --cflags $(PKG_DEPS))
@@ -27,29 +84,58 @@ PKG_LIBS = $(shell pkg-config --libs $(PKG_DEPS))
 WAYLAND_PROTOCOLS_DIR = $(shell pkg-config --variable=pkgdatadir wayland-protocols)
 WAYLAND_SCANNER = $(shell pkg-config --variable=wayland_scanner wayland-scanner)
 
-# Protocol files
+# Protocol files (conditional on Wayland)
+ifeq ($(ENABLE_WAYLAND),1)
 XDG_SHELL_PROTOCOL = $(WAYLAND_PROTOCOLS_DIR)/stable/xdg-shell/xdg-shell.xml
 LAYER_SHELL_PROTOCOL = protocols/wlr-layer-shell-unstable-v1.xml
-
-# Generated protocol files  
 PROTOCOL_SRCS = protocols/xdg-shell-protocol.c protocols/wlr-layer-shell-protocol.c
 PROTOCOL_HDRS = protocols/xdg-shell-client-protocol.h protocols/wlr-layer-shell-client-protocol.h
+else
+PROTOCOL_SRCS =
+PROTOCOL_HDRS =
+endif
 
-# Core module sources
-CORE_SRCS = src/core/easing.c src/core/animation.c src/core/layer.c src/core/config.c src/core/monitor.c
+# Core module sources (always included)
+CORE_SRCS = src/core/easing.c src/core/animation.c src/core/layer.c src/core/config.c src/core/monitor.c src/core/log.c
 
-# Renderer module sources
-RENDERER_SRCS = src/renderer/renderer.c src/renderer/shader.c src/renderer/gles2.c
+# Renderer module sources (conditional)
+RENDERER_SRCS = src/renderer/renderer.c src/renderer/shader.c
+ifeq ($(ENABLE_GLES2),1)
+RENDERER_SRCS += src/renderer/gles2.c
+endif
 
-# Platform module sources
-PLATFORM_SRCS = src/platform/platform.c src/platform/wayland.c src/platform/x11.c
+# Platform module sources (conditional)
+PLATFORM_SRCS = src/platform/platform.c
+ifeq ($(ENABLE_WAYLAND),1)
+PLATFORM_SRCS += src/platform/wayland.c
+endif
+ifeq ($(ENABLE_X11),1)
+PLATFORM_SRCS += src/platform/x11.c
+endif
 
-# Compositor module sources
-COMPOSITOR_SRCS = src/compositor/compositor.c src/compositor/hyprland.c \
-                  src/compositor/wayfire.c src/compositor/niri.c \
-                  src/compositor/sway.c src/compositor/river.c \
-                  src/compositor/generic_wayland.c src/compositor/x11_ewmh.c \
-                  src/compositor/workspace_models.c
+# Compositor module sources (conditional)
+COMPOSITOR_SRCS = src/compositor/compositor.c src/compositor/workspace_models.c
+ifeq ($(ENABLE_HYPRLAND),1)
+COMPOSITOR_SRCS += src/compositor/hyprland.c
+endif
+ifeq ($(ENABLE_SWAY),1)
+COMPOSITOR_SRCS += src/compositor/sway.c
+endif
+ifeq ($(ENABLE_WAYFIRE),1)
+COMPOSITOR_SRCS += src/compositor/wayfire.c
+endif
+ifeq ($(ENABLE_NIRI),1)
+COMPOSITOR_SRCS += src/compositor/niri.c
+endif
+ifeq ($(ENABLE_RIVER),1)
+COMPOSITOR_SRCS += src/compositor/river.c
+endif
+ifeq ($(ENABLE_GENERIC_WAYLAND),1)
+COMPOSITOR_SRCS += src/compositor/generic_wayland.c
+endif
+ifeq ($(ENABLE_X11_EWMH),1)
+COMPOSITOR_SRCS += src/compositor/x11_ewmh.c
+endif
 
 # Main module sources
 MAIN_SRCS = src/main.c src/hyprlax_main.c src/hyprlax_ctl.c
@@ -66,6 +152,23 @@ OBJS = $(SRCS:.c=.o)
 TARGET = hyprlax
 
 all: $(TARGET)
+
+# Convenience targets for common configurations
+hyprland-minimal:
+	$(MAKE) clean
+	$(MAKE) ENABLE_X11=0 ENABLE_SWAY=0 ENABLE_WAYFIRE=0 ENABLE_NIRI=0 ENABLE_RIVER=0 ENABLE_X11_EWMH=0 ENABLE_GENERIC_WAYLAND=0
+
+x11-only:
+	$(MAKE) clean
+	$(MAKE) ENABLE_WAYLAND=0 ENABLE_HYPRLAND=0 ENABLE_SWAY=0 ENABLE_WAYFIRE=0 ENABLE_NIRI=0 ENABLE_RIVER=0 ENABLE_GENERIC_WAYLAND=0
+
+wayland-only:
+	$(MAKE) clean
+	$(MAKE) ENABLE_X11=0 ENABLE_X11_EWMH=0
+
+sway-minimal:
+	$(MAKE) clean
+	$(MAKE) ENABLE_X11=0 ENABLE_HYPRLAND=0 ENABLE_WAYFIRE=0 ENABLE_NIRI=0 ENABLE_RIVER=0 ENABLE_X11_EWMH=0 ENABLE_GENERIC_WAYLAND=0
 
 # Generate protocol files
 protocols/xdg-shell-protocol.c: $(XDG_SHELL_PROTOCOL)

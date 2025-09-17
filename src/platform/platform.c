@@ -43,18 +43,30 @@ static bool is_x11_session(void) {
 
 /* Auto-detect best platform */
 platform_type_t platform_detect(void) {
+#ifdef ENABLE_WAYLAND
     /* Prefer Wayland if available */
     if (is_wayland_session()) {
         return PLATFORM_WAYLAND;
     }
+#endif
     
+#ifdef ENABLE_X11
     if (is_x11_session()) {
         return PLATFORM_X11;
     }
+#endif
     
-    /* Default to Wayland if nothing detected */
+    /* Default to first available platform */
+#ifdef ENABLE_WAYLAND
     fprintf(stderr, "Warning: Could not detect platform, defaulting to Wayland\n");
     return PLATFORM_WAYLAND;
+#elif defined(ENABLE_X11)
+    fprintf(stderr, "Warning: Could not detect platform, defaulting to X11\n");
+    return PLATFORM_X11;
+#else
+    fprintf(stderr, "Error: No platform backends enabled at compile time\n");
+    return PLATFORM_AUTO; /* Will fail in platform_create */
+#endif
 }
 
 /* Create platform instance */
@@ -75,17 +87,22 @@ int platform_create(platform_t **out_platform, platform_type_t type) {
     
     /* Select backend based on type */
     switch (type) {
+#ifdef ENABLE_WAYLAND
         case PLATFORM_WAYLAND:
             platform->ops = &platform_wayland_ops;
             platform->type = PLATFORM_WAYLAND;
             break;
+#endif
             
+#ifdef ENABLE_X11
         case PLATFORM_X11:
             platform->ops = &platform_x11_ops;
             platform->type = PLATFORM_X11;
             break;
+#endif
             
         default:
+            fprintf(stderr, "Error: Platform type %d not available in this build\n", type);
             free(platform);
             return HYPRLAX_ERROR_INVALID_ARGS;
     }

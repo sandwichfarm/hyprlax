@@ -62,12 +62,29 @@ The next easiest (and more secure) method is to checkout the source and run the 
 ```bash
 git clone https://github.com/sandwichfarm/hyprlax.git
 cd hyprlax
-./install.sh        # Install for current user (~/.local/bin)
+./install.sh        # Interactive installation (prompts for location)
 ```
+
+### Installation Options
+
+The installer will prompt you to choose between:
+
+1. **System-wide** (`/usr/local/bin`) - **RECOMMENDED**
+   - Works with compositor autostart (`exec-once`)
+   - Available to all users
+   - Requires sudo
+
+2. **User-specific** (`~/.local/bin`)
+   - Only for current user
+   - May require full path in `exec-once` commands
+   - No sudo required
+
+You can also specify the location directly:
+- **System-wide**: `./install.sh --system`
+- **User-specific**: `./install.sh --user`
 
 ### Other Methods
 
-- **System-wide**: `./install.sh -s` (requires sudo)
 - **From release**: Download from [releases page](https://github.com/sandwichfarm/hyprlax/releases)
 - **Manual build**: See [installation guide](docs/installation.md)
 
@@ -117,10 +134,16 @@ hyprlax --platform x11 ~/Pictures/wallpaper.jpg
 
 ## Compositor Configuration
 
+> **Important:** For `exec-once` commands to work, hyprlax must be installed system-wide (`/usr/local/bin`).
+> If installed to `~/.local/bin`, use the full path: `~/.local/bin/hyprlax`
+
 ### Hyprland
 Add to `~/.config/hypr/hyprland.conf`:
 ```bash
 exec-once = pkill hyprlax; hyprlax ~/Pictures/wallpaper.jpg
+
+# If installed to ~/.local/bin:
+# exec-once = pkill hyprlax; ~/.local/bin/hyprlax ~/Pictures/wallpaper.jpg
 ```
 
 ### Sway/i3

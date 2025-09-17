@@ -14,7 +14,7 @@
 #include <pwd.h>
 #include "ipc.h"
 
-#define SOCKET_TIMEOUT_MS 5000
+/* Note: socket operations are blocking for simplicity; timeout not used */
 
 /* Connect to hyprlax daemon socket */
 static int connect_to_daemon(void) {

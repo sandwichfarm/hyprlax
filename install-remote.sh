@@ -20,7 +20,7 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Default values
-INSTALL_TYPE="user"
+INSTALL_TYPE=""  # Will be set interactively if not specified
 FORCE_INSTALL=0
 VERSION="latest"
 
@@ -52,17 +52,65 @@ Usage: curl -sSL https://hyprlax.com/install.sh | bash [-s -- OPTIONS]
 
 OPTIONS:
     -s, --system      Install system-wide (requires sudo)
-    -u, --user        Install for current user only (default)
+    -u, --user        Install for current user only
     -v, --version     Install specific version (default: latest)
     -f, --force       Force reinstall even if same version exists
     -h, --help        Show this help message
 
 EXAMPLES:
-    curl -sSL https://hyprlax.com/install.sh | bash
+    curl -sSL https://hyprlax.com/install.sh | bash         # Interactive
     curl -sSL https://hyprlax.com/install.sh | bash -s -- --system
     curl -sSL https://hyprlax.com/install.sh | bash -s -- --version v1.2.3
 EOF
     exit 0
+}
+
+# Prompt for installation type
+prompt_install_type() {
+    if [ -n "$INSTALL_TYPE" ]; then
+        # Already set via command line
+        return
+    fi
+    
+    echo "================================"
+    echo "   Installation Location"
+    echo "================================"
+    echo
+    print_info "Please select installation location:"
+    echo
+    echo "  ${GREEN}1)${NC} System-wide ${CYAN}(/usr/local/bin)${NC} ${GREEN}[RECOMMENDED]${NC}"
+    echo "     • Available to all users"
+    echo "     • Works with compositor autostart (exec-once)"
+    echo "     • Requires sudo for installation"
+    echo
+    echo "  ${YELLOW}2)${NC} User-specific ${CYAN}(~/.local/bin)${NC}"
+    echo "     • Only available to current user"
+    echo "     • ${YELLOW}May not work with compositor autostart${NC}"
+    echo "     • No sudo required"
+    echo
+    
+    while true; do
+        read -p "Select option [1-2] (default: 1): " -n 1 -r choice
+        echo
+        
+        case "$choice" in
+            1|"")
+                INSTALL_TYPE="system"
+                print_success "Selected: System-wide installation"
+                break
+                ;;
+            2)
+                INSTALL_TYPE="user"
+                print_warning "Selected: User installation"
+                print_warning "Note: You may need to use full path in exec-once"
+                break
+                ;;
+            *)
+                print_error "Invalid choice. Please select 1 or 2."
+                ;;
+        esac
+    done
+    echo
 }
 
 # Parse arguments
@@ -279,6 +327,9 @@ main() {
     echo "     hyprlax Installer"
     echo "================================"
     echo
+    
+    # Prompt for installation type if not specified
+    prompt_install_type
     
     # Detect architecture
     ARCH=$(detect_arch)

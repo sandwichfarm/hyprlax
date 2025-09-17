@@ -22,11 +22,16 @@ int renderer_create(renderer_t **out_renderer, const char *backend_name) {
     }
     
     /* Select backend based on name */
+#ifdef ENABLE_GLES2
     if (!backend_name || strcmp(backend_name, "gles2") == 0) {
         /* Default to OpenGL ES 2.0 */
         renderer->ops = &renderer_gles2_ops;
-    } else {
-        /* Unknown backend */
+    } else 
+#endif
+    {
+        /* Unknown backend or not compiled in */
+        fprintf(stderr, "Error: Renderer backend '%s' not available in this build\n", 
+                backend_name ? backend_name : "default");
         free(renderer);
         return HYPRLAX_ERROR_INVALID_ARGS;
     }

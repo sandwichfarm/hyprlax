@@ -16,6 +16,7 @@
 #include <poll.h>
 #include "../include/compositor.h"
 #include "../include/hyprlax_internal.h"
+#include "../include/log.h"
 
 /* Hyprland IPC commands */
 #define HYPRLAND_IPC_GET_WORKSPACES "j/workspaces"
@@ -113,7 +114,13 @@ static bool get_hyprland_socket_paths(char *cmd_path, char *event_path, size_t s
     const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
     const char *hyprland_instance = getenv("HYPRLAND_INSTANCE_SIGNATURE");
     
-    if (!runtime_dir || !hyprland_instance) {
+    if (!runtime_dir) {
+        LOG_ERROR("XDG_RUNTIME_DIR environment variable not set - waiting for Hyprland to be ready");
+        return false;
+    }
+    
+    if (!hyprland_instance) {
+        LOG_ERROR("HYPRLAND_INSTANCE_SIGNATURE environment variable not set - waiting for Hyprland to be ready");
         return false;
     }
     
@@ -317,7 +324,7 @@ static int hyprland_connect_ipc(const char *socket_path) {
     g_hyprland_data->event_fd = compositor_connect_socket_with_retry(
         g_hyprland_data->event_socket_path,
         "Hyprland",
-        30,    /* max_retries: 3 seconds total */
+        150,   /* max_retries: 15 seconds total (match Wayland retry window) */
         100    /* retry_delay_ms */
     );
     

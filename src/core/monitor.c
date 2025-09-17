@@ -5,6 +5,7 @@
 #include "monitor.h"
 #include "hyprlax.h"
 #include "core.h"
+#include "log.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -254,12 +255,7 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
                                              monitor->config ? monitor->config->shift_pixels : 200.0f,
                                              NULL);
     
-    /* Debug output */
-    char old_str[64], new_str[64];
-    workspace_context_to_string(&monitor->current_context, old_str, sizeof(old_str));
-    workspace_context_to_string(new_context, new_str, sizeof(new_str));
-    fprintf(stderr, "Monitor %s: %s -> %s (offset=%.1f)\n",
-            monitor->name, old_str, new_str, offset);
+    /* Debug output - only visible with --debug flag */
     
     /* Update context */
     monitor->previous_context = monitor->current_context;
@@ -342,8 +338,11 @@ void monitor_start_parallax_animation_offset(hyprlax_context_t *ctx,
     monitor->animation_start_time = ctx ? ctx->last_frame_time : 0.0;
     monitor->animating = true;
     
-    fprintf(stderr, "Monitor %s: starting animation %.1f -> %.1f\n",
-            monitor->name, monitor->animation_start_x, monitor->animation_target_x);
+    /* Debug output - only with --debug flag */
+    if (ctx && ctx->config.debug) {
+        LOG_DEBUG("Monitor %s: starting animation %.1f -> %.1f",
+                monitor->name, monitor->animation_start_x, monitor->animation_target_x);
+    }
 }
 
 /* Update animation state */

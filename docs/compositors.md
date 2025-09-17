@@ -52,8 +52,8 @@ exec-once = hyprlax --layer bg.jpg:1.0:1.0:expo:0:1.0:5.0 \
 
 **IPC Commands:**
 ```bash
-hyprlax-ctl workspace next  # Hyprland handles this natively
-hyprlax-ctl blur 5.0        # Set blur amount
+hyprctl dispatch workspace +1   # Workspace change is handled by Hyprland
+hyprlax ctl set blur_size 5     # Set blur amount for hyprlax
 ```
 
 **Limitations:** None - Full feature support
