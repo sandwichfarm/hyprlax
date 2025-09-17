@@ -293,6 +293,18 @@ compare_versions() {
     fi
 }
 
+# Check if version is v2.x.x
+is_v2_version() {
+    local version="$1"
+    # Remove 'v' prefix if present and check if it starts with 2.
+    version=${version#v}
+    if [[ "$version" =~ ^2\. ]]; then
+        echo "1"
+    else
+        echo "0"
+    fi
+}
+
 # Detect system architecture
 detect_arch() {
     local arch=$(uname -m)
@@ -377,19 +389,34 @@ install_single_binary() {
     print_success "${binary_name} installation complete"
 }
 
-# Install both binaries
+# Install both binaries (or just hyprlax for v2)
 install_binaries() {
     local hyprlax_file="$1"
     local ctl_file="$2"
+    local is_v2="$3"
     local hyprlax_path=$(get_hyprlax_path)
     local ctl_path=$(get_ctl_path)
     local install_dir=$(dirname "$hyprlax_path")
     
-    # Install both binaries
+    # Always install hyprlax
     install_single_binary "$hyprlax_file" "$hyprlax_path" "hyprlax"
-    install_single_binary "$ctl_file" "$ctl_path" "hyprlax-ctl"
     
-    print_success "Both binaries installed successfully"
+    # Only install hyprlax-ctl for v1.x versions
+    if [ "$is_v2" = "0" ]; then
+        install_single_binary "$ctl_file" "$ctl_path" "hyprlax-ctl"
+        print_success "Both binaries installed successfully"
+    else
+        # For v2, remove old hyprlax-ctl if it exists
+        if [ -f "$ctl_path" ]; then
+            print_step "Removing obsolete hyprlax-ctl (integrated in v2)..."
+            if [ "$INSTALL_TYPE" = "system" ]; then
+                sudo rm -f "$ctl_path"
+            else
+                rm -f "$ctl_path"
+            fi
+        fi
+        print_success "hyprlax v2 installed successfully (ctl functionality integrated)"
+    fi
     
     # Check if directory is in PATH
     if [ "$INSTALL_TYPE" = "user" ] && [[ ":$PATH:" != *":$install_dir:"* ]]; then
@@ -516,9 +543,19 @@ main() {
         fi
     fi
     
+    # Check if this is a v2 version
+    IS_V2=$(is_v2_version "$VERSION")
+    
     # Download binaries
     HYPRLAX_FILE=$(download_binary "$VERSION" "$ARCH" "hyprlax")
-    CTL_FILE=$(download_binary "$VERSION" "$ARCH" "hyprlax-ctl")
+    
+    # Only download hyprlax-ctl for v1.x versions
+    if [ "$IS_V2" = "0" ]; then
+        CTL_FILE=$(download_binary "$VERSION" "$ARCH" "hyprlax-ctl")
+    else
+        CTL_FILE=""
+        print_info "Skipping hyprlax-ctl download (integrated in v2)"
+    fi
     
     # Backup existing installation
     if [ "$INSTALLED_VERSION" != "none" ]; then
@@ -535,7 +572,8 @@ main() {
             fi
         fi
         
-        if [ -f "$ctl_path" ]; then
+        # Only backup hyprlax-ctl for v1 -> v1 upgrades
+        if [ "$IS_V2" = "0" ] && [ -f "$ctl_path" ]; then
             local backup_path="${ctl_path}.backup.$(date +%Y%m%d_%H%M%S)"
             print_step "Backing up existing hyprlax-ctl binary..."
             if [ "$INSTALL_TYPE" = "system" ]; then
@@ -546,8 +584,8 @@ main() {
         fi
     fi
     
-    # Install both binaries
-    install_binaries "$HYPRLAX_FILE" "$CTL_FILE"
+    # Install binaries (both for v1, just hyprlax for v2)
+    install_binaries "$HYPRLAX_FILE" "$CTL_FILE" "$IS_V2"
     
     # Restart if it was running
     if [ -n "$WALLPAPER_PATH" ] && [ -f "$WALLPAPER_PATH" ]; then
@@ -567,20 +605,35 @@ main() {
     echo
     
     if [ "$INSTALLED_VERSION" = "none" ]; then
-        print_info "hyprlax and hyprlax-ctl $VERSION_NUM have been installed"
+        if [ "$IS_V2" = "1" ]; then
+            print_info "hyprlax v2 $VERSION_NUM has been installed"
+            echo
+            print_info "Note: hyprlax-ctl functionality is now integrated into the main binary"
+        else
+            print_info "hyprlax and hyprlax-ctl $VERSION_NUM have been installed"
+        fi
         echo
         print_info "To get started:"
         print_step "1. Add to your Hyprland config:"
         echo "      exec-once = hyprlax /path/to/wallpaper.jpg"
         print_step "2. Reload Hyprland or logout/login"
     else
-        print_success "hyprlax and hyprlax-ctl have been updated to $VERSION_NUM"
+        if [ "$IS_V2" = "1" ]; then
+            print_success "hyprlax has been updated to v2 $VERSION_NUM"
+            print_info "Note: hyprlax-ctl functionality is now integrated into the main binary"
+        else
+            print_success "hyprlax and hyprlax-ctl have been updated to $VERSION_NUM"
+        fi
     fi
     
     echo
     print_info "For more information:"
     print_step "GitHub: https://github.com/${GITHUB_REPO}"
-    print_step "Usage: hyprlax --help, hyprlax-ctl --help"
+    if [ "$IS_V2" = "1" ]; then
+        print_step "Usage: hyprlax --help"
+    else
+        print_step "Usage: hyprlax --help, hyprlax-ctl --help"
+    fi
 }
 
 # Run main function
