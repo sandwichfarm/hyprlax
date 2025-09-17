@@ -1,0 +1,128 @@
+name: Feature Branch Build
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+      - master
+      - main
+
+jobs:
+  build:
+    # Only run for feature branches with PRs ready for review
+    if: |
+      !github.event.pull_request.draft &&
+      (startsWith(github.head_ref, 'feat/') || startsWith(github.head_ref, 'feature/'))
+    
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            meson \
+            ninja-build \
+            wayland-protocols \
+            libwayland-dev \
+            libegl1-mesa-dev \
+            libgles2-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            wayland-scanner++ \
+            pkg-config
+      
+      - name: Build hyprlax
+        run: |
+          make clean
+          make -j$(nproc)
+      
+      - name: Create distribution package
+        run: |
+          mkdir -p dist
+          cp hyprlax dist/
+          cp -r examples dist/
+          cp README.md dist/
+          echo "Built from ${{ github.event.pull_request.head.ref }} @ ${{ github.event.pull_request.head.sha }}" > dist/BUILD_INFO.txt
+          echo "PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}" >> dist/BUILD_INFO.txt
+          echo "Built on $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> dist/BUILD_INFO.txt
+          tar -czf hyprlax-${{ github.event.pull_request.head.ref }}-${{ github.run_number }}.tar.gz -C dist .
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyprlax-${{ github.event.pull_request.head.ref }}-${{ github.run_number }}
+          path: hyprlax-*.tar.gz
+          retention-days: 14
+      
+      - name: Comment on PR with artifact link
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const artifactUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            const branch = '${{ github.event.pull_request.head.ref }}';
+            const shortSha = '${{ github.event.pull_request.head.sha }}'.substring(0, 7);
+            
+            // Check if we already commented
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+            
+            const botComment = comments.data.find(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('🤖 **Build Artifact Available**')
+            );
+            
+            const commentBody = `🤖 **Build Artifact Available**
+            
+            A build artifact for \`${branch}\` @ \`${shortSha}\` is ready!
+            
+            📦 [Download from Actions Run #${{ github.run_number }}](${artifactUrl})
+            
+            This artifact will be available for 14 days. The build includes:
+            - \`hyprlax\` binary
+            - Example configurations
+            - README and build information
+            
+            <details>
+            <summary>Installation instructions</summary>
+            
+            \`\`\`bash
+            # Download and extract the artifact
+            tar -xzf hyprlax-*.tar.gz
+            
+            # Make executable and run
+            chmod +x hyprlax
+            ./hyprlax --help
+            \`\`\`
+            </details>
+            
+            ---
+            <sub>Built from PR #${{ github.event.pull_request.number }} • Run #${{ github.run_number }} • [View Workflow](${artifactUrl})</sub>`;
+            
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: commentBody
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: commentBody
+              });
+            }
