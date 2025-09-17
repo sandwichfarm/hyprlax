@@ -451,53 +451,23 @@ static int hyprland_poll_events(compositor_event_t *event) {
                 return HYPRLAX_SUCCESS;
             }
         } else if (strncmp(line, "focusedmon>>", 12) == 0) {
-            /* Parse monitor change: "focusedmon>>monitor_name,workspace_id" */
+            /* Parse monitor focus change: "focusedmon>>monitor_name,workspace_id" */
             char *comma = strchr(line + 12, ',');
             if (comma) {
-                /* Extract monitor name */
+                /* Extract and store monitor name for future workspace events */
                 size_t monitor_name_len = comma - (line + 12);
-                if (monitor_name_len > 0 && monitor_name_len < sizeof(event->data.workspace.monitor_name)) {
-                    strncpy(event->data.workspace.monitor_name, line + 12, monitor_name_len);
-                    event->data.workspace.monitor_name[monitor_name_len] = '\0';
-                    
-                    /* Save current monitor name for future workspace events */
+                if (monitor_name_len > 0 && monitor_name_len < sizeof(g_hyprland_data->current_monitor_name)) {
                     strncpy(g_hyprland_data->current_monitor_name, line + 12, monitor_name_len);
                     g_hyprland_data->current_monitor_name[monitor_name_len] = '\0';
-                    
-                    int new_workspace = atoi(comma + 1);
-                    
-                    /* Check if workspace is being stolen from another monitor */
-                    const char *previous_owner = find_workspace_owner(new_workspace);
-                    bool is_steal = false;
-                    if (previous_owner && strcmp(previous_owner, event->data.workspace.monitor_name) != 0) {
-                        is_steal = true;
-                        if (getenv("HYPRLAX_DEBUG")) {
-                            fprintf(stderr, "[DEBUG] Workspace %d stolen from %s to %s\n",
-                                   new_workspace, previous_owner, event->data.workspace.monitor_name);
-                        }
-                    }
-                    
-                    /* Update workspace ownership */
-                    update_workspace_owner(new_workspace, event->data.workspace.monitor_name);
-                    
-                    /* Always send workspace change event with monitor info */
-                    event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
-                    event->data.workspace.from_workspace = g_hyprland_data->current_workspace;
-                    event->data.workspace.to_workspace = new_workspace;
-                    event->data.workspace.from_x = 0;
-                    event->data.workspace.from_y = 0;
-                    event->data.workspace.to_x = 0;
-                    event->data.workspace.to_y = 0;
-                    g_hyprland_data->current_workspace = new_workspace;
-                    
+
+                    /* Track workspace ownership mapping without emitting a workspace change */
+                    int focused_workspace = atoi(comma + 1);
+                    update_workspace_owner(focused_workspace, g_hyprland_data->current_monitor_name);
+
                     if (getenv("HYPRLAX_DEBUG")) {
-                        fprintf(stderr, "[DEBUG] Workspace change on monitor %s: %d -> %d%s\n",
-                                event->data.workspace.monitor_name,
-                                event->data.workspace.from_workspace,
-                                event->data.workspace.to_workspace,
-                                is_steal ? " (stolen)" : "");
+                        fprintf(stderr, "[DEBUG] Monitor focus changed to %s (ws %d)\n",
+                                g_hyprland_data->current_monitor_name, focused_workspace);
                     }
-                    return HYPRLAX_SUCCESS;
                 }
             }
         }
@@ -609,3 +579,34 @@ const compositor_ops_t compositor_hyprland_ops = {
     .set_blur = hyprland_set_blur,
     .set_wallpaper_offset = hyprland_set_wallpaper_offset,
 };
+
+#ifdef UNIT_TEST
+/*
+ * Test helpers (compiled only for unit tests)
+ * Allow tests to inject a fake event FD and initial state so we can
+ * exercise hyprland_poll_events() without a real Hyprland instance.
+ */
+void hyprland_test_setup_fd(int event_fd, const char *monitor_name, int initial_workspace) {
+    if (!g_hyprland_data) {
+        /* Initialize minimal state */
+        hyprland_init(NULL);
+    }
+    if (!g_hyprland_data) return;
+
+    g_hyprland_data->event_fd = event_fd;
+    g_hyprland_data->connected = true;
+    g_hyprland_data->current_workspace = initial_workspace > 0 ? initial_workspace : 1;
+    if (monitor_name && *monitor_name) {
+        strncpy(g_hyprland_data->current_monitor_name, monitor_name,
+                sizeof(g_hyprland_data->current_monitor_name) - 1);
+        g_hyprland_data->current_monitor_name[sizeof(g_hyprland_data->current_monitor_name) - 1] = '\0';
+    } else {
+        g_hyprland_data->current_monitor_name[0] = '\0';
+    }
+}
+
+void hyprland_test_reset(void) {
+    /* Clean up state between tests */
+    hyprland_destroy();
+}
+#endif /* UNIT_TEST */
