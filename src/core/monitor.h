@@ -19,6 +19,9 @@ struct wl_callback;
 typedef struct EGLSurface_* EGLSurface;
 typedef struct hyprlax_context hyprlax_context_t;
 
+/* Include workspace models for flexible workspace tracking */
+#include "../compositor/workspace_models.h"
+
 /* Multi-monitor modes */
 typedef enum {
     MULTI_MON_ALL,        /* Use all monitors (DEFAULT) */
@@ -57,10 +60,14 @@ typedef struct monitor_instance {
     double last_frame_time;
     double target_frame_time;         /* Based on refresh rate */
     
-    /* Workspace tracking (per-monitor independent) */
-    int current_workspace;
-    float workspace_offset_x;         /* This monitor's parallax offset */
-    float workspace_offset_y;
+    /* Workspace tracking (flexible model support) */
+    workspace_context_t current_context;  /* Current workspace/tag/set state */
+    workspace_context_t previous_context; /* Previous state for comparison */
+    float parallax_offset_x;             /* Calculated parallax offset */
+    float parallax_offset_y;
+    
+    /* Compositor capabilities for this monitor */
+    compositor_capabilities_t capabilities;
     
     /* Animation state */
     bool animating;
@@ -99,6 +106,7 @@ void monitor_list_remove(monitor_list_t *list, monitor_instance_t *monitor);
 monitor_instance_t* monitor_list_find_by_name(monitor_list_t *list, const char *name);
 monitor_instance_t* monitor_list_find_by_output(monitor_list_t *list, struct wl_output *output);
 monitor_instance_t* monitor_list_find_by_id(monitor_list_t *list, uint32_t id);
+monitor_instance_t* monitor_list_get_primary(monitor_list_t *list);
 
 /* Monitor configuration */
 config_t* monitor_resolve_config(monitor_instance_t *monitor, config_t *global_config);
@@ -108,9 +116,15 @@ void monitor_apply_config(monitor_instance_t *monitor, config_t *config);
 void monitor_handle_workspace_change(hyprlax_context_t *ctx, 
                                     monitor_instance_t *monitor,
                                     int new_workspace);
+void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
+                                            monitor_instance_t *monitor,
+                                            const workspace_context_t *new_context);
 void monitor_start_parallax_animation(hyprlax_context_t *ctx,
                                      monitor_instance_t *monitor,
                                      int workspace_delta);
+void monitor_start_parallax_animation_offset(hyprlax_context_t *ctx,
+                                            monitor_instance_t *monitor,
+                                            float offset);
 void monitor_update_animation(monitor_instance_t *monitor, double current_time);
 
 /* Frame management */

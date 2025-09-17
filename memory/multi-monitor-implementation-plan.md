@@ -8,7 +8,7 @@ This document provides a detailed, actionable implementation plan for adding mul
 - Phase 0 adds zero-config multi-monitor support
 - Simplified implementation by removing custom parser complexity
 
-## Phase 0: Zero-Config Multi-Monitor Support
+## Phase 0: Zero-Config Multi-Monitor Support (COMPLETED)
 **Duration**: 1 week  
 **Goal**: Default multi-monitor behavior with no configuration changes
 
@@ -90,6 +90,59 @@ hyprlax --layer bg.png:0.1:1.0  # Shows on all monitors
 - [ ] Parallax animations are independent per monitor
 - [ ] Override options work correctly
 - [ ] No breaking changes for existing users
+
+---
+
+## Phase 0.5: Compositor Workspace Abstraction (CRITICAL - NEW)
+**Duration**: 1 week
+**Goal**: Support different compositor workspace models
+
+### 0.5.1 Workspace Model Types
+```c
+typedef enum {
+    WS_MODEL_GLOBAL_NUMERIC,     // Hyprland, Sway (default)
+    WS_MODEL_PER_OUTPUT_NUMERIC, // Niri, Hyprland+split-monitor
+    WS_MODEL_TAG_BASED,          // River
+    WS_MODEL_SET_BASED,          // Wayfire with wsets
+} workspace_model_t;
+```
+
+### 0.5.2 Flexible Workspace Context
+```c
+typedef struct workspace_context {
+    workspace_model_t model;
+    union {
+        int workspace_id;           // Numeric workspace
+        uint32_t visible_tags;      // River tag bitmask
+        struct {
+            int set_id;
+            int workspace_id;
+        } wayfire_set;
+    } data;
+} workspace_context_t;
+```
+
+### 0.5.3 Update Monitor Structure
+**Files to Modify**:
+- `src/core/monitor.h` - Add flexible workspace tracking
+- `src/core/monitor.c` - Implement model-agnostic offset calculation
+
+### 0.5.4 Compositor Detection
+**Files to Create**:
+- `src/compositor/workspace_models.c` - Model detection and handling
+- `src/compositor/workspace_models.h` - Interfaces
+
+### 0.5.5 Handle Workspace Stealing/Movement
+- Sway/Hyprland: Workspace can move to focused output
+- Niri: Workspace can move between monitors
+- Implement atomic multi-monitor updates
+
+### 0.5.6 Validation Milestone 0.5
+- [ ] River tag support working
+- [ ] Niri vertical stacks working
+- [ ] Workspace stealing handled correctly
+- [ ] Wayfire wsets detected and handled
+- [ ] No regression for numeric workspaces
 
 ---
 

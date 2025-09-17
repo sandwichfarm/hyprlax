@@ -23,6 +23,13 @@
 #define HYPRLAND_IPC_GET_ACTIVE_WORKSPACE "j/activeworkspace"
 #define HYPRLAND_IPC_GET_ACTIVE_WINDOW "j/activewindow"
 
+/* Workspace-to-monitor mapping for detecting stealing */
+#define MAX_WORKSPACES 32
+typedef struct {
+    int workspace_id;
+    char monitor_name[64];
+} workspace_monitor_map_t;
+
 /* Hyprland private data */
 typedef struct {
     int ipc_fd;           /* Command socket */
@@ -32,13 +39,74 @@ typedef struct {
     bool connected;
     int current_workspace;
     int current_monitor;
+    char current_monitor_name[64];  /* Track current monitor name */
+    /* Workspace-to-monitor mapping for detecting stealing */
+    workspace_monitor_map_t workspace_map[MAX_WORKSPACES];
+    int workspace_map_count;
+    /* Plugin detection */
+    bool has_split_monitor_plugin;  /* split-monitor-workspaces changes behavior */
 } hyprland_data_t;
 
 /* Global instance (simplified for now) */
 static hyprland_data_t *g_hyprland_data = NULL;
 
+/* Helper: Find which monitor owns a workspace */
+static const char* find_workspace_owner(int workspace_id) {
+    if (!g_hyprland_data) return NULL;
+    
+    for (int i = 0; i < g_hyprland_data->workspace_map_count; i++) {
+        if (g_hyprland_data->workspace_map[i].workspace_id == workspace_id) {
+            return g_hyprland_data->workspace_map[i].monitor_name;
+        }
+    }
+    return NULL;
+}
+
+/* Helper: Update workspace ownership */
+static void update_workspace_owner(int workspace_id, const char *monitor_name) {
+    if (!g_hyprland_data || !monitor_name) return;
+    
+    /* Check if workspace already mapped */
+    for (int i = 0; i < g_hyprland_data->workspace_map_count; i++) {
+        if (g_hyprland_data->workspace_map[i].workspace_id == workspace_id) {
+            /* Update existing mapping */
+            strncpy(g_hyprland_data->workspace_map[i].monitor_name, 
+                   monitor_name, sizeof(g_hyprland_data->workspace_map[i].monitor_name) - 1);
+            g_hyprland_data->workspace_map[i].monitor_name[sizeof(g_hyprland_data->workspace_map[i].monitor_name) - 1] = '\0';
+            return;
+        }
+    }
+    
+    /* Add new mapping if space available */
+    if (g_hyprland_data->workspace_map_count < MAX_WORKSPACES) {
+        g_hyprland_data->workspace_map[g_hyprland_data->workspace_map_count].workspace_id = workspace_id;
+        strncpy(g_hyprland_data->workspace_map[g_hyprland_data->workspace_map_count].monitor_name,
+               monitor_name, sizeof(g_hyprland_data->workspace_map[0].monitor_name) - 1);
+        g_hyprland_data->workspace_map[g_hyprland_data->workspace_map_count].monitor_name[sizeof(g_hyprland_data->workspace_map[0].monitor_name) - 1] = '\0';
+        g_hyprland_data->workspace_map_count++;
+    }
+}
+
 /* Forward declaration */
 static int hyprland_send_command(const char *command, char *response, size_t response_size);
+
+/* Detect split-monitor-workspaces plugin */
+static bool detect_split_monitor_plugin(void) {
+    char response[4096];
+    
+    /* Query hyprctl plugins to check if split-monitor-workspaces is loaded */
+    if (hyprland_send_command("j/plugins", response, sizeof(response)) == HYPRLAX_SUCCESS) {
+        /* Simple check for plugin name in JSON response */
+        if (strstr(response, "split-monitor-workspaces") != NULL) {
+            if (getenv("HYPRLAX_DEBUG")) {
+                fprintf(stderr, "[DEBUG] Detected split-monitor-workspaces plugin\n");
+            }
+            return true;
+        }
+    }
+    
+    return false;
+}
 
 /* Get Hyprland socket paths */
 static bool get_hyprland_socket_paths(char *cmd_path, char *event_path, size_t size) {
@@ -74,6 +142,8 @@ static int hyprland_init(void *platform_data) {
     g_hyprland_data->connected = false;
     g_hyprland_data->current_workspace = 1;
     g_hyprland_data->current_monitor = 0;
+    g_hyprland_data->current_monitor_name[0] = '\0';
+    g_hyprland_data->workspace_map_count = 0;
     
     return HYPRLAX_SUCCESS;
 }
@@ -261,6 +331,9 @@ static int hyprland_connect_ipc(const char *socket_path) {
     
     g_hyprland_data->connected = true;
     
+    /* Detect plugins after connection established */
+    g_hyprland_data->has_split_monitor_plugin = detect_split_monitor_plugin();
+    
     /* Get initial workspace */
     char response[1024];
     if (hyprland_send_command(HYPRLAND_IPC_GET_ACTIVE_WORKSPACE, response, sizeof(response)) == HYPRLAX_SUCCESS) {
@@ -353,6 +426,15 @@ static int hyprland_poll_events(compositor_event_t *event) {
                 event->data.workspace.from_y = 0;
                 event->data.workspace.to_x = 0;
                 event->data.workspace.to_y = 0;
+                /* Use last known monitor name if we have one */
+                if (g_hyprland_data->current_monitor_name[0] != '\0') {
+                    strncpy(event->data.workspace.monitor_name, 
+                           g_hyprland_data->current_monitor_name,
+                           sizeof(event->data.workspace.monitor_name) - 1);
+                    event->data.workspace.monitor_name[sizeof(event->data.workspace.monitor_name) - 1] = '\0';
+                } else {
+                    event->data.workspace.monitor_name[0] = '\0';
+                }
                 g_hyprland_data->current_workspace = new_workspace;
                 if (getenv("HYPRLAX_DEBUG")) {
                     fprintf(stderr, "[DEBUG] Workspace change detected: %d -> %d\n",
@@ -365,16 +447,48 @@ static int hyprland_poll_events(compositor_event_t *event) {
             /* Parse monitor change: "focusedmon>>monitor_name,workspace_id" */
             char *comma = strchr(line + 12, ',');
             if (comma) {
-                int new_workspace = atoi(comma + 1);
-                if (new_workspace != g_hyprland_data->current_workspace) {
+                /* Extract monitor name */
+                size_t monitor_name_len = comma - (line + 12);
+                if (monitor_name_len > 0 && monitor_name_len < sizeof(event->data.workspace.monitor_name)) {
+                    strncpy(event->data.workspace.monitor_name, line + 12, monitor_name_len);
+                    event->data.workspace.monitor_name[monitor_name_len] = '\0';
+                    
+                    /* Save current monitor name for future workspace events */
+                    strncpy(g_hyprland_data->current_monitor_name, line + 12, monitor_name_len);
+                    g_hyprland_data->current_monitor_name[monitor_name_len] = '\0';
+                    
+                    int new_workspace = atoi(comma + 1);
+                    
+                    /* Check if workspace is being stolen from another monitor */
+                    const char *previous_owner = find_workspace_owner(new_workspace);
+                    bool is_steal = false;
+                    if (previous_owner && strcmp(previous_owner, event->data.workspace.monitor_name) != 0) {
+                        is_steal = true;
+                        if (getenv("HYPRLAX_DEBUG")) {
+                            fprintf(stderr, "[DEBUG] Workspace %d stolen from %s to %s\n",
+                                   new_workspace, previous_owner, event->data.workspace.monitor_name);
+                        }
+                    }
+                    
+                    /* Update workspace ownership */
+                    update_workspace_owner(new_workspace, event->data.workspace.monitor_name);
+                    
+                    /* Always send workspace change event with monitor info */
                     event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
                     event->data.workspace.from_workspace = g_hyprland_data->current_workspace;
                     event->data.workspace.to_workspace = new_workspace;
+                    event->data.workspace.from_x = 0;
+                    event->data.workspace.from_y = 0;
+                    event->data.workspace.to_x = 0;
+                    event->data.workspace.to_y = 0;
                     g_hyprland_data->current_workspace = new_workspace;
+                    
                     if (getenv("HYPRLAX_DEBUG")) {
-                        fprintf(stderr, "[DEBUG] Workspace change detected (monitor): %d -> %d\n",
+                        fprintf(stderr, "[DEBUG] Workspace change on monitor %s: %d -> %d%s\n",
+                                event->data.workspace.monitor_name,
                                 event->data.workspace.from_workspace,
-                                event->data.workspace.to_workspace);
+                                event->data.workspace.to_workspace,
+                                is_steal ? " (stolen)" : "");
                     }
                     return HYPRLAX_SUCCESS;
                 }
@@ -435,6 +549,11 @@ static bool hyprland_supports_transparency(void) {
 /* Check animation support */
 static bool hyprland_supports_animations(void) {
     return true;  /* Hyprland has excellent animation support */
+}
+
+/* Check if Hyprland has split-monitor-workspaces plugin */
+bool hyprland_has_split_monitor_plugin(void) {
+    return g_hyprland_data ? g_hyprland_data->has_split_monitor_plugin : false;
 }
 
 /* Set blur amount */

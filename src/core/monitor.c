@@ -4,6 +4,7 @@
 
 #include "monitor.h"
 #include "hyprlax.h"
+#include "core.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -46,9 +47,14 @@ monitor_instance_t* monitor_instance_create(const char *name) {
     strncpy(monitor->name, name ? name : "unknown", sizeof(monitor->name) - 1);
     monitor->scale = 1;
     monitor->refresh_rate = 60;
-    monitor->current_workspace = 1;
-    monitor->workspace_offset_x = 0.0f;
-    monitor->workspace_offset_y = 0.0f;
+    
+    /* Initialize workspace context (default to numeric) */
+    monitor->current_context.model = WS_MODEL_GLOBAL_NUMERIC;
+    monitor->current_context.data.workspace_id = 1;
+    monitor->previous_context = monitor->current_context;
+    
+    monitor->parallax_offset_x = 0.0f;
+    monitor->parallax_offset_y = 0.0f;
     monitor->target_frame_time = 1000.0 / 60.0;  /* Default 60 Hz */
     
     return monitor;
@@ -140,6 +146,20 @@ monitor_instance_t* monitor_list_find_by_name(monitor_list_t *list, const char *
     return NULL;
 }
 
+/* Get primary monitor */
+monitor_instance_t* monitor_list_get_primary(monitor_list_t *list) {
+    if (!list) return NULL;
+    
+    monitor_instance_t *current = list->head;
+    while (current) {
+        if (current->is_primary) {
+            return current;
+        }
+        current = current->next;
+    }
+    return NULL;
+}
+
 /* Find monitor by Wayland output */
 monitor_instance_t* monitor_list_find_by_output(monitor_list_t *list, struct wl_output *output) {
     if (!list || !output) return NULL;
@@ -206,37 +226,117 @@ void monitor_apply_config(monitor_instance_t *monitor, config_t *config) {
     }
 }
 
-/* Handle workspace change for specific monitor */
+/* Handle workspace change for specific monitor (legacy - numeric only) */
 void monitor_handle_workspace_change(hyprlax_context_t *ctx,
                                     monitor_instance_t *monitor,
                                     int new_workspace) {
     if (!monitor) return;
     
-    int workspace_delta = new_workspace - monitor->current_workspace;
-    if (workspace_delta == 0) return;
+    /* Create workspace context for numeric workspace */
+    workspace_context_t new_context = monitor->current_context;
+    new_context.data.workspace_id = new_workspace;
     
-    fprintf(stderr, "Monitor %s: workspace %d -> %d (delta=%d)\n",
-            monitor->name, monitor->current_workspace, new_workspace, workspace_delta);
-    
-    monitor->current_workspace = new_workspace;
-    monitor_start_parallax_animation(ctx, monitor, workspace_delta);
+    monitor_handle_workspace_context_change(ctx, monitor, &new_context);
 }
 
-/* Start parallax animation for monitor */
+/* Handle workspace context change (flexible model) */
+void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
+                                            monitor_instance_t *monitor,
+                                            const workspace_context_t *new_context) {
+    if (!monitor || !new_context) return;
+    
+    /* Check if context actually changed */
+    if (workspace_context_equal(&monitor->current_context, new_context)) return;
+    
+    /* Calculate offset based on context change */
+    float offset = workspace_calculate_offset(&monitor->current_context,
+                                             new_context,
+                                             monitor->config ? monitor->config->shift_pixels : 200.0f,
+                                             NULL);
+    
+    /* Debug output */
+    char old_str[64], new_str[64];
+    workspace_context_to_string(&monitor->current_context, old_str, sizeof(old_str));
+    workspace_context_to_string(new_context, new_str, sizeof(new_str));
+    fprintf(stderr, "Monitor %s: %s -> %s (offset=%.1f)\n",
+            monitor->name, old_str, new_str, offset);
+    
+    /* Update context */
+    monitor->previous_context = monitor->current_context;
+    monitor->current_context = *new_context;
+    
+    /* Start animation if offset changed */
+    if (offset != 0.0f && ctx) {
+        /* Calculate absolute workspace position based on workspace ID */
+        int target_workspace = new_context->data.workspace_id;
+        int base_workspace = 1; /* Assuming workspace 1 is at position 0 */
+        float absolute_target = (target_workspace - base_workspace) * 
+                              (monitor->config ? monitor->config->shift_pixels : 200.0f);
+        
+        /* Update all layers with their absolute target positions */
+        if (ctx->layers) {
+            parallax_layer_t *layer = ctx->layers;
+            
+            while (layer) {
+                /* Each layer moves at its own speed based on shift_multiplier */
+                float layer_target_x = absolute_target * layer->shift_multiplier;
+                float layer_target_y = 0.0f;
+                
+                layer_update_offset(layer, layer_target_x, layer_target_y,
+                                  monitor->config ? monitor->config->animation_duration : 1.0,
+                                  monitor->config ? monitor->config->default_easing : EASE_CUBIC_OUT);
+                
+                layer = layer->next;
+            }
+        }
+        
+        /* Update monitor's animation separately for tracking */
+        monitor_start_parallax_animation_offset(ctx, monitor, offset);
+    }
+}
+
+/* Start parallax animation for monitor (legacy - uses workspace delta) */
 void monitor_start_parallax_animation(hyprlax_context_t *ctx,
                                      monitor_instance_t *monitor,
                                      int workspace_delta) {
     if (!monitor || !monitor->config) return;
     
     float shift_amount = monitor->config->shift_pixels * workspace_delta;
+    monitor_start_parallax_animation_offset(ctx, monitor, shift_amount);
+}
+
+/* Start parallax animation with specific offset */
+void monitor_start_parallax_animation_offset(hyprlax_context_t *ctx,
+                                            monitor_instance_t *monitor,
+                                            float offset) {
+    if (!monitor) return;
     
-    /* Store animation start state */
-    monitor->animation_start_x = monitor->workspace_offset_x;
-    monitor->animation_start_y = monitor->workspace_offset_y;
+    /* If already animating, use current animated position as start point */
+    if (monitor->animating && ctx) {
+        /* Calculate current position in the ongoing animation */
+        double elapsed = ctx->last_frame_time - monitor->animation_start_time;
+        double duration = monitor->config ? monitor->config->animation_duration * 1000.0 : 1000.0;
+        double progress = (elapsed >= duration) ? 1.0 : (elapsed / duration);
+        
+        /* Apply easing to progress */
+        if (monitor->config && monitor->config->default_easing) {
+            progress = apply_easing(progress, monitor->config->default_easing);
+        }
+        
+        /* Calculate current animated position */
+        monitor->animation_start_x = monitor->animation_start_x + 
+                                    (monitor->animation_target_x - monitor->animation_start_x) * progress;
+        monitor->animation_start_y = monitor->animation_start_y + 
+                                    (monitor->animation_target_y - monitor->animation_start_y) * progress;
+    } else {
+        /* Not animating, use current offset as start */
+        monitor->animation_start_x = monitor->parallax_offset_x;
+        monitor->animation_start_y = monitor->parallax_offset_y;
+    }
     
-    /* Set animation targets */
-    monitor->animation_target_x = monitor->workspace_offset_x + shift_amount;
-    monitor->animation_target_y = monitor->workspace_offset_y;  /* No vertical shift for now */
+    /* Set animation targets - add offset to the starting position */
+    monitor->animation_target_x = monitor->animation_start_x + offset;
+    monitor->animation_target_y = monitor->animation_start_y;  /* No vertical shift for now */
     
     /* Start animation */
     monitor->animation_start_time = ctx ? ctx->last_frame_time : 0.0;
@@ -255,8 +355,8 @@ void monitor_update_animation(monitor_instance_t *monitor, double current_time) 
     
     if (elapsed >= duration) {
         /* Animation complete */
-        monitor->workspace_offset_x = monitor->animation_target_x;
-        monitor->workspace_offset_y = monitor->animation_target_y;
+        monitor->parallax_offset_x = monitor->animation_target_x;
+        monitor->parallax_offset_y = monitor->animation_target_y;
         monitor->animating = false;
         return;
     }
@@ -277,9 +377,9 @@ void monitor_update_animation(monitor_instance_t *monitor, double current_time) 
     }
     
     /* Update offsets */
-    monitor->workspace_offset_x = monitor->animation_start_x +
+    monitor->parallax_offset_x = monitor->animation_start_x +
         (monitor->animation_target_x - monitor->animation_start_x) * eased_progress;
-    monitor->workspace_offset_y = monitor->animation_start_y +
+    monitor->parallax_offset_y = monitor->animation_start_y +
         (monitor->animation_target_y - monitor->animation_start_y) * eased_progress;
 }
 

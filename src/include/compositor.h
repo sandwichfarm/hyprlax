@@ -78,6 +78,8 @@ typedef struct {
             /* 2D workspace grid support */
             int from_x, from_y;
             int to_x, to_y;
+            /* Monitor association */
+            char monitor_name[64];  /* Which monitor this workspace change affects */
         } workspace;
         struct {
             int monitor_id;

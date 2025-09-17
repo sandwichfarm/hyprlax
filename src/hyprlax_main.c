@@ -1012,6 +1012,27 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             int poll_result = ctx->compositor->ops->poll_events(&comp_event);
             if (poll_result == HYPRLAX_SUCCESS) {
                 if (comp_event.type == COMPOSITOR_EVENT_WORKSPACE_CHANGE) {
+                    /* For multi-monitor support, find the correct monitor */
+                    monitor_instance_t *target_monitor = NULL;
+                    
+                    if (ctx->monitors && comp_event.data.workspace.monitor_name[0] != '\0') {
+                        /* Use monitor name from event if available */
+                        target_monitor = monitor_list_find_by_name(ctx->monitors, 
+                                                                  comp_event.data.workspace.monitor_name);
+                        if (ctx->config.debug && target_monitor) {
+                            fprintf(stderr, "[DEBUG] Workspace event for monitor: %s\n", 
+                                   comp_event.data.workspace.monitor_name);
+                        }
+                    }
+                    
+                    /* Fall back to primary/first monitor if not found */
+                    if (!target_monitor && ctx->monitors) {
+                        target_monitor = monitor_list_get_primary(ctx->monitors);
+                        if (!target_monitor) {
+                            target_monitor = ctx->monitors->head;
+                        }
+                    }
+                    
                     /* Check if this is a 2D workspace change */
                     if (comp_event.data.workspace.from_x != 0 || 
                         comp_event.data.workspace.from_y != 0 ||
@@ -1019,26 +1040,53 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                         comp_event.data.workspace.to_y != 0) {
                         /* 2D workspace change */
                         if (ctx->config.debug) {
-                            fprintf(stderr, "[DEBUG] Main loop: 2D Workspace changed from (%d,%d) to (%d,%d)\n", 
+                            fprintf(stderr, "[DEBUG] Main loop: 2D Workspace changed from (%d,%d) to (%d,%d) on %s\n", 
                                    comp_event.data.workspace.from_x,
                                    comp_event.data.workspace.from_y,
                                    comp_event.data.workspace.to_x,
-                                   comp_event.data.workspace.to_y);
+                                   comp_event.data.workspace.to_y,
+                                   target_monitor ? target_monitor->name : "unknown");
                         }
-                        hyprlax_handle_workspace_change_2d(ctx,
-                                                         comp_event.data.workspace.from_x,
-                                                         comp_event.data.workspace.from_y,
-                                                         comp_event.data.workspace.to_x,
-                                                         comp_event.data.workspace.to_y);
+                        
+                        if (target_monitor) {
+                            /* Update monitor's workspace context for 2D */
+                            workspace_context_t new_context = {
+                                .model = WS_MODEL_SET_BASED,
+                                .data.wayfire_set = {
+                                    .set_id = comp_event.data.workspace.to_y,
+                                    .workspace_id = comp_event.data.workspace.to_x
+                                }
+                            };
+                            monitor_handle_workspace_context_change(ctx, target_monitor, &new_context);
+                        } else {
+                            /* Fallback to global handler */
+                            hyprlax_handle_workspace_change_2d(ctx,
+                                                             comp_event.data.workspace.from_x,
+                                                             comp_event.data.workspace.from_y,
+                                                             comp_event.data.workspace.to_x,
+                                                             comp_event.data.workspace.to_y);
+                        }
                     } else {
                         /* Linear workspace change (Hyprland, Sway, etc.) */
                         if (ctx->config.debug) {
-                            fprintf(stderr, "[DEBUG] Main loop: Workspace changed from %d to %d\n", 
+                            fprintf(stderr, "[DEBUG] Main loop: Workspace changed from %d to %d on %s\n", 
                                    comp_event.data.workspace.from_workspace,
-                                   comp_event.data.workspace.to_workspace);
+                                   comp_event.data.workspace.to_workspace,
+                                   target_monitor ? target_monitor->name : "unknown");
                         }
-                        hyprlax_handle_workspace_change(ctx, 
-                                                      comp_event.data.workspace.to_workspace);
+                        
+                        if (target_monitor) {
+                            /* Update monitor's workspace context */
+                            workspace_context_t new_context = {
+                                .model = WS_MODEL_GLOBAL_NUMERIC,
+                                .data.workspace_id = comp_event.data.workspace.to_workspace
+                            };
+                            monitor_handle_workspace_context_change(ctx, target_monitor, &new_context);
+                        } else {
+                            /* Fallback to global handler */
+                            hyprlax_handle_workspace_change(ctx, 
+                                                          comp_event.data.workspace.to_workspace);
+                        }
                     }
                 }
             }

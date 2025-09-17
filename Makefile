@@ -48,7 +48,8 @@ PLATFORM_SRCS = src/platform/platform.c src/platform/wayland.c src/platform/x11.
 COMPOSITOR_SRCS = src/compositor/compositor.c src/compositor/hyprland.c \
                   src/compositor/wayfire.c src/compositor/niri.c \
                   src/compositor/sway.c src/compositor/river.c \
-                  src/compositor/generic_wayland.c src/compositor/x11_ewmh.c
+                  src/compositor/generic_wayland.c src/compositor/x11_ewmh.c \
+                  src/compositor/workspace_models.c
 
 # Main module sources
 MAIN_SRCS = src/main.c src/hyprlax_main.c src/hyprlax_ctl.c
