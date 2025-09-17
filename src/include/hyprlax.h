@@ -14,6 +14,7 @@
 #include "renderer.h"
 #include "platform.h"
 #include "compositor.h"
+#include "../core/monitor.h"
 
 /* Application state */
 typedef enum {
@@ -54,7 +55,13 @@ typedef struct hyprlax_context {
     double delta_time;
     double fps;
     
-    /* Current workspace/monitor */
+    /* Multi-monitor support */
+    monitor_list_t *monitors;           /* All active monitors */
+    multi_monitor_mode_t monitor_mode;  /* ALL, PRIMARY, SPECIFIC */
+    char **specific_monitors;           /* For SPECIFIC mode */
+    int specific_monitor_count;
+    
+    /* Legacy single-monitor fields (kept for compatibility) */
     int current_workspace;
     int current_monitor;
     float workspace_offset_x;
@@ -86,6 +93,9 @@ void hyprlax_update_layers(hyprlax_context_t *ctx, double current_time);
 
 /* Event handling */
 void hyprlax_handle_workspace_change(hyprlax_context_t *ctx, int new_workspace);
+void hyprlax_handle_monitor_workspace_change(hyprlax_context_t *ctx, 
+                                            const char *monitor_name,
+                                            int new_workspace);
 void hyprlax_handle_resize(hyprlax_context_t *ctx, int width, int height);
 
 /* Rendering */

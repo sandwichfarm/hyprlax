@@ -17,6 +17,8 @@
 #include <poll.h>
 #include "include/hyprlax.h"
 #include "include/hyprlax_internal.h"
+#include "include/log.h"
+#include "include/renderer.h"
 #include "ipc.h"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -33,7 +35,7 @@ static int hyprlax_load_layer_textures(hyprlax_context_t *ctx);
 hyprlax_context_t* hyprlax_create(void) {
     hyprlax_context_t *ctx = calloc(1, sizeof(hyprlax_context_t));
     if (!ctx) {
-        fprintf(stderr, "Failed to allocate application context\n");
+        LOG_ERROR("Failed to allocate application context");
         return NULL;
     }
     
@@ -104,7 +106,7 @@ static int parse_config_file(hyprlax_context_t *ctx, const char *filename) {
     
     FILE *file = fopen(filename, "r");
     if (!file) {
-        fprintf(stderr, "Error: Cannot open config file: %s\n", filename);
+        LOG_ERROR("Cannot open config file: %s", filename);
         return -1;
     }
     
@@ -132,14 +134,14 @@ static int parse_config_file(hyprlax_context_t *ctx, const char *filename) {
             char *blur_str = strtok(NULL, " \t");
             
             if (!image) {
-                fprintf(stderr, "Config line %d: layer requires image path\n", line_num);
+                LOG_ERROR("Config line %d: layer requires image path", line_num);
                 continue;
             }
             
             /* Resolve path relative to config file if needed */
             char *resolved_image_path = resolve_config_relative_path(filename, image);
             if (!resolved_image_path) {
-                fprintf(stderr, "Error: Failed to resolve image path at line %d: %s\n", line_num, image);
+                LOG_ERROR("Failed to resolve image path at line %d: %s", line_num, image);
                 continue;
             }
             
@@ -147,10 +149,8 @@ static int parse_config_file(hyprlax_context_t *ctx, const char *filename) {
             float opacity = opacity_str ? atof(opacity_str) : 1.0f;
             float blur = blur_str ? atof(blur_str) : 0.0f;
             
-            if (ctx->config.debug) {
-                fprintf(stderr, "Config parse layer: image=%s, shift=%.2f, opacity=%.2f, blur=%.2f\n",
-                        resolved_image_path, shift, opacity, blur);
-            }
+            LOG_DEBUG("Config parse layer: image=%s, shift=%.2f, opacity=%.2f, blur=%.2f",
+                    resolved_image_path, shift, opacity, blur);
             
             /* Add the layer */
             hyprlax_add_layer(ctx, resolved_image_path, shift, opacity, blur);
@@ -191,6 +191,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
         {"easing", required_argument, 0, 'e'},
         {"config", required_argument, 0, 'c'},
         {"debug", no_argument, 0, 'D'},
+        {"debug-log", optional_argument, 0, 'L'},
         {"renderer", required_argument, 0, 'r'},
         {"platform", required_argument, 0, 'p'},
         {"compositor", required_argument, 0, 'C'},
@@ -200,7 +201,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
     int opt;
     int option_index = 0;
     
-    while ((opt = getopt_long(argc, argv, "hvf:s:d:e:c:Dr:p:C:", 
+    while ((opt = getopt_long(argc, argv, "hvf:s:d:e:c:DL::r:p:C:", 
                               long_options, &option_index)) != -1) {
         switch (opt) {
             case 'h':
@@ -214,6 +215,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 printf("  -e, --easing <type>       Easing function (default: cubic)\n");
                 printf("  -c, --config <file>       Load configuration from file\n");
                 printf("  -D, --debug               Enable debug output\n");
+                printf("  -L, --debug-log[=FILE]    Write debug output to file (default: /tmp/hyprlax-PID.log)\n");
                 printf("  -r, --renderer <backend>  Renderer backend (gles2, auto)\n");
                 printf("  -p, --platform <backend>  Platform backend (wayland, x11, auto)\n");
                 printf("  -C, --compositor <backend> Compositor (hyprland, sway, generic, auto)\n");
@@ -224,7 +226,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 
             case 'v':
                 printf("hyprlax %s\n", HYPRLAX_VERSION);
-                fprintf(stderr, "Buttery-smooth parallax wallpaper daemon with support for multiple compositors, platforms and renderers\n");
+                printf("Buttery-smooth parallax wallpaper daemon with support for multiple compositors, platforms and renderers\n");
                 exit(0);  /* Exit successfully for version */
                 
             case 'f':
@@ -246,13 +248,25 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
             case 'c':
                 ctx->config.config_path = strdup(optarg);
                 if (parse_config_file(ctx, ctx->config.config_path) < 0) {
-                    fprintf(stderr, "Failed to load config file: %s\n", optarg);
+                    LOG_ERROR("Failed to load config file: %s", optarg);
                     return -1;
                 }
                 break;
                 
             case 'D':
                 ctx->config.debug = true;
+                break;
+                
+            case 'L':
+                ctx->config.debug = true;  /* Debug log implies debug mode */
+                if (optarg) {
+                    ctx->config.debug_log_path = strdup(optarg);
+                } else {
+                    /* Default log file with timestamp */
+                    char log_file[256];
+                    snprintf(log_file, sizeof(log_file), "/tmp/hyprlax-%d.log", getpid());
+                    ctx->config.debug_log_path = strdup(log_file);
+                }
                 break;
                 
             case 'r':
@@ -265,6 +279,21 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 
             case 'C':
                 ctx->backends.compositor_backend = optarg;
+                break;
+                
+            case 1001:  /* --primary-only */
+                ctx->monitor_mode = MULTI_MON_PRIMARY;
+                break;
+                
+            case 1002:  /* --monitor */
+                /* TODO: Add specific monitor to list */
+                ctx->monitor_mode = MULTI_MON_SPECIFIC;
+                LOG_DEBUG("Monitor selection: %s", optarg);
+                break;
+                
+            case 1003:  /* --disable-monitor */
+                /* TODO: Add monitor to exclusion list */
+                LOG_DEBUG("Excluding monitor: %s", optarg);
                 break;
                 
             default:
@@ -293,7 +322,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
             /* Legacy: treat as image path */
             /* Check if file exists first */
             if (access(argv[i], F_OK) != 0) {
-                fprintf(stderr, "Error: Image file not found: %s\n", argv[i]);
+                LOG_ERROR("Image file not found: %s", argv[i]);
                 return -1;
             }
             hyprlax_add_layer(ctx, argv[i], 1.0f, 1.0f, 0.0f);
@@ -318,14 +347,14 @@ int hyprlax_init_platform(hyprlax_context_t *ctx) {
     /* Create platform instance */
     int ret = platform_create(&ctx->platform, platform_type);
     if (ret != HYPRLAX_SUCCESS) {
-        fprintf(stderr, "Failed to create platform adapter\n");
+        LOG_ERROR("Failed to create platform adapter");
         return ret;
     }
     
     /* Initialize platform */
     ret = PLATFORM_INIT(ctx->platform);
     if (ret != HYPRLAX_SUCCESS) {
-        fprintf(stderr, "Failed to initialize platform\n");
+        LOG_ERROR("Failed to initialize platform");
         platform_destroy(ctx->platform);
         ctx->platform = NULL;
         return ret;
@@ -334,15 +363,19 @@ int hyprlax_init_platform(hyprlax_context_t *ctx) {
     /* Connect to display */
     ret = PLATFORM_CONNECT(ctx->platform, NULL);
     if (ret != HYPRLAX_SUCCESS) {
-        fprintf(stderr, "Failed to connect to display\n");
+        LOG_ERROR("Failed to connect to display");
         platform_destroy(ctx->platform);
         ctx->platform = NULL;
         return ret;
     }
     
-    if (ctx->config.debug) {
-        fprintf(stderr, "Platform: %s\n", ctx->platform->ops->get_name());
+    /* Share context with platform for monitor detection */
+    extern void wayland_set_context(hyprlax_context_t *ctx);
+    if (ctx->platform->type == PLATFORM_WAYLAND) {
+        wayland_set_context(ctx);
     }
+    
+    LOG_DEBUG("Platform: %s", ctx->platform->ops->get_name());
     
     return HYPRLAX_SUCCESS;
 }
@@ -364,14 +397,14 @@ int hyprlax_init_compositor(hyprlax_context_t *ctx) {
     /* Create compositor adapter */
     int ret = compositor_create(&ctx->compositor, compositor_type);
     if (ret != HYPRLAX_SUCCESS) {
-        fprintf(stderr, "Failed to create compositor adapter\n");
+        LOG_ERROR("Failed to create compositor adapter");
         return ret;
     }
     
     /* Initialize compositor */
     ret = COMPOSITOR_INIT(ctx->compositor, ctx->platform);
     if (ret != HYPRLAX_SUCCESS) {
-        fprintf(stderr, "Failed to initialize compositor\n");
+        LOG_ERROR("Failed to initialize compositor");
         compositor_destroy(ctx->compositor);
         ctx->compositor = NULL;
         return ret;
@@ -381,13 +414,13 @@ int hyprlax_init_compositor(hyprlax_context_t *ctx) {
     if (ctx->compositor->ops->connect_ipc) {
         int ret = ctx->compositor->ops->connect_ipc(NULL);
         if (ret == HYPRLAX_SUCCESS && ctx->config.debug) {
-            fprintf(stderr, "  IPC connected\n");
+            LOG_DEBUG("  IPC connected");
         }
     }
     
     if (ctx->config.debug) {
-        fprintf(stderr, "Compositor: %s\n", ctx->compositor->ops->get_name());
-        fprintf(stderr, "  Blur support: %s\n", 
+        LOG_INFO("Compositor: %s", ctx->compositor->ops->get_name());
+        LOG_INFO("  Blur support: %s", 
                 COMPOSITOR_SUPPORTS_BLUR(ctx->compositor) ? "yes" : "no");
     }
     
@@ -407,14 +440,24 @@ int hyprlax_init_renderer(hyprlax_context_t *ctx) {
     /* Create renderer instance */
     int ret = renderer_create(&ctx->renderer, backend);
     if (ret != HYPRLAX_SUCCESS) {
-        fprintf(stderr, "Failed to create renderer\n");
+        LOG_ERROR("Failed to create renderer");
         return ret;
+    }
+    
+    /* Get actual window dimensions from platform */
+    int actual_width = 1920;   /* Default fallback */
+    int actual_height = 1080;
+    
+    if (ctx->platform->type == PLATFORM_WAYLAND) {
+        extern void wayland_get_window_size(int *width, int *height);
+        wayland_get_window_size(&actual_width, &actual_height);
+        LOG_DEBUG("[INIT] Got window size from Wayland: %dx%d", actual_width, actual_height);
     }
     
     /* Initialize renderer with native handles */
     renderer_config_t render_config = {
-        .width = 1920,   /* Default, will be updated */
-        .height = 1080,
+        .width = actual_width,
+        .height = actual_height,
         .vsync = true,
         .target_fps = ctx->config.target_fps,
         .capabilities = 0,
@@ -425,15 +468,13 @@ int hyprlax_init_renderer(hyprlax_context_t *ctx) {
     
     ret = RENDERER_INIT(ctx->renderer, native_display, native_window, &render_config);
     if (ret != HYPRLAX_SUCCESS) {
-        fprintf(stderr, "Failed to initialize renderer\n");
+        LOG_ERROR("Failed to initialize renderer");
         renderer_destroy(ctx->renderer);
         ctx->renderer = NULL;
         return ret;
     }
     
-    if (ctx->config.debug) {
-        fprintf(stderr, "Renderer: %s\n", ctx->renderer->ops->get_name());
-    }
+    LOG_DEBUG("Renderer: %s", ctx->renderer->ops->get_name());
     
     return HYPRLAX_SUCCESS;
 }
@@ -453,7 +494,7 @@ static int hyprlax_init_ipc(hyprlax_context_t *ctx) {
     ((ipc_context_t*)ctx->ipc_ctx)->app_context = ctx;
     
     if (ctx->config.debug) {
-        fprintf(stderr, "IPC server initialized\n");
+        LOG_INFO("IPC server initialized");
     }
     
     return HYPRLAX_SUCCESS;
@@ -468,35 +509,53 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
     
+    /* Initialize logging system */
+    log_init(ctx->config.debug, ctx->config.debug_log_path);
+    if (ctx->config.debug_log_path) {
+        LOG_INFO("Debug logging to file: %s", ctx->config.debug_log_path);
+    }
+    
     /* Initialize modules in order */
     int ret;
     
+    /* 0. Initialize multi-monitor support */
+    LOG_INFO("[INIT] Step 0: Initializing multi-monitor support");
+    ctx->monitors = monitor_list_create();
+    if (!ctx->monitors) {
+        LOG_ERROR("[INIT] Failed to create monitor list");
+        return HYPRLAX_ERROR_NO_MEMORY;
+    }
+    ctx->monitor_mode = MULTI_MON_ALL;  /* Default: use all monitors */
+    LOG_DEBUG("[INIT] Multi-monitor mode: %s", 
+            ctx->monitor_mode == MULTI_MON_ALL ? "ALL" : 
+            ctx->monitor_mode == MULTI_MON_PRIMARY ? "PRIMARY" : "SPECIFIC");
+    
     /* 1. Initialize IPC server first to check for existing instances */
-    fprintf(stderr, "[INIT] Step 1: Initializing IPC\n");
+    LOG_INFO("[INIT] Step 1: Initializing IPC");
     ret = hyprlax_init_ipc(ctx);
     if (ret != HYPRLAX_SUCCESS) {
-        fprintf(stderr, "[INIT] IPC initialization failed with code %d\n", ret);
+        LOG_ERROR("[INIT] IPC initialization failed with code %d", ret);
         return ret;  /* Exit if another instance is running */
     }
     
     /* 2. Platform (windowing system) */
-    fprintf(stderr, "[INIT] Step 2: Initializing platform\n");
+    LOG_INFO("[INIT] Step 2: Initializing platform");
     ret = hyprlax_init_platform(ctx);
     if (ret != HYPRLAX_SUCCESS) {
-        fprintf(stderr, "[INIT] Platform initialization failed with code %d\n", ret);
+        LOG_ERROR("[INIT] Platform initialization failed with code %d", ret);
         return ret;
     }
     
     /* 3. Compositor (IPC and features) */
-    fprintf(stderr, "[INIT] Step 3: Initializing compositor\n");
+    LOG_INFO("[INIT] Step 3: Initializing compositor");
     ret = hyprlax_init_compositor(ctx);
     if (ret != HYPRLAX_SUCCESS) {
-        fprintf(stderr, "[INIT] Compositor initialization failed with code %d\n", ret);
+        LOG_ERROR("[INIT] Compositor initialization failed with code %d", ret);
         return ret;
     }
     
     /* 4. Create window */
-    fprintf(stderr, "[INIT] Step 4: Creating window\n");
+    LOG_INFO("[INIT] Step 4: Creating window");
     window_config_t window_config = {
         .width = 1920,
         .height = 1080,
@@ -510,54 +569,54 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
     
     ret = PLATFORM_CREATE_WINDOW(ctx->platform, &window_config);
     if (ret != HYPRLAX_SUCCESS) {
-        fprintf(stderr, "[INIT] Window creation failed with code %d\n", ret);
+        LOG_ERROR("[INIT] Window creation failed with code %d", ret);
         return ret;
     }
     
     /* 5. Renderer (OpenGL context) */
-    fprintf(stderr, "[INIT] Step 5: Initializing renderer\n");
+    LOG_INFO("[INIT] Step 5: Initializing renderer");
     ret = hyprlax_init_renderer(ctx);
     if (ret != HYPRLAX_SUCCESS) {
-        fprintf(stderr, "[INIT] Renderer initialization failed with code %d\n", ret);
+        LOG_ERROR("[INIT] Renderer initialization failed with code %d", ret);
         return ret;
     }
     
-    /* 6. Load textures for all layers now that GL is initialized */
-    fprintf(stderr, "[INIT] Step 6: Loading layer textures\n");
+    /* 6. Create EGL surfaces for all monitors now that renderer exists */
+    LOG_INFO("[INIT] Step 6: Creating EGL surfaces for monitors");
+    if (ctx->monitors) {
+        monitor_instance_t *monitor = ctx->monitors->head;
+        while (monitor) {
+            if (monitor->wl_egl_window && !monitor->egl_surface) {
+                monitor->egl_surface = gles2_create_monitor_surface(monitor->wl_egl_window);
+                if (monitor->egl_surface) {
+                    LOG_DEBUG("Created EGL surface for monitor %s", monitor->name);
+                } else {
+                    LOG_ERROR("Failed to create EGL surface for monitor %s", monitor->name);
+                }
+            }
+            monitor = monitor->next;
+        }
+    }
+    
+    /* 7. Load textures for all layers now that GL is initialized */
+    LOG_INFO("[INIT] Step 7: Loading layer textures");
     ret = hyprlax_load_layer_textures(ctx);
     if (ret != HYPRLAX_SUCCESS) {
-        fprintf(stderr, "[INIT] Warning: Some textures failed to load\n");
+        LOG_WARN("[INIT] Warning: Some textures failed to load");
         /* Continue anyway - we can still run with missing textures */
     }
     
-    /* 7. Create layer surface if using Wayland */
-    fprintf(stderr, "[INIT] Step 7: Creating layer surface\n");
-    if (ctx->platform->type == PLATFORM_WAYLAND && ctx->compositor->ops->create_layer_surface) {
-        layer_surface_config_t layer_config = {
-            .layer = LAYER_BACKGROUND,
-            .anchor = ANCHOR_TOP | ANCHOR_BOTTOM | ANCHOR_LEFT | ANCHOR_RIGHT,
-            .exclusive_zone = -1,
-            .margin_top = 0,
-            .margin_bottom = 0,
-            .margin_left = 0,
-            .margin_right = 0,
-            .keyboard_interactive = false,
-            .accept_input = false,
-        };
-        
-        ctx->compositor->ops->create_layer_surface(NULL, &layer_config);
-    }
+    /* Layer surface is already created in Step 4 (window creation) for Wayland */
+    /* No need to create it again */
     
     ctx->state = APP_STATE_RUNNING;
     ctx->running = true;
     
-    if (ctx->config.debug) {
-        fprintf(stderr, "hyprlax initialized successfully\n");
-        fprintf(stderr, "  FPS target: %d\n", ctx->config.target_fps);
-        fprintf(stderr, "  Shift amount: %.1f pixels\n", ctx->config.shift_pixels);
-        fprintf(stderr, "  Animation duration: %.1f seconds\n", ctx->config.animation_duration);
-        fprintf(stderr, "  Easing: %s\n", easing_to_string(ctx->config.default_easing));
-    }
+    LOG_INFO("hyprlax initialized successfully");
+    LOG_DEBUG("  FPS target: %d", ctx->config.target_fps);
+    LOG_DEBUG("  Shift amount: %.1f pixels", ctx->config.shift_pixels);
+    LOG_DEBUG("  Animation duration: %.1f seconds", ctx->config.animation_duration);
+    LOG_DEBUG("  Easing: %s", easing_to_string(ctx->config.default_easing));
     
     return HYPRLAX_SUCCESS;
 }
@@ -567,7 +626,7 @@ static GLuint load_texture(const char *path, int *width, int *height) {
     int channels;
     unsigned char *data = stbi_load(path, width, height, &channels, 4);
     if (!data) {
-        fprintf(stderr, "Failed to load image '%s': %s\n", path, stbi_failure_reason());
+        LOG_ERROR("Failed to load image '%s': %s", path, stbi_failure_reason());
         return 0;
     }
     
@@ -614,10 +673,8 @@ int hyprlax_add_layer(hyprlax_context_t *ctx, const char *image_path,
     ctx->layers = layer_list_add(ctx->layers, new_layer);
     ctx->layer_count = layer_list_count(ctx->layers);
     
-    if (ctx->config.debug) {
-        fprintf(stderr, "Added layer: %s (shift=%.1f, opacity=%.1f, blur=%.1f)\n",
+    LOG_DEBUG("Added layer: %s (shift=%.1f, opacity=%.1f, blur=%.1f)",
                 image_path, shift_multiplier, opacity, blur);
-    }
     
     return HYPRLAX_SUCCESS;
 }
@@ -640,24 +697,50 @@ static int hyprlax_load_layer_textures(hyprlax_context_t *ctx) {
                 layer->texture_height = img_height;
                 loaded++;
                 if (ctx->config.debug) {
-                    fprintf(stderr, "Loaded texture for layer: %s (%dx%d)\n",
+                    LOG_DEBUG("Loaded texture for layer: %s (%dx%d)",
                             layer->image_path, img_width, img_height);
                 }
             } else {
-                fprintf(stderr, "Failed to load texture for layer: %s\n", layer->image_path);
+                LOG_ERROR("Failed to load texture for layer: %s", layer->image_path);
             }
         }
         layer = layer->next;
     }
     
     if (ctx->config.debug && loaded > 0) {
-        fprintf(stderr, "Loaded %d layer textures\n", loaded);
+        LOG_INFO("Loaded %d layer textures", loaded);
     }
     
     return HYPRLAX_SUCCESS;
 }
 
-/* Handle workspace change */
+/* Handle per-monitor workspace change */
+void hyprlax_handle_monitor_workspace_change(hyprlax_context_t *ctx, 
+                                            const char *monitor_name,
+                                            int new_workspace) {
+    if (!ctx || !ctx->monitors || !monitor_name) return;
+    
+    /* Find the monitor */
+    monitor_instance_t *monitor = monitor_list_find_by_name(ctx->monitors, monitor_name);
+    if (!monitor) {
+        /* If monitor not found, fall back to primary or first monitor */
+        monitor = ctx->monitors->primary;
+        if (!monitor && ctx->monitors->head) {
+            monitor = ctx->monitors->head;
+        }
+        if (!monitor) return;
+    }
+    
+    /* Handle workspace change for this specific monitor */
+    monitor_handle_workspace_change(ctx, monitor, new_workspace);
+    
+    if (ctx->config.debug) {
+        fprintf(stderr, "[DEBUG] Monitor %s: workspace changed to %d\n", 
+                monitor->name, new_workspace);
+    }
+}
+
+/* Handle workspace change (legacy - applies to primary monitor) */
 void hyprlax_handle_workspace_change(hyprlax_context_t *ctx, int new_workspace) {
     if (!ctx) return;
     
@@ -670,14 +753,17 @@ void hyprlax_handle_workspace_change(hyprlax_context_t *ctx, int new_workspace) 
     
     ctx->current_workspace = new_workspace;
     
-    /* Calculate target offset */
+    /* If we have monitors, update the primary monitor */
+    if (ctx->monitors && ctx->monitors->primary) {
+        monitor_handle_workspace_change(ctx, ctx->monitors->primary, new_workspace);
+    }
+    
+    /* Calculate target offset (for legacy single-surface mode) */
     float target_x = ctx->workspace_offset_x + (delta * ctx->config.shift_pixels);
     float target_y = ctx->workspace_offset_y;
     
-    if (ctx->config.debug) {
-        fprintf(stderr, "[DEBUG] Target offset: %.1f, %.1f (shift=%.1f)\n", 
-               target_x, target_y, ctx->config.shift_pixels);
-    }
+    LOG_TRACE("Target offset: %.1f, %.1f (shift=%.1f)", 
+           target_x, target_y, ctx->config.shift_pixels);
     
     /* Update all layers with animation */
     parallax_layer_t *layer = ctx->layers;
@@ -714,10 +800,8 @@ void hyprlax_handle_workspace_change_2d(hyprlax_context_t *ctx,
     float target_x = ctx->workspace_offset_x + (delta_x * ctx->config.shift_pixels);
     float target_y = ctx->workspace_offset_y + (delta_y * ctx->config.shift_pixels);
     
-    if (ctx->config.debug) {
-        fprintf(stderr, "[DEBUG] Target offset: (%.1f, %.1f) shift=%.1f\n", 
-               target_x, target_y, ctx->config.shift_pixels);
-    }
+    LOG_TRACE("Target offset: (%.1f, %.1f) shift=%.1f", 
+           target_x, target_y, ctx->config.shift_pixels);
     
     /* Update all layers with animation for both axes */
     parallax_layer_t *layer = ctx->layers;
@@ -766,20 +850,36 @@ void hyprlax_update_layers(hyprlax_context_t *ctx, double current_time) {
     }
 }
 
-/* Render frame */
-void hyprlax_render_frame(hyprlax_context_t *ctx) {
-    if (!ctx || !ctx->renderer) {
-        if (ctx && ctx->config.debug) {
-            fprintf(stderr, "[DEBUG] render_frame: No renderer available\n");
-        }
+/* Render frame to a specific monitor */
+static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *monitor) {
+    if (!ctx || !ctx->renderer || !monitor) {
+        LOG_TRACE("Skipping render: ctx=%p, renderer=%p, monitor=%p", ctx, ctx ? ctx->renderer : NULL, monitor);
         return;
     }
     
-    static int render_count = 0;
-    if (ctx->config.debug && render_count < 5) {
-        fprintf(stderr, "[DEBUG] render_frame %d: Starting\n", render_count);
+    /* Skip if monitor doesn't have an EGL surface */
+    if (!monitor->egl_surface) {
+        LOG_WARN("Monitor %s has no EGL surface", monitor->name);
+        return;
     }
     
+    /* Monitor rendering debug - commented out for performance
+    LOG_TRACE("Rendering to monitor %s (%dx%d, surface=%p)", 
+              monitor->name, monitor->width, monitor->height, monitor->egl_surface); */
+    
+    /* Switch to this monitor's EGL surface */
+    if (gles2_make_current(monitor->egl_surface) != HYPRLAX_SUCCESS) {
+        LOG_ERROR("Failed to make EGL surface current for monitor %s", monitor->name);
+        return;
+    }
+    
+    /* Set viewport for this monitor */
+    glViewport(0, 0, monitor->width * monitor->scale, monitor->height * monitor->scale);
+    /* Viewport debug - commented out for performance
+    LOG_TRACE("Set viewport: %dx%d (scale=%d)", 
+              monitor->width * monitor->scale, monitor->height * monitor->scale, monitor->scale); */
+    
+    /* Clear and prepare for rendering */
     RENDERER_BEGIN_FRAME(ctx->renderer);
     RENDERER_CLEAR(ctx->renderer, 0.0f, 0.0f, 0.0f, 1.0f);
     
@@ -789,107 +889,102 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
     }
     
-    /* Get actual viewport dimensions */
-    int viewport_width = 1920;
-    int viewport_height = 1080;
-    
-    /* Get dimensions from platform if available */
-    if (ctx->platform && ctx->platform->type == PLATFORM_WAYLAND) {
-        extern void wayland_get_window_size(int *width, int *height);
-        wayland_get_window_size(&viewport_width, &viewport_height);
-    }
-    
-    /* Calculate optimal scale factor if not set */
-    if (ctx->config.scale_factor <= 1.0f) {
-        ctx->config.scale_factor = calculate_scale_factor(
-            ctx->config.shift_pixels, 10, viewport_width);
-        if (ctx->config.debug) {
-            fprintf(stderr, "[DEBUG] Calculated scale factor: %.2f\n", ctx->config.scale_factor);
-        }
-    }
-    
+    /* Calculate scale factor for this monitor */
     float scale_factor = ctx->config.scale_factor;
-    
-    if (ctx->config.debug && render_count < 5) {
-        fprintf(stderr, "[DEBUG] Rendering %d layers\n", ctx->layer_count);
+    if (scale_factor <= 1.0f) {
+        scale_factor = calculate_scale_factor(
+            ctx->config.shift_pixels, 10, monitor->width);
     }
     
-    /* Render each layer */
+    /* Render each layer with this monitor's offset */
     parallax_layer_t *layer = ctx->layers;
     int layer_num = 0;
+    /* Layer count debug - commented out for performance
+    LOG_TRACE("Rendering %d layers for monitor %s", ctx->layer_count, monitor->name); */
     while (layer) {
         if (layer->texture_id == 0) {
-            if (ctx->config.debug && render_count < 5) {
-                fprintf(stderr, "[DEBUG] Layer %d: No texture (id=0)\n", layer_num);
-            }
             layer = layer->next;
-            layer_num++;
             continue;
         }
         
-        /* Calculate texture offset based on layer animation */
-        float viewport_width_in_texture = 1.0f / scale_factor;
-        float viewport_height_in_texture = 1.0f / scale_factor;
-        float max_texture_offset_x = 1.0f - viewport_width_in_texture;
-        float max_texture_offset_y = 1.0f - viewport_height_in_texture;
-        float max_pixel_offset_x = (scale_factor - 1.0f) * viewport_width;
-        float max_pixel_offset_y = (scale_factor - 1.0f) * viewport_height;
-        float tex_offset_x = 0.0f;
-        float tex_offset_y = 0.0f;
+        /* Use the layer's own animated offset */
+        float offset_x = layer->offset_x;
+        float offset_y = layer->offset_y;
         
-        if (max_pixel_offset_x > 0) {
-            tex_offset_x = (layer->offset_x / max_pixel_offset_x) * max_texture_offset_x;
+        /* Create texture struct for drawing */
+        texture_t tex = {
+            .id = layer->texture_id,
+            .width = layer->width,
+            .height = layer->height
+        };
+        
+        /* Bind texture */
+        if (ctx->renderer->ops->bind_texture) {
+            ctx->renderer->ops->bind_texture(&tex, 0);
         }
-        if (max_pixel_offset_y > 0) {
-            tex_offset_y = (layer->offset_y / max_pixel_offset_y) * max_texture_offset_y;
-        }
         
-        /* Clamp to valid range */
-        if (tex_offset_x > max_texture_offset_x) tex_offset_x = max_texture_offset_x;
-        if (tex_offset_x < 0.0f) tex_offset_x = 0.0f;
-        if (tex_offset_y > max_texture_offset_y) tex_offset_y = max_texture_offset_y;
-        if (tex_offset_y < 0.0f) tex_offset_y = 0.0f;
-        
-        /* Render the layer texture */
         if (ctx->renderer->ops->draw_layer) {
-            if (ctx->config.debug && render_count < 5) {
-                fprintf(stderr, "[DEBUG] Layer %d: Drawing texture %u (%dx%d) at offset (%.3f, %.3f)\n", 
-                       layer_num, layer->texture_id, layer->width, layer->height, 
-                       tex_offset_x, tex_offset_y);
-            }
-            texture_t tex = {
-                .id = layer->texture_id,
-                .width = layer->width,
-                .height = layer->height,
-                .format = TEXTURE_FORMAT_RGBA
-            };
-            ctx->renderer->ops->draw_layer(&tex, tex_offset_x, tex_offset_y, 
-                                          layer->opacity, layer->blur_amount);
-        } else if (ctx->config.debug && render_count < 5) {
-            fprintf(stderr, "[DEBUG] Layer %d: No draw_layer function!\n", layer_num);
+            /* Draw the layer with offset and effects */
+            /* Layer drawing debug - commented out for performance
+            LOG_TRACE("Drawing layer %d (tex_id=%u, offset=%.3f,%.3f, opacity=%.2f)", 
+                     layer_num++, layer->texture_id, 
+                     offset_x / monitor->width, offset_y / monitor->height, layer->opacity); */
+            layer_num++;
+            ctx->renderer->ops->draw_layer(
+                &tex,
+                offset_x / monitor->width,  /* Normalized X offset */
+                offset_y / monitor->height, /* Normalized Y offset */
+                layer->opacity,
+                layer->blur_amount
+            );
         }
         
         layer = layer->next;
-        layer_num++;
     }
     
-    if (ctx->layer_count > 1) {
-        glDisable(GL_BLEND);
-    }
-    
+    /* Present this monitor's frame */
+    /* Present debug - commented out for performance
+    LOG_TRACE("Ending frame and presenting for monitor %s", monitor->name); */
     RENDERER_END_FRAME(ctx->renderer);
     RENDERER_PRESENT(ctx->renderer);
     
-    if (ctx->config.debug && render_count < 5) {
-        fprintf(stderr, "[DEBUG] render_frame %d: Complete, flushing\n", render_count);
+    /* Commit the Wayland surface to make the frame visible */
+    if (monitor->wl_surface) {
+        /* Need platform to commit the surface */
+        extern void wayland_commit_monitor_surface(monitor_instance_t *monitor);
+        wayland_commit_monitor_surface(monitor);
+        /* Commit debug - commented out for performance
+        LOG_TRACE("Committed surface for monitor %s", monitor->name); */
     }
     
-    /* Commit Wayland surface after rendering */
-    if (ctx->platform->type == PLATFORM_WAYLAND && ctx->platform->ops->flush_events) {
-        ctx->platform->ops->flush_events();
+    /* Frame presented debug - commented out for performance
+    LOG_TRACE("Frame presented for monitor %s", monitor->name); */
+}
+
+/* Render frame to all monitors */
+void hyprlax_render_frame(hyprlax_context_t *ctx) {
+    if (!ctx || !ctx->renderer) {
+        LOG_ERROR("render_frame: No renderer available");
+        return;
     }
     
-    render_count++;
+    /* Always use monitor list - single monitor is just count=1 */
+    if (!ctx->monitors || ctx->monitors->count == 0) {
+        LOG_WARN("No monitors available for rendering");
+        return;
+    }
+    
+    /* Monitor count debug - commented out for performance
+    LOG_TRACE("Rendering frame to %d monitor(s)", ctx->monitors->count); */
+    
+    /* Render to each monitor */
+    monitor_instance_t *monitor = ctx->monitors->head;
+    while (monitor) {
+        /* Monitor call debug - commented out for performance
+        LOG_TRACE("Calling hyprlax_render_monitor for %s", monitor->name); */
+        hyprlax_render_monitor(ctx, monitor);
+        monitor = monitor->next;
+    }
 }
 
 /* Main run loop */
@@ -897,7 +992,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
     if (!ctx) return HYPRLAX_ERROR_INVALID_ARGS;
     
     if (ctx->config.debug) {
-        fprintf(stderr, "[DEBUG] Starting main loop (target FPS: %d)\n", ctx->config.target_fps);
+        LOG_DEBUG("Starting main loop (target FPS: %d)", ctx->config.target_fps);
     }
     
     double last_time = get_time();
@@ -909,16 +1004,18 @@ int hyprlax_run(hyprlax_context_t *ctx) {
         double current_time = get_time();
         ctx->delta_time = current_time - last_time;
         
+        /* Frame timing debug - disabled for performance
         if (ctx->config.debug && frame_count < 5) {
-            fprintf(stderr, "[DEBUG] Frame %d: delta=%.4f, frame_time=%.4f\n", 
+            LOG_TRACE("Frame %d: delta=%.4f, frame_time=%.4f", 
                    frame_count, ctx->delta_time, frame_time);
-        }
+        } */
         
         /* Poll platform events */
         platform_event_t platform_event;
+        /* Platform events debug - disabled for performance
         if (ctx->config.debug && frame_count < 5) {
-            fprintf(stderr, "[DEBUG] Polling platform events\n");
-        }
+            LOG_TRACE("Polling platform events");
+        } */
         if (PLATFORM_POLL_EVENTS(ctx->platform, &platform_event) == HYPRLAX_SUCCESS) {
             switch (platform_event.type) {
                 case PLATFORM_EVENT_CLOSE:
@@ -938,7 +1035,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
         if (ctx->ipc_ctx && ipc_process_commands((ipc_context_t*)ctx->ipc_ctx)) {
             /* IPC processed - layers may have changed */
             if (ctx->config.debug) {
-                fprintf(stderr, "[DEBUG] IPC command processed\n");
+                LOG_TRACE("IPC command processed");
             }
         }
         
@@ -948,6 +1045,27 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             int poll_result = ctx->compositor->ops->poll_events(&comp_event);
             if (poll_result == HYPRLAX_SUCCESS) {
                 if (comp_event.type == COMPOSITOR_EVENT_WORKSPACE_CHANGE) {
+                    /* For multi-monitor support, find the correct monitor */
+                    monitor_instance_t *target_monitor = NULL;
+                    
+                    if (ctx->monitors && comp_event.data.workspace.monitor_name[0] != '\0') {
+                        /* Use monitor name from event if available */
+                        target_monitor = monitor_list_find_by_name(ctx->monitors, 
+                                                                  comp_event.data.workspace.monitor_name);
+                        if (ctx->config.debug && target_monitor) {
+                            LOG_TRACE("Workspace event for monitor: %s", 
+                                   comp_event.data.workspace.monitor_name);
+                        }
+                    }
+                    
+                    /* Fall back to primary/first monitor if not found */
+                    if (!target_monitor && ctx->monitors) {
+                        target_monitor = monitor_list_get_primary(ctx->monitors);
+                        if (!target_monitor) {
+                            target_monitor = ctx->monitors->head;
+                        }
+                    }
+                    
                     /* Check if this is a 2D workspace change */
                     if (comp_event.data.workspace.from_x != 0 || 
                         comp_event.data.workspace.from_y != 0 ||
@@ -955,42 +1073,80 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                         comp_event.data.workspace.to_y != 0) {
                         /* 2D workspace change */
                         if (ctx->config.debug) {
-                            fprintf(stderr, "[DEBUG] Main loop: 2D Workspace changed from (%d,%d) to (%d,%d)\n", 
+                            LOG_TRACE("Main loop: 2D Workspace changed from (%d,%d) to (%d,%d) on %s", 
                                    comp_event.data.workspace.from_x,
                                    comp_event.data.workspace.from_y,
                                    comp_event.data.workspace.to_x,
-                                   comp_event.data.workspace.to_y);
+                                   comp_event.data.workspace.to_y,
+                                   target_monitor ? target_monitor->name : "unknown");
                         }
-                        hyprlax_handle_workspace_change_2d(ctx,
-                                                         comp_event.data.workspace.from_x,
-                                                         comp_event.data.workspace.from_y,
-                                                         comp_event.data.workspace.to_x,
-                                                         comp_event.data.workspace.to_y);
+                        
+                        if (target_monitor) {
+                            /* Update monitor's workspace context for 2D */
+                            workspace_context_t new_context = {
+                                .model = WS_MODEL_SET_BASED,
+                                .data.wayfire_set = {
+                                    .set_id = comp_event.data.workspace.to_y,
+                                    .workspace_id = comp_event.data.workspace.to_x
+                                }
+                            };
+                            monitor_handle_workspace_context_change(ctx, target_monitor, &new_context);
+                        } else {
+                            /* Fallback to global handler */
+                            hyprlax_handle_workspace_change_2d(ctx,
+                                                             comp_event.data.workspace.from_x,
+                                                             comp_event.data.workspace.from_y,
+                                                             comp_event.data.workspace.to_x,
+                                                             comp_event.data.workspace.to_y);
+                        }
                     } else {
                         /* Linear workspace change (Hyprland, Sway, etc.) */
                         if (ctx->config.debug) {
-                            fprintf(stderr, "[DEBUG] Main loop: Workspace changed from %d to %d\n", 
+                            LOG_DEBUG("Workspace changed from %d to %d on %s", 
                                    comp_event.data.workspace.from_workspace,
-                                   comp_event.data.workspace.to_workspace);
+                                   comp_event.data.workspace.to_workspace,
+                                   target_monitor ? target_monitor->name : "unknown");
                         }
-                        hyprlax_handle_workspace_change(ctx, 
-                                                      comp_event.data.workspace.to_workspace);
+                        
+                        if (target_monitor) {
+                            /* Update monitor's workspace context */
+                            workspace_context_t new_context = {
+                                .model = WS_MODEL_GLOBAL_NUMERIC,
+                                .data.workspace_id = comp_event.data.workspace.to_workspace
+                            };
+                            monitor_handle_workspace_context_change(ctx, target_monitor, &new_context);
+                        } else {
+                            /* Fallback to global handler */
+                            hyprlax_handle_workspace_change(ctx, 
+                                                          comp_event.data.workspace.to_workspace);
+                        }
                     }
                 }
             }
         }
         
         /* Update animations */
+        /* Animation debug - disabled for performance
         if (ctx->config.debug && frame_count < 5) {
-            fprintf(stderr, "[DEBUG] Updating layer animations\n");
-        }
+            LOG_TRACE("Updating layer animations");
+        } */
         hyprlax_update_layers(ctx, current_time);
+        
+        /* Update monitor animations for parallax */
+        if (ctx->monitors) {
+            monitor_instance_t *monitor = ctx->monitors->head;
+            while (monitor) {
+                monitor_update_animation(monitor, current_time);
+                monitor = monitor->next;
+            }
+        }
         
         /* Render frame if enough time has passed */
         if (ctx->delta_time >= frame_time) {
+            /* Render debug - disabled for performance
             if (ctx->config.debug && frame_count < 5) {
-                fprintf(stderr, "[DEBUG] Rendering frame %d\n", frame_count);
-            }
+                LOG_TRACE("Rendering frame %d", frame_count);
+            } */
             hyprlax_render_frame(ctx);
             ctx->fps = 1.0 / ctx->delta_time;
             last_time = current_time;
@@ -1000,16 +1156,17 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             if (ctx->config.debug) {
                 debug_timer += ctx->delta_time;
                 if (debug_timer >= 1.0) {
-                    fprintf(stderr, "[DEBUG] FPS: %.1f, Layers: %d\n", ctx->fps, ctx->layer_count);
+                    LOG_DEBUG("FPS: %.1f, Layers: %d", ctx->fps, ctx->layer_count);
                     debug_timer = 0.0;
                 }
             }
         } else {
             /* Sleep to maintain target FPS using nanosleep for better precision */
             double sleep_time = frame_time - ctx->delta_time;
+            /* Sleep debug - disabled for performance
             if (ctx->config.debug && frame_count < 5) {
-                fprintf(stderr, "[DEBUG] Sleeping for %.4f seconds\n", sleep_time);
-            }
+                LOG_TRACE("Sleeping for %.4f seconds", sleep_time);
+            } */
             if (sleep_time > 0) {
                 struct timespec ts;
                 ts.tv_sec = (time_t)(sleep_time);  /* Integer seconds (usually 0) */
@@ -1036,7 +1193,7 @@ void hyprlax_handle_resize(hyprlax_context_t *ctx, int width, int height) {
     }
     
     if (ctx->config.debug) {
-        fprintf(stderr, "Window resized: %dx%d\n", width, height);
+        LOG_INFO("Window resized: %dx%d", width, height);
     }
 }
 
@@ -1080,6 +1237,6 @@ void hyprlax_shutdown(hyprlax_context_t *ctx) {
     }
     
     if (ctx->config.debug) {
-        fprintf(stderr, "hyprlax shut down\n");
+        LOG_INFO("hyprlax shut down");
     }
 }

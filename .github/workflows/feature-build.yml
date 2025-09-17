@@ -1,0 +1,199 @@
+name: Feature Branch Build
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+      - master
+      - main
+  
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Pull Request number to build (e.g., 15)'
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Get PR Information
+        id: pr_info
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            let pr;
+            let shouldRun = false;
+            
+            // Handle manual trigger
+            if (context.eventName === 'workflow_dispatch') {
+              const prNumber = context.payload.inputs.pr_number;
+              try {
+                const { data } = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: parseInt(prNumber)
+                });
+                pr = data;
+                // For manual trigger, build any PR (even drafts)
+                shouldRun = true;
+                console.log(`Manual trigger for PR #${prNumber}: ${pr.title}`);
+              } catch (error) {
+                core.setFailed(`PR #${prNumber} not found`);
+                return;
+              }
+            } 
+            // Handle automatic PR trigger
+            else if (context.eventName === 'pull_request') {
+              pr = context.payload.pull_request;
+              // Only run for feature branches that are ready for review
+              shouldRun = !pr.draft && 
+                         (pr.head.ref.startsWith('feat/') || pr.head.ref.startsWith('feature/'));
+            }
+            
+            if (!shouldRun) {
+              core.setOutput('skip', 'true');
+              return;
+            }
+            
+            // Set outputs for use in later steps
+            core.setOutput('skip', 'false');
+            core.setOutput('pr_number', pr.number);
+            core.setOutput('pr_title', pr.title);
+            core.setOutput('head_ref', pr.head.ref);
+            core.setOutput('head_sha', pr.head.sha);
+            core.setOutput('draft', pr.draft);
+      
+      - name: Skip if not applicable
+        if: steps.pr_info.outputs.skip == 'true'
+        run: |
+          echo "Skipping build - not a feature branch or PR is in draft"
+          exit 0
+      
+      - name: Checkout code
+        if: steps.pr_info.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ref: ${{ steps.pr_info.outputs.head_sha }}
+      
+      - name: Install dependencies
+        if: steps.pr_info.outputs.skip != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            meson \
+            ninja-build \
+            wayland-protocols \
+            libwayland-dev \
+            libegl1-mesa-dev \
+            libgles2-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            wayland-scanner++ \
+            pkg-config
+      
+      - name: Build hyprlax
+        if: steps.pr_info.outputs.skip != 'true'
+        run: |
+          make clean
+          make -j$(nproc)
+      
+      - name: Create distribution package
+        if: steps.pr_info.outputs.skip != 'true'
+        run: |
+          mkdir -p dist
+          cp hyprlax dist/
+          cp -r examples dist/
+          cp README.md dist/
+          echo "Built from ${{ steps.pr_info.outputs.head_ref }} @ ${{ steps.pr_info.outputs.head_sha }}" > dist/BUILD_INFO.txt
+          echo "PR #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}" >> dist/BUILD_INFO.txt
+          echo "Built on $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> dist/BUILD_INFO.txt
+          tar -czf hyprlax-${{ steps.pr_info.outputs.head_ref }}-${{ github.run_number }}.tar.gz -C dist .
+      
+      - name: Upload artifact
+        if: steps.pr_info.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyprlax-${{ steps.pr_info.outputs.head_ref }}-${{ github.run_number }}
+          path: hyprlax-*.tar.gz
+          retention-days: 14
+      
+      - name: Comment on PR with artifact link
+        if: steps.pr_info.outputs.skip != 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = parseInt('${{ steps.pr_info.outputs.pr_number }}');
+            const artifactUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            const branch = '${{ steps.pr_info.outputs.head_ref }}';
+            const shortSha = '${{ steps.pr_info.outputs.head_sha }}'.substring(0, 7);
+            const isDraft = '${{ steps.pr_info.outputs.draft }}' === 'true';
+            const isManual = context.eventName === 'workflow_dispatch';
+            
+            // Check if we already commented
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber
+            });
+            
+            const botComment = comments.data.find(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('🤖 **Build Artifact Available**')
+            );
+            
+            let triggerInfo = isManual ? ' (Manual Build)' : '';
+            if (isDraft && isManual) {
+              triggerInfo = ' (Manual Build - Draft PR)';
+            }
+            
+            const commentBody = `🤖 **Build Artifact Available**${triggerInfo}
+            
+            A build artifact for \`${branch}\` @ \`${shortSha}\` is ready!
+            
+            📦 [Download from Actions Run #${{ github.run_number }}](${artifactUrl})
+            
+            This artifact will be available for 14 days. The build includes:
+            - \`hyprlax\` binary
+            - Example configurations
+            - README and build information
+            
+            <details>
+            <summary>Installation instructions</summary>
+            
+            \`\`\`bash
+            # Download and extract the artifact
+            tar -xzf hyprlax-*.tar.gz
+            
+            # Make executable and run
+            chmod +x hyprlax
+            ./hyprlax --help
+            \`\`\`
+            </details>
+            
+            ---
+            <sub>Built from PR #${prNumber} • Run #${{ github.run_number }} • [View Workflow](${artifactUrl})</sub>`;
+            
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: commentBody
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: commentBody
+              });
+            }

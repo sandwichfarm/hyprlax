@@ -75,7 +75,7 @@ hyprlax/
 │   ├── main.c                    # Entry point
 │   ├── hyprlax_main.c            # Main application logic
 │   ├── ipc.c                     # IPC server implementation
-│   ├── hyprlax-ctl.c            # IPC client tool
+│   ├── hyprlax_ctl.c            # Integrated control interface (hyprlax ctl)
 │   │
 │   ├── core/                    # Core functionality
 │   │   ├── animation.c          # Animation system
@@ -356,7 +356,7 @@ make coverage
 - [ ] Wayland and X11 platform detection
 - [ ] Blur effects (where supported)
 - [ ] Config file loading
-- [ ] IPC commands via hyprlax-ctl
+- [ ] IPC commands via `hyprlax ctl`
 - [ ] Memory usage over time
 - [ ] CPU usage during animations
 

@@ -665,6 +665,10 @@ void render_frame() {
                     layer->animating = 0;
                 } else {
                     float t = elapsed / layer->animation_duration;
+                    // Smooth completion: treat very close to 1.0 as complete
+                    if (t > 0.995f) {
+                        t = 1.0f;
+                    }
                     float eased = apply_easing(t, layer->easing);
                     layer->current_offset = layer->start_offset +
                         (layer->target_offset - layer->start_offset) * eased;
@@ -683,6 +687,10 @@ void render_frame() {
                 state.animating = 0;
             } else {
                 float t = elapsed / config.animation_duration;
+                // Smooth completion: treat very close to 1.0 as complete
+                if (t > 0.995f) {
+                    t = 1.0f;
+                }
                 float eased = apply_easing(t, config.easing);
                 state.current_offset = state.start_offset +
                     (state.target_offset - state.start_offset) * eased;

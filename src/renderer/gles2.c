@@ -24,6 +24,9 @@ typedef struct {
     EGLSurface egl_surface;
     EGLConfig egl_config;
     
+    /* Current surface for multi-monitor support */
+    EGLSurface current_surface;
+    
     /* Shaders */
     shader_program_t *basic_shader;
     shader_program_t *blur_shader;
@@ -239,7 +242,12 @@ static void gles2_end_frame(void) {
 static void gles2_present(void) {
     if (!g_gles2_data) return;
     
-    eglSwapBuffers(g_gles2_data->egl_display, g_gles2_data->egl_surface);
+    /* Use current surface for multi-monitor support */
+    EGLSurface surface = g_gles2_data->current_surface ? 
+                        g_gles2_data->current_surface : 
+                        g_gles2_data->egl_surface;
+    
+    eglSwapBuffers(g_gles2_data->egl_display, surface);
 }
 
 /* Clear screen */
@@ -452,6 +460,35 @@ static const char* gles2_get_name(void) {
 /* Get renderer version */
 static const char* gles2_get_version(void) {
     return (const char*)glGetString(GL_VERSION);
+}
+
+/* Create EGL surface for a monitor */
+EGLSurface gles2_create_monitor_surface(void *native_window) {
+    if (!g_gles2_data || !native_window) {
+        return EGL_NO_SURFACE;
+    }
+    
+    EGLSurface surface = eglCreateWindowSurface(g_gles2_data->egl_display, 
+                                                g_gles2_data->egl_config,
+                                                (EGLNativeWindowType)native_window, 
+                                                NULL);
+    return surface;
+}
+
+/* Make a monitor's EGL surface current */
+int gles2_make_current(EGLSurface surface) {
+    if (!g_gles2_data) {
+        return HYPRLAX_ERROR_INVALID_ARGS;
+    }
+    
+    if (!eglMakeCurrent(g_gles2_data->egl_display, surface, surface, g_gles2_data->egl_context)) {
+        return HYPRLAX_ERROR_GL_INIT;
+    }
+    
+    /* Track current surface for present */
+    g_gles2_data->current_surface = surface;
+    
+    return HYPRLAX_SUCCESS;
 }
 
 /* OpenGL ES 2.0 renderer operations */

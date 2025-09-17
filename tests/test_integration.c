@@ -249,14 +249,26 @@ START_TEST(test_daemon_restart)
         unlink(ctx->socket_path);
         
         ctx->socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-        if (ctx->socket_fd < 0) exit(1);
+        if (ctx->socket_fd < 0) {
+            fprintf(stderr, "Failed to create socket: %s\n", strerror(errno));
+            ipc_cleanup(ctx);
+            exit(1);
+        }
         
         struct sockaddr_un addr = {0};
         addr.sun_family = AF_UNIX;
         strncpy(addr.sun_path, ctx->socket_path, sizeof(addr.sun_path) - 1);
         
-        if (bind(ctx->socket_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) exit(1);
-        if (listen(ctx->socket_fd, 1) < 0) exit(1);
+        if (bind(ctx->socket_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            fprintf(stderr, "Failed to bind socket: %s\n", strerror(errno));
+            ipc_cleanup(ctx);
+            exit(1);
+        }
+        if (listen(ctx->socket_fd, 1) < 0) {
+            fprintf(stderr, "Failed to listen on socket: %s\n", strerror(errno));
+            ipc_cleanup(ctx);
+            exit(1);
+        }
         
         // Add a layer
         ipc_add_layer(ctx, test_image, 1.0f, 1.0f, 0.0f, 0.0f, 0);
@@ -321,14 +333,26 @@ START_TEST(test_daemon_restart)
         unlink(ctx->socket_path);
         
         ctx->socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-        if (ctx->socket_fd < 0) exit(1);
+        if (ctx->socket_fd < 0) {
+            fprintf(stderr, "Failed to create socket: %s\n", strerror(errno));
+            ipc_cleanup(ctx);
+            exit(1);
+        }
         
         struct sockaddr_un addr2 = {0};
         addr2.sun_family = AF_UNIX;
         strncpy(addr2.sun_path, ctx->socket_path, sizeof(addr2.sun_path) - 1);
         
-        if (bind(ctx->socket_fd, (struct sockaddr*)&addr2, sizeof(addr2)) < 0) exit(1);
-        if (listen(ctx->socket_fd, 1) < 0) exit(1);
+        if (bind(ctx->socket_fd, (struct sockaddr*)&addr2, sizeof(addr2)) < 0) {
+            fprintf(stderr, "Failed to bind socket: %s\n", strerror(errno));
+            ipc_cleanup(ctx);
+            exit(1);
+        }
+        if (listen(ctx->socket_fd, 1) < 0) {
+            fprintf(stderr, "Failed to listen on socket: %s\n", strerror(errno));
+            ipc_cleanup(ctx);
+            exit(1);
+        }
         
         // No layers in new instance
         

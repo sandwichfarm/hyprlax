@@ -39,11 +39,6 @@ typedef struct {
 } layer_t;
 
 typedef struct {
-    ipc_command_t command;
-    char args[IPC_MAX_MESSAGE_SIZE - sizeof(ipc_command_t)];
-} ipc_message_t;
-
-typedef struct {
     int socket_fd;
     char socket_path[256];
     bool active;
@@ -73,4 +68,3 @@ void ipc_sort_layers(ipc_context_t* ctx);
 int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, size_t response_size);
 
 #endif // HYPRLAX_IPC_H
-
