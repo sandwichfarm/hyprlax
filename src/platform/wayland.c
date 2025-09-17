@@ -16,6 +16,7 @@
 #include "../include/platform.h"
 #include "../include/hyprlax_internal.h"
 #include "../include/log.h"
+#include "../include/renderer.h"
 #include "../../protocols/wlr-layer-shell-client-protocol.h"
 #include "../include/hyprlax.h"
 #include "../core/monitor.h"
@@ -496,7 +497,6 @@ int wayland_create_monitor_surface(monitor_instance_t *monitor) {
         /* Create EGL surface for this monitor if we have a renderer context */
         if (g_wayland_data->ctx && g_wayland_data->ctx->renderer) {
             /* Get the EGL surface creation function from renderer */
-            extern EGLSurface gles2_create_monitor_surface(void *native_window);
             monitor->egl_surface = gles2_create_monitor_surface(monitor->wl_egl_window);
             
             if (monitor->egl_surface) {

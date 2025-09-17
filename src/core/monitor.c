@@ -315,15 +315,16 @@ void monitor_start_parallax_animation_offset(hyprlax_context_t *ctx,
         double progress = (elapsed >= duration) ? 1.0 : (elapsed / duration);
         
         /* Apply easing to progress */
+        double eased_progress = progress;
         if (monitor->config && monitor->config->default_easing) {
-            progress = apply_easing(progress, monitor->config->default_easing);
+            eased_progress = apply_easing(progress, monitor->config->default_easing);
         }
         
         /* Calculate current animated position */
         monitor->animation_start_x = monitor->animation_start_x + 
-                                    (monitor->animation_target_x - monitor->animation_start_x) * progress;
+                                    (monitor->animation_target_x - monitor->animation_start_x) * eased_progress;
         monitor->animation_start_y = monitor->animation_start_y + 
-                                    (monitor->animation_target_y - monitor->animation_start_y) * progress;
+                                    (monitor->animation_target_y - monitor->animation_start_y) * eased_progress;
     } else {
         /* Not animating, use current offset as start */
         monitor->animation_start_x = monitor->parallax_offset_x;

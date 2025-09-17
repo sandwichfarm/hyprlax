@@ -103,4 +103,14 @@ void renderer_destroy(renderer_t *renderer);
 extern const renderer_ops_t renderer_gles2_ops;
 /* Future: renderer_gl3_ops, renderer_vulkan_ops */
 
+/* Multi-monitor support functions for GLES2 backend */
+#ifdef __EGL_H__
+EGLSurface gles2_create_monitor_surface(void *native_window);
+int gles2_make_current(EGLSurface surface);
+#else
+/* Forward declaration for when EGL types aren't available */
+void* gles2_create_monitor_surface(void *native_window);
+int gles2_make_current(void *surface);
+#endif
+
 #endif /* HYPRLAX_RENDERER_H */

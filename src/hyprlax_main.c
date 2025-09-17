@@ -18,6 +18,7 @@
 #include "include/hyprlax.h"
 #include "include/hyprlax_internal.h"
 #include "include/log.h"
+#include "include/renderer.h"
 #include "ipc.h"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -583,7 +584,6 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
     /* 6. Create EGL surfaces for all monitors now that renderer exists */
     LOG_INFO("[INIT] Step 6: Creating EGL surfaces for monitors");
     if (ctx->monitors) {
-        extern EGLSurface gles2_create_monitor_surface(void *native_window);
         monitor_instance_t *monitor = ctx->monitors->head;
         while (monitor) {
             if (monitor->wl_egl_window && !monitor->egl_surface) {
@@ -868,7 +868,6 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
               monitor->name, monitor->width, monitor->height, monitor->egl_surface); */
     
     /* Switch to this monitor's EGL surface */
-    extern int gles2_make_current(EGLSurface surface);
     if (gles2_make_current(monitor->egl_surface) != HYPRLAX_SUCCESS) {
         LOG_ERROR("Failed to make EGL surface current for monitor %s", monitor->name);
         return;

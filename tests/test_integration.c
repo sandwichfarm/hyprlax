@@ -250,6 +250,7 @@ START_TEST(test_daemon_restart)
         
         ctx->socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
         if (ctx->socket_fd < 0) {
+            fprintf(stderr, "Failed to create socket: %s\n", strerror(errno));
             ipc_cleanup(ctx);
             exit(1);
         }
@@ -259,10 +260,12 @@ START_TEST(test_daemon_restart)
         strncpy(addr.sun_path, ctx->socket_path, sizeof(addr.sun_path) - 1);
         
         if (bind(ctx->socket_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            fprintf(stderr, "Failed to bind socket: %s\n", strerror(errno));
             ipc_cleanup(ctx);
             exit(1);
         }
         if (listen(ctx->socket_fd, 1) < 0) {
+            fprintf(stderr, "Failed to listen on socket: %s\n", strerror(errno));
             ipc_cleanup(ctx);
             exit(1);
         }
@@ -331,6 +334,7 @@ START_TEST(test_daemon_restart)
         
         ctx->socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
         if (ctx->socket_fd < 0) {
+            fprintf(stderr, "Failed to create socket: %s\n", strerror(errno));
             ipc_cleanup(ctx);
             exit(1);
         }
@@ -340,10 +344,12 @@ START_TEST(test_daemon_restart)
         strncpy(addr2.sun_path, ctx->socket_path, sizeof(addr2.sun_path) - 1);
         
         if (bind(ctx->socket_fd, (struct sockaddr*)&addr2, sizeof(addr2)) < 0) {
+            fprintf(stderr, "Failed to bind socket: %s\n", strerror(errno));
             ipc_cleanup(ctx);
             exit(1);
         }
         if (listen(ctx->socket_fd, 1) < 0) {
+            fprintf(stderr, "Failed to listen on socket: %s\n", strerror(errno));
             ipc_cleanup(ctx);
             exit(1);
         }
