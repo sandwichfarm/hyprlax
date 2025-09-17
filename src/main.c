@@ -1,6 +1,6 @@
 /*
  * main.c - Application entry point
- * 
+ *
  * Simple entry point that uses the modular hyprlax system.
  */
 
@@ -31,7 +31,7 @@ int main(int argc, char **argv) {
     /* Some libraries don't work properly when stderr is /dev/null */
     char target[256];
     ssize_t len;
-    
+
     /* Check if stderr points to /dev/null */
     len = readlink("/proc/self/fd/2", target, sizeof(target)-1);
     if (len > 0) {
@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
             }
         }
     }
-    
+
     /* Log startup immediately to see if we're even running */
     FILE *startup_log = fopen("/tmp/hyprlax-exec.log", "a");
     if (startup_log) {
@@ -62,7 +62,7 @@ int main(int argc, char **argv) {
         fprintf(startup_log, "  HYPRLAND_INSTANCE_SIGNATURE: %s\n", getenv("HYPRLAND_INSTANCE_SIGNATURE") ?: "NOT SET");
         fflush(startup_log);
     }
-    
+
     /* Check for ctl subcommand first */
     if (argc >= 2 && strcmp(argv[1], "ctl") == 0) {
         if (startup_log) {
@@ -71,7 +71,7 @@ int main(int argc, char **argv) {
         }
         return hyprlax_ctl_main(argc - 1, argv + 1);
     }
-    
+
     /* Check for help/version early */
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
@@ -116,7 +116,7 @@ int main(int argc, char **argv) {
             return 0;
         }
     }
-    
+
     /* Create application context */
     if (startup_log) {
         fprintf(startup_log, "[MAIN] Creating application context\n");
@@ -130,7 +130,7 @@ int main(int argc, char **argv) {
         }
         return 1;
     }
-    
+
     /* Set up signal handlers */
     if (startup_log) {
         fprintf(startup_log, "[MAIN] Setting up signal handlers\n");
@@ -140,7 +140,7 @@ int main(int argc, char **argv) {
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
     signal(SIGPIPE, SIG_IGN);  /* Ignore SIGPIPE like bash does */
-    
+
     /* Initialize application */
     if (startup_log) {
         fprintf(startup_log, "[MAIN] Starting initialization\n");
@@ -160,13 +160,13 @@ int main(int argc, char **argv) {
         fclose(startup_log);
         startup_log = NULL;
     }
-    
+
     /* Run main loop */
     ret = hyprlax_run(ctx);
-    
+
     /* Clean up */
     hyprlax_destroy(ctx);
     g_ctx = NULL;
-    
+
     return ret;
 }

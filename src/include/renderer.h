@@ -1,6 +1,6 @@
 /*
  * renderer.h - Renderer abstraction interface
- * 
+ *
  * Provides an abstraction layer for rendering operations, allowing
  * different rendering backends (OpenGL ES, OpenGL, Vulkan, etc.)
  */
@@ -49,27 +49,27 @@ typedef struct renderer_ops {
     /* Lifecycle */
     int (*init)(void *native_display, void *native_window, const renderer_config_t *config);
     void (*destroy)(void);
-    
+
     /* Frame management */
     void (*begin_frame)(void);
     void (*end_frame)(void);
     void (*present)(void);
-    
+
     /* Texture management */
     texture_t* (*create_texture)(const void *data, int width, int height, texture_format_t format);
     void (*destroy_texture)(texture_t *texture);
     void (*bind_texture)(const texture_t *texture, int unit);
-    
+
     /* Drawing operations */
     void (*clear)(float r, float g, float b, float a);
-    void (*draw_layer)(const texture_t *texture, float x, float y, 
+    void (*draw_layer)(const texture_t *texture, float x, float y,
                       float opacity, float blur_amount);
-    
+
     /* Configuration */
     void (*resize)(int width, int height);
     void (*set_vsync)(bool enabled);
     uint32_t (*get_capabilities)(void);
-    
+
     /* Debug */
     const char* (*get_name)(void);
     const char* (*get_version)(void);

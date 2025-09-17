@@ -1,6 +1,6 @@
 /*
  * shader.h - Shader management interface
- * 
+ *
  * Handles shader compilation, linking, and uniform management.
  */
 
@@ -39,18 +39,18 @@ typedef struct {
 shader_program_t* shader_create_program(const char *name);
 void shader_destroy_program(shader_program_t *program);
 
-int shader_compile(shader_program_t *program, 
-                  const char *vertex_src, 
+int shader_compile(shader_program_t *program,
+                  const char *vertex_src,
                   const char *fragment_src);
 
 int shader_compile_blur(shader_program_t *program);
 
 void shader_use(const shader_program_t *program);
-void shader_set_uniform_float(const shader_program_t *program, 
+void shader_set_uniform_float(const shader_program_t *program,
                              const char *name, float value);
-void shader_set_uniform_vec2(const shader_program_t *program, 
+void shader_set_uniform_vec2(const shader_program_t *program,
                            const char *name, float x, float y);
-void shader_set_uniform_int(const shader_program_t *program, 
+void shader_set_uniform_int(const shader_program_t *program,
                           const char *name, int value);
 
 /* Get cached uniform locations */
