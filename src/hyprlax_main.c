@@ -217,7 +217,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 printf("  -D, --debug               Enable debug output\n");
                 printf("  -L, --debug-log[=FILE]    Write debug output to file (default: /tmp/hyprlax-PID.log)\n");
                 printf("  -r, --renderer <backend>  Renderer backend (gles2, auto)\n");
-                printf("  -p, --platform <backend>  Platform backend (wayland, x11, auto)\n");
+                printf("  -p, --platform <backend>  Platform backend (wayland, auto)\n");
                 printf("  -C, --compositor <backend> Compositor (hyprland, sway, generic, auto)\n");
                 printf("\nEasing types:\n");
                 printf("  linear, quad, cubic, quart, quint, sine, expo, circ,\n");
@@ -340,8 +340,6 @@ int hyprlax_init_platform(hyprlax_context_t *ctx) {
     platform_type_t platform_type = PLATFORM_AUTO;
     if (strcmp(ctx->backends.platform_backend, "wayland") == 0) {
         platform_type = PLATFORM_WAYLAND;
-    } else if (strcmp(ctx->backends.platform_backend, "x11") == 0) {
-        platform_type = PLATFORM_X11;
     }
 
     /* Create platform instance */

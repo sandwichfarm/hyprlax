@@ -15,7 +15,6 @@ Required tools:
 Required libraries:
 - Wayland client libraries
 - Wayland protocols
-- X11 libraries (for X11 support)
 - EGL (OpenGL ES context creation)
 - OpenGL ES 2.0
 - Math library (libm)
@@ -41,10 +40,6 @@ make clean && make
 
 # Build for specific architecture
 make ARCH=aarch64
-
-# Build without X11 support
-make NO_X11=1
-
 # Verbose build output
 make VERBOSE=1
 ```
@@ -86,7 +81,6 @@ hyprlax/
 │   ├── platform/                # Platform abstraction
 │   │   ├── platform.c           # Platform interface
 │   │   ├── wayland.c            # Wayland implementation
-│   │   └── x11.c                # X11 implementation
 │   │
 │   ├── compositor/              # Compositor adapters
 │   │   ├── compositor.c         # Compositor interface
@@ -95,7 +89,6 @@ hyprlax/
 │   │   ├── river.c             # River adapter
 │   │   ├── wayfire.c           # Wayfire adapter
 │   │   ├── niri.c              # Niri adapter
-│   │   ├── x11_ewmh.c          # X11 EWMH adapter
 │   │   └── generic_wayland.c   # Generic Wayland adapter
 │   │
 │   ├── renderer/                # Rendering backends
@@ -133,7 +126,7 @@ See [Architecture Documentation](architecture.md) for detailed system design.
 
 ### Key Components
 
-1. **Platform Layer** - Abstracts Wayland/X11 differences
+1. **Platform Layer** - Abstracts platform differences
 2. **Compositor Adapters** - Handle compositor-specific features
 3. **Renderer** - OpenGL ES 2.0 rendering engine
 4. **Core Engine** - Animation, configuration, and layer management
@@ -324,7 +317,6 @@ make test
 ./tests/test_animation
 ./tests/test_config
 ./tests/test_compositor
-./tests/test_x11_platform
 
 # Run with memory checking
 make memcheck
@@ -352,8 +344,7 @@ make coverage
 - [ ] Multi-layer with different opacities
 - [ ] All easing functions
 - [ ] Workspace switching in each compositor
-- [ ] X11 window manager integration (i3, bspwm, awesome, etc.)
-- [ ] Wayland and X11 platform detection
+- [ ] Wayland platform detection
 - [ ] Blur effects (where supported)
 - [ ] Config file loading
 - [ ] IPC commands via `hyprlax ctl`
@@ -537,7 +528,6 @@ HYPRLAX_DEBUG_TIMING=1 hyprlax wallpaper.jpg
 
 ### Documentation
 - [Wayland Protocol](https://wayland.freedesktop.org/docs/html/)
-- [X11/EWMH Specification](https://specifications.freedesktop.org/wm-spec/latest/)
 - [OpenGL ES 2.0 Reference](https://www.khronos.org/opengles/sdk/docs/man/)
 - [Layer Shell Protocol](https://github.com/swaywm/wlr-protocols)
 

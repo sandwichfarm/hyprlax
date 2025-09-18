@@ -8,7 +8,7 @@ hyprlax uses a modular architecture designed for extensibility and maintainabili
 
 ### Core Principles
 
-1. **Platform Independence** - Abstract platform-specific details (Wayland vs X11)
+1. **Platform Independence** - Abstract platform-specific details
 2. **Compositor Agnostic** - Support any compositor through adapters
 3. **Renderer Flexibility** - Allow different rendering backends
 4. **Module Isolation** - Each module has a single responsibility
@@ -35,11 +35,10 @@ hyprlax uses a modular architecture designed for extensibility and maintainabili
 │  Layer │                               │   Adapter   │              │   Layer     │
 ├────────┤                               ├─────────────┤              ├─────────────┤
 │Wayland │                               │  Hyprland   │              │   GLES2     │
-│  X11   │                               │    Sway     │              │   Shader    │
+│        │                               │    Sway     │              │   Shader    │
 └────────┘                               │   River     │              └─────────────┘
                                         │   Wayfire   │
                                         │    Niri     │
-                                        │ X11 EWMH    │
                                         └─────────────┘
 ```
 
@@ -86,7 +85,7 @@ hyprlax uses a modular architecture designed for extensibility and maintainabili
   - `platform_detect()` - Auto-detect platform
   - `platform_create()` - Create platform instance
   - `platform_connect()` - Connect to display server
-- **Implementations**: wayland.c, x11.c
+- **Implementations**: wayland.c
 
 #### wayland.c
 - **Purpose**: Wayland platform implementation
@@ -99,14 +98,6 @@ hyprlax uses a modular architecture designed for extensibility and maintainabili
 - **Key Features**:
   - Layer shell surface creation
   - EGL window management
-  - Event handling
-
-#### x11.c
-- **Purpose**: X11 platform implementation
-- **Key Features**:
-  - X11 window creation
-  - EWMH property management
-  - GLX/EGL context creation
   - Event handling
 
 ### Compositor Adapters (`src/compositor/`)
@@ -128,7 +119,6 @@ hyprlax uses a modular architecture designed for extensibility and maintainabili
 | river.c | River | Control socket | Tag-based workspaces |
 | wayfire.c | Wayfire | DBus/Socket | 2D workspace grid |
 | niri.c | Niri | Custom IPC | Scrollable workspaces |
-| x11_ewmh.c | X11 WMs | X11 properties | EWMH desktop changes |
 | generic_wayland.c | Generic | None | Basic layer shell |
 
 ### Renderer Modules (`src/renderer/`)

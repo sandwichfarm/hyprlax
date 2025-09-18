@@ -111,7 +111,6 @@ START_TEST(test_config_string_validation)
     
     strcpy(config.platform, "invalid_platform");
     if (strcmp(config.platform, "wayland") != 0 && 
-        strcmp(config.platform, "x11") != 0 &&
         strcmp(config.platform, "auto") != 0) {
         strcpy(config.platform, "auto");
     }

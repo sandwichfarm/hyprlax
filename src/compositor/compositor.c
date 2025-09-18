@@ -117,15 +117,7 @@ compositor_type_t compositor_detect(void) {
         return COMPOSITOR_RIVER;
     }
 #endif
-
-#ifdef ENABLE_X11_EWMH
-    /* X11/EWMH */
-    if (compositor_x11_ewmh_ops.detect && compositor_x11_ewmh_ops.detect()) {
-        DEBUG_LOG("Detected X11/EWMH environment");
-        return COMPOSITOR_X11_EWMH;
-    }
-#endif
-
+    
 #ifdef ENABLE_GENERIC_WAYLAND
     /* Generic Wayland (fallback) */
     if (compositor_generic_wayland_ops.detect && compositor_generic_wayland_ops.detect()) {
@@ -201,14 +193,7 @@ int compositor_create(compositor_adapter_t **out_adapter, compositor_type_t type
             adapter->type = COMPOSITOR_GENERIC_WAYLAND;
             break;
 #endif
-
-#ifdef ENABLE_X11_EWMH
-        case COMPOSITOR_X11_EWMH:
-            adapter->ops = &compositor_x11_ewmh_ops;
-            adapter->type = COMPOSITOR_X11_EWMH;
-            break;
-#endif
-
+            
         default:
             fprintf(stderr, "Error: Compositor type %d not available in this build\n", type);
             free(adapter);

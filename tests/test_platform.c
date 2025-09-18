@@ -8,7 +8,6 @@
 // Mock platform structures (simplified versions from platform.h)
 typedef enum {
     PLATFORM_WAYLAND,
-    PLATFORM_X11,
     PLATFORM_AUTO
 } platform_type_t;
 
@@ -23,8 +22,6 @@ typedef struct {
 platform_type_t detect_platform(void) {
     if (getenv("WAYLAND_DISPLAY")) {
         return PLATFORM_WAYLAND;
-    } else if (getenv("DISPLAY")) {
-        return PLATFORM_X11;
     }
     return PLATFORM_AUTO;
 }
@@ -34,11 +31,9 @@ START_TEST(test_platform_detection_wayland)
 {
     // Save original env
     char *orig_wayland = getenv("WAYLAND_DISPLAY");
-    char *orig_x11 = getenv("DISPLAY");
     
     // Set Wayland environment
     setenv("WAYLAND_DISPLAY", "wayland-1", 1);
-    unsetenv("DISPLAY");
     
     platform_type_t detected = detect_platform();
     ck_assert_int_eq(detected, PLATFORM_WAYLAND);
@@ -46,48 +41,22 @@ START_TEST(test_platform_detection_wayland)
     // Restore env
     if (orig_wayland) setenv("WAYLAND_DISPLAY", orig_wayland, 1);
     else unsetenv("WAYLAND_DISPLAY");
-    if (orig_x11) setenv("DISPLAY", orig_x11, 1);
 }
 END_TEST
 
-START_TEST(test_platform_detection_x11)
+START_TEST(test_platform_detection_fallback)
 {
     // Save original env
     char *orig_wayland = getenv("WAYLAND_DISPLAY");
-    char *orig_x11 = getenv("DISPLAY");
     
-    // Set X11 environment
+    // Unset Wayland - should fallback to AUTO
     unsetenv("WAYLAND_DISPLAY");
-    setenv("DISPLAY", ":0", 1);
     
     platform_type_t detected = detect_platform();
-    ck_assert_int_eq(detected, PLATFORM_X11);
+    ck_assert_int_eq(detected, PLATFORM_AUTO);
     
     // Restore env
     if (orig_wayland) setenv("WAYLAND_DISPLAY", orig_wayland, 1);
-    if (orig_x11) setenv("DISPLAY", orig_x11, 1);
-    else unsetenv("DISPLAY");
-}
-END_TEST
-
-START_TEST(test_platform_detection_priority)
-{
-    // Save original env
-    char *orig_wayland = getenv("WAYLAND_DISPLAY");
-    char *orig_x11 = getenv("DISPLAY");
-    
-    // Set both - Wayland should take priority
-    setenv("WAYLAND_DISPLAY", "wayland-1", 1);
-    setenv("DISPLAY", ":0", 1);
-    
-    platform_type_t detected = detect_platform();
-    ck_assert_int_eq(detected, PLATFORM_WAYLAND);
-    
-    // Restore env
-    if (orig_wayland) setenv("WAYLAND_DISPLAY", orig_wayland, 1);
-    else unsetenv("WAYLAND_DISPLAY");
-    if (orig_x11) setenv("DISPLAY", orig_x11, 1);
-    else unsetenv("DISPLAY");
 }
 END_TEST
 
@@ -96,13 +65,13 @@ START_TEST(test_platform_force_selection)
     // Save original env
     char *orig_platform = getenv("HYPRLAX_PLATFORM");
     
-    // Force X11 even if Wayland is available
-    setenv("HYPRLAX_PLATFORM", "x11", 1);
+    // Force Wayland platform
+    setenv("HYPRLAX_PLATFORM", "wayland", 1);
     setenv("WAYLAND_DISPLAY", "wayland-1", 1);
     
     // In real implementation, this would check the forced platform
     const char *forced = getenv("HYPRLAX_PLATFORM");
-    ck_assert_str_eq(forced, "x11");
+    ck_assert_str_eq(forced, "wayland");
     
     // Restore env
     if (orig_platform) setenv("HYPRLAX_PLATFORM", orig_platform, 1);
@@ -135,16 +104,12 @@ START_TEST(test_platform_capabilities)
         int has_transparency;
     } capabilities[] = {
         { PLATFORM_WAYLAND, 1, 0, 1 },
-        { PLATFORM_X11, 0, 1, 1 }
     };
     
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 1; i++) {
         if (capabilities[i].type == PLATFORM_WAYLAND) {
             ck_assert_int_eq(capabilities[i].has_layer_shell, 1);
             ck_assert_int_eq(capabilities[i].has_ewmh, 0);
-        } else if (capabilities[i].type == PLATFORM_X11) {
-            ck_assert_int_eq(capabilities[i].has_layer_shell, 0);
-            ck_assert_int_eq(capabilities[i].has_ewmh, 1);
         }
         ck_assert_int_eq(capabilities[i].has_transparency, 1);
     }
@@ -160,8 +125,7 @@ Suite *platform_suite(void)
     tc_core = tcase_create("Core");
     
     tcase_add_test(tc_core, test_platform_detection_wayland);
-    tcase_add_test(tc_core, test_platform_detection_x11);
-    tcase_add_test(tc_core, test_platform_detection_priority);
+    tcase_add_test(tc_core, test_platform_detection_fallback);
     tcase_add_test(tc_core, test_platform_force_selection);
     tcase_add_test(tc_core, test_platform_initialization);
     tcase_add_test(tc_core, test_platform_capabilities);

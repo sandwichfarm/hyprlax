@@ -3,9 +3,6 @@ name: Feature Branch Build
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    branches:
-      - master
-      - main
   
   workflow_dispatch:
     inputs:
@@ -92,8 +89,6 @@ jobs:
             libwayland-dev \
             libegl1-mesa-dev \
             libgles2-mesa-dev \
-            libx11-dev \
-            libxext-dev \
             wayland-scanner++ \
             pkg-config
       
@@ -113,13 +108,15 @@ jobs:
           echo "Built from ${{ steps.pr_info.outputs.head_ref }} @ ${{ steps.pr_info.outputs.head_sha }}" > dist/BUILD_INFO.txt
           echo "PR #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}" >> dist/BUILD_INFO.txt
           echo "Built on $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> dist/BUILD_INFO.txt
-          tar -czf hyprlax-${{ steps.pr_info.outputs.head_ref }}-${{ github.run_number }}.tar.gz -C dist .
+          # Sanitize branch name for filename (replace / with -)
+          BRANCH_NAME=$(echo "${{ steps.pr_info.outputs.head_ref }}" | sed 's/\//-/g')
+          tar -czf hyprlax-${BRANCH_NAME}-${{ github.run_number }}.tar.gz -C dist .
       
       - name: Upload artifact
         if: steps.pr_info.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: hyprlax-${{ steps.pr_info.outputs.head_ref }}-${{ github.run_number }}
+          name: hyprlax-pr-${{ steps.pr_info.outputs.pr_number }}-run-${{ github.run_number }}
           path: hyprlax-*.tar.gz
           retention-days: 14
       

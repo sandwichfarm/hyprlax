@@ -87,7 +87,7 @@ int main(int argc, char **argv) {
             printf("  -c, --config <file>       Load configuration from file\n");
             printf("  -D, --debug               Enable debug output\n");
             printf("  -r, --renderer <backend>  Renderer backend (gles2, auto)\n");
-            printf("  -p, --platform <backend>  Platform backend (wayland, x11, auto)\n");
+            printf("  -p, --platform <backend>  Platform backend (wayland, auto)\n");
             printf("  -C, --compositor <backend> Compositor (hyprland, sway, generic, auto)\n");
             printf("\nMulti-monitor options:\n");
             printf("  --primary-only            Only use primary monitor\n");

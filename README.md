@@ -4,7 +4,6 @@ Dynamic parallax wallpaper engine with multi-compositor support for Linux.
 
 <p align="center">
   <img src="https://img.shields.io/badge/Wayland-Native-green" alt="Wayland Native">
-  <img src="https://img.shields.io/badge/X11-EWMH-blue" alt="X11 EWMH">
   <img src="https://img.shields.io/badge/GPU-Accelerated-orange" alt="GPU Accelerated">
   <img src="https://img.shields.io/badge/Multi--Compositor-Support-purple" alt="Multi-Compositor">
 </p>
@@ -19,7 +18,7 @@ Dynamic parallax wallpaper engine with multi-compositor support for Linux.
 - 🖼️ **Parallax effect** - Wallpaper shifts as you switch workspaces
 - 🌌 **Multi-layer parallax** - Create depth with multiple layers moving at different speeds
 - 🔍 **Depth-of-field blur** - Realistic depth perception with per-layer blur effects
-- 🖥️ **Multi-compositor support** - Works with Hyprland, Sway, River, Wayfire, Niri, X11 WMs, and more
+- 🖥️ **Multi-compositor support** - Works with Hyprland, Sway, River, Wayfire, Niri, and more
 - ⚡ **Lightweight** - Native client using appropriate protocols for each platform
 - 🎨 **Customizable** - Per-layer easing functions, delays, and animation parameters
 - 🔄 **Seamless transitions** - Interrupts and chains animations smoothly
@@ -37,15 +36,6 @@ Dynamic parallax wallpaper engine with multi-compositor support for Linux.
 | **Niri** | Scrollable workspaces | Smooth scrolling | ✅ Full Support |
 | **Generic Wayland** | Basic workspaces | Any wlr-layer-shell compositor | ✅ Basic Support |
 
-### X11 Window Managers
-| Window Manager | Protocol | Features | Status |
-|---------------|----------|----------|---------|
-| **i3** | EWMH + i3 IPC | Workspace switching | ✅ Full Support |
-| **bspwm** | EWMH | Desktop switching | ✅ Full Support |
-| **awesome** | EWMH | Tag system | ✅ Full Support |
-| **xmonad** | EWMH | Workspace switching | ✅ Full Support |
-| **dwm** | EWMH | Tag system | ✅ Full Support |
-| **Others** | EWMH | Basic desktop switching | ✅ Basic Support |
 
 ## Installation
 
@@ -93,8 +83,6 @@ You can also specify the location directly:
 #### Wayland
 - Wayland, wayland-protocols, Mesa (EGL/GLES)
 
-#### X11
-- libX11, libXext, Mesa (EGL/GLES)
 
 Full dependency list: [installation guide](docs/installation.md#dependencies)
 
@@ -115,9 +103,6 @@ hyprlax --config ~/.config/hyprlax/parallax.conf
 
 # Force specific compositor
 HYPRLAX_COMPOSITOR=sway hyprlax ~/Pictures/wallpaper.jpg
-
-# X11 window managers (i3, bspwm, awesome, etc.)
-hyprlax --platform x11 ~/Pictures/wallpaper.jpg
 ```
 
 ### Key Options
@@ -125,7 +110,7 @@ hyprlax --platform x11 ~/Pictures/wallpaper.jpg
 - `-s, --shift` - Pixels to shift per workspace (default: 200)
 - `-d, --duration` - Animation duration in seconds (default: 1.0)
 - `-e, --easing` - Animation curve: linear, sine, expo, elastic, etc.
-- `-p, --platform` - Platform backend: `wayland`, `x11`, or `auto` (default: auto)
+- `-p, --platform` - Platform backend: `wayland` or `auto` (default: auto)
 - `-C, --compositor` - Compositor: `hyprland`, `sway`, `generic`, `auto` (default: auto)
 - `--layer` - Add layer: `image:shift:opacity[:easing[:delay[:duration[:blur]]]]`
 - `--config` - Load from config file
@@ -158,23 +143,6 @@ Add to your River init script:
 riverctl spawn "pkill hyprlax; hyprlax ~/Pictures/wallpaper.jpg"
 ```
 
-### X11 Window Managers
-For i3, bspwm, awesome, xmonad, dwm, or other EWMH-compatible window managers, add to your config:
-
-**i3/Sway:**
-```bash
-exec_always pkill hyprlax; hyprlax --platform x11 ~/Pictures/wallpaper.jpg
-```
-
-**bspwm (bspwmrc):**
-```bash
-pkill hyprlax; hyprlax --platform x11 ~/Pictures/wallpaper.jpg &
-```
-
-**awesome (rc.lua):**
-```lua
-awful.spawn.with_shell("pkill hyprlax; hyprlax --platform x11 ~/Pictures/wallpaper.jpg")
-```
 
 ### Other Compositors
 See [Compositor Configuration Guide](docs/compositors.md) for specific setup instructions.
@@ -250,7 +218,7 @@ See [CHANGELOG.md](CHANGELOG.md) for a detailed list of changes in each release.
 ### Architecture
 
 hyprlax uses a modular architecture with clear separation of concerns:
-- **Platform abstraction** - Wayland and X11 backends
+- **Platform abstraction** - Wayland backend with modular design
 - **Compositor adapters** - Specific compositor implementations
 - **Renderer abstraction** - OpenGL ES 2.0 rendering
 - **Core engine** - Animation and configuration management
@@ -305,7 +273,7 @@ MIT
 
 ## Roadmap
 
-- [x] Multi-compositor support (Wayland & X11)
+- [x] Multi-compositor support (Wayland)
 - [x] Dynamic layer loading/unloading
 - [ ] Multi-monitor support
 - [ ] Video wallpaper support

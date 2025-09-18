@@ -21,23 +21,18 @@ CFLAGS += $(BUILD_DEFINES)
 
 # Feature flags (all enabled by default)
 ENABLE_WAYLAND ?= 1
-ENABLE_X11 ?= 1
 ENABLE_HYPRLAND ?= 1
 ENABLE_SWAY ?= 1
 ENABLE_WAYFIRE ?= 1
 ENABLE_NIRI ?= 1
 ENABLE_RIVER ?= 1
 ENABLE_GENERIC_WAYLAND ?= 1
-ENABLE_X11_EWMH ?= 1
 ENABLE_GLES2 ?= 1
 
 # Build defines based on feature flags
 BUILD_DEFINES =
 ifeq ($(ENABLE_WAYLAND),1)
 BUILD_DEFINES += -DENABLE_WAYLAND
-endif
-ifeq ($(ENABLE_X11),1)
-BUILD_DEFINES += -DENABLE_X11
 endif
 ifeq ($(ENABLE_HYPRLAND),1)
 BUILD_DEFINES += -DENABLE_HYPRLAND
@@ -57,9 +52,6 @@ endif
 ifeq ($(ENABLE_GENERIC_WAYLAND),1)
 BUILD_DEFINES += -DENABLE_GENERIC_WAYLAND
 endif
-ifeq ($(ENABLE_X11_EWMH),1)
-BUILD_DEFINES += -DENABLE_X11_EWMH
-endif
 ifeq ($(ENABLE_GLES2),1)
 BUILD_DEFINES += -DENABLE_GLES2
 endif
@@ -71,9 +63,6 @@ PKG_DEPS += wayland-client wayland-protocols wayland-egl
 endif
 ifeq ($(ENABLE_GLES2),1)
 PKG_DEPS += egl glesv2
-endif
-ifeq ($(ENABLE_X11),1)
-PKG_DEPS += x11 xext
 endif
 
 # Get package flags
@@ -109,9 +98,6 @@ PLATFORM_SRCS = src/platform/platform.c
 ifeq ($(ENABLE_WAYLAND),1)
 PLATFORM_SRCS += src/platform/wayland.c
 endif
-ifeq ($(ENABLE_X11),1)
-PLATFORM_SRCS += src/platform/x11.c
-endif
 
 # Compositor module sources (conditional)
 COMPOSITOR_SRCS = src/compositor/compositor.c src/compositor/workspace_models.c
@@ -133,9 +119,6 @@ endif
 ifeq ($(ENABLE_GENERIC_WAYLAND),1)
 COMPOSITOR_SRCS += src/compositor/generic_wayland.c
 endif
-ifeq ($(ENABLE_X11_EWMH),1)
-COMPOSITOR_SRCS += src/compositor/x11_ewmh.c
-endif
 
 # Main module sources
 MAIN_SRCS = src/main.c src/hyprlax_main.c src/hyprlax_ctl.c
@@ -156,19 +139,15 @@ all: $(TARGET)
 # Convenience targets for common configurations
 hyprland-minimal:
 	$(MAKE) clean
-	$(MAKE) ENABLE_X11=0 ENABLE_SWAY=0 ENABLE_WAYFIRE=0 ENABLE_NIRI=0 ENABLE_RIVER=0 ENABLE_X11_EWMH=0 ENABLE_GENERIC_WAYLAND=0
-
-x11-only:
-	$(MAKE) clean
-	$(MAKE) ENABLE_WAYLAND=0 ENABLE_HYPRLAND=0 ENABLE_SWAY=0 ENABLE_WAYFIRE=0 ENABLE_NIRI=0 ENABLE_RIVER=0 ENABLE_GENERIC_WAYLAND=0
+	$(MAKE) ENABLE_SWAY=0 ENABLE_WAYFIRE=0 ENABLE_NIRI=0 ENABLE_RIVER=0 ENABLE_GENERIC_WAYLAND=0
 
 wayland-only:
 	$(MAKE) clean
-	$(MAKE) ENABLE_X11=0 ENABLE_X11_EWMH=0
+	$(MAKE)
 
 sway-minimal:
 	$(MAKE) clean
-	$(MAKE) ENABLE_X11=0 ENABLE_HYPRLAND=0 ENABLE_WAYFIRE=0 ENABLE_NIRI=0 ENABLE_RIVER=0 ENABLE_X11_EWMH=0 ENABLE_GENERIC_WAYLAND=0
+	$(MAKE) ENABLE_HYPRLAND=0 ENABLE_WAYFIRE=0 ENABLE_NIRI=0 ENABLE_RIVER=0 ENABLE_GENERIC_WAYLAND=0
 
 # Generate protocol files
 protocols/xdg-shell-protocol.c: $(XDG_SHELL_PROTOCOL)
@@ -193,7 +172,7 @@ protocols/wlr-layer-shell-client-protocol.h: $(LAYER_SHELL_PROTOCOL)
 	$(CC) $(CFLAGS) $(PKG_CFLAGS) -c $< -o $@
 
 $(TARGET): $(OBJS)
-	$(CC) $(LDFLAGS) $(OBJS) $(PKG_LIBS) -lm -lX11 -o $@
+	$(CC) $(LDFLAGS) $(OBJS) $(PKG_LIBS) -lm -o $@
 
 clean:
 	rm -f $(TARGET) $(OBJS) $(PROTOCOL_SRCS) $(PROTOCOL_HDRS)
@@ -227,7 +206,7 @@ VALGRIND_FLAGS = --leak-check=full --show-leak-kinds=definite,indirect --track-o
 # For Arch Linux, enable debuginfod for symbol resolution
 export DEBUGINFOD_URLS ?= https://debuginfod.archlinux.org
 
-TEST_TARGETS = tests/test_integration tests/test_ipc tests/test_blur tests/test_config tests/test_animation tests/test_easing tests/test_shader tests/test_platform tests/test_compositor tests/test_modules tests/test_renderer tests/test_workspace_changes tests/test_animation_state tests/test_config_validation tests/test_x11_platform tests/test_hyprland_events
+TEST_TARGETS = tests/test_integration tests/test_ipc tests/test_blur tests/test_config tests/test_animation tests/test_easing tests/test_shader tests/test_platform tests/test_compositor tests/test_modules tests/test_renderer tests/test_workspace_changes tests/test_animation_state tests/test_config_validation tests/test_hyprland_events
 ALL_TESTS = $(filter tests/test_%, $(wildcard tests/test_*.c))
 ALL_TEST_TARGETS = $(ALL_TESTS:.c=)
 
@@ -275,9 +254,6 @@ tests/test_animation_state: tests/test_animation_state.c
 	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
 
 tests/test_config_validation: tests/test_config_validation.c
-	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
-
-tests/test_x11_platform: tests/test_x11_platform.c
 	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
 
 # Hyprland event parsing tests (link hyprland adapter and core compositor utils)

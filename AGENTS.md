@@ -16,7 +16,7 @@ Hyprlax is a smooth parallax wallpaper animation system for Hyprland (Wayland co
 ### Architecture
 - Modular architecture with separated concerns:
   - **Core**: Animation engine, configuration, layer management
-  - **Platform**: Wayland/X11 abstraction layer
+  - **Platform**: Wayland abstraction layer
   - **Compositor**: Adapter system for different compositors
   - **Renderer**: OpenGL ES 2.0 rendering with custom shaders
 - Runtime IPC system for dynamic control
@@ -153,7 +153,6 @@ hyprlax/
 │   ├── platform/           # Platform abstraction
 │   │   ├── platform.c      # Platform detection/initialization
 │   │   ├── wayland.c       # Wayland implementation
-│   │   └── x11.c           # X11 implementation
 │   ├── compositor/         # Compositor adapters
 │   │   ├── compositor.c    # Compositor detection/management
 │   │   ├── hyprland.c      # Hyprland IPC integration
@@ -162,7 +161,6 @@ hyprlax/
 │   │   ├── niri.c          # Niri (scrollable workspaces)
 │   │   ├── river.c         # River (tag-based workspaces)
 │   │   ├── generic_wayland.c # Generic Wayland fallback
-│   │   └── x11_ewmh.c      # X11 EWMH support
 │   ├── renderer/           # Rendering system
 │   │   ├── renderer.c      # Renderer interface
 │   │   ├── shader.c        # Shader management
@@ -224,12 +222,10 @@ When adding new features:
   - **River**: Tag-based workspace system
   - **Niri**: Scrollable workspace model
   - **Generic Wayland**: Fallback for unsupported compositors
-  - **X11 EWMH**: Support for i3, bspwm, etc.
 
 #### Platform Abstraction
 - **Location**: `src/platform/`
 - **Wayland**: Layer-shell protocol implementation
-- **X11**: Traditional window management
 - **Auto-detection**: Runtime platform selection
 
 ## Commit Message Format

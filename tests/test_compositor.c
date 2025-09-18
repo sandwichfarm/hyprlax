@@ -13,7 +13,6 @@ typedef enum {
     COMPOSITOR_SWAY,
     COMPOSITOR_RIVER,
     COMPOSITOR_GENERIC_WAYLAND,
-    COMPOSITOR_X11_EWMH,
     COMPOSITOR_AUTO
 } compositor_type_t;
 
@@ -27,14 +26,12 @@ compositor_type_t detect_compositor(void) {
         if (strcmp(forced, "river") == 0) return COMPOSITOR_RIVER;
         if (strcmp(forced, "wayfire") == 0) return COMPOSITOR_WAYFIRE;
         if (strcmp(forced, "niri") == 0) return COMPOSITOR_NIRI;
-        if (strcmp(forced, "x11") == 0) return COMPOSITOR_X11_EWMH;
         if (strcmp(forced, "generic") == 0) return COMPOSITOR_GENERIC_WAYLAND;
     }
     
     // Auto-detect based on environment
     if (getenv("HYPRLAND_INSTANCE_SIGNATURE")) return COMPOSITOR_HYPRLAND;
     if (getenv("SWAYSOCK")) return COMPOSITOR_SWAY;
-    if (getenv("I3SOCK") && !getenv("WAYLAND_DISPLAY")) return COMPOSITOR_X11_EWMH;
     if (getenv("WAYFIRE_SOCKET")) return COMPOSITOR_WAYFIRE;
     
     const char *desktop = getenv("XDG_CURRENT_DESKTOP");
@@ -48,7 +45,6 @@ compositor_type_t detect_compositor(void) {
     
     // Fallback
     if (getenv("WAYLAND_DISPLAY")) return COMPOSITOR_GENERIC_WAYLAND;
-    if (getenv("DISPLAY")) return COMPOSITOR_X11_EWMH;
     
     return COMPOSITOR_AUTO;
 }
@@ -81,30 +77,6 @@ START_TEST(test_compositor_detection_sway)
     if (orig) setenv("SWAYSOCK", orig, 1);
     else unsetenv("SWAYSOCK");
     if (orig_hypr) setenv("HYPRLAND_INSTANCE_SIGNATURE", orig_hypr, 1);
-}
-END_TEST
-
-START_TEST(test_compositor_detection_i3)
-{
-    char *orig_i3 = getenv("I3SOCK");
-    char *orig_wl = getenv("WAYLAND_DISPLAY");
-    char *orig_hypr = getenv("HYPRLAND_INSTANCE_SIGNATURE");
-    char *orig_sway = getenv("SWAYSOCK");
-    
-    // Clear all compositor hints
-    unsetenv("HYPRLAND_INSTANCE_SIGNATURE");
-    unsetenv("SWAYSOCK");
-    setenv("I3SOCK", "/run/user/1000/i3-ipc.sock", 1);
-    unsetenv("WAYLAND_DISPLAY");  // Ensure X11 mode
-    
-    compositor_type_t detected = detect_compositor();
-    ck_assert_int_eq(detected, COMPOSITOR_X11_EWMH);
-    
-    if (orig_i3) setenv("I3SOCK", orig_i3, 1);
-    else unsetenv("I3SOCK");
-    if (orig_wl) setenv("WAYLAND_DISPLAY", orig_wl, 1);
-    if (orig_hypr) setenv("HYPRLAND_INSTANCE_SIGNATURE", orig_hypr, 1);
-    if (orig_sway) setenv("SWAYSOCK", orig_sway, 1);
 }
 END_TEST
 
@@ -209,8 +181,7 @@ START_TEST(test_compositor_capabilities)
         { COMPOSITOR_RIVER, 0, 0, 1, 0 },
         { COMPOSITOR_WAYFIRE, 0, 1, 1, 1 },
         { COMPOSITOR_NIRI, 0, 1, 1, 0 },
-        { COMPOSITOR_GENERIC_WAYLAND, 0, 0, 0, 0 },
-        { COMPOSITOR_X11_EWMH, 0, 0, 0, 0 }
+        { COMPOSITOR_GENERIC_WAYLAND, 0, 0, 0, 0 }
     };
     
     // Verify known capabilities
@@ -259,7 +230,6 @@ Suite *compositor_suite(void)
     tc_core = tcase_create("Detection");
     tcase_add_test(tc_core, test_compositor_detection_hyprland);
     tcase_add_test(tc_core, test_compositor_detection_sway);
-    tcase_add_test(tc_core, test_compositor_detection_i3);
     tcase_add_test(tc_core, test_compositor_force_selection);
     tcase_add_test(tc_core, test_compositor_xdg_desktop_detection);
     tcase_add_test(tc_core, test_compositor_fallback_wayland);
