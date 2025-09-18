@@ -49,7 +49,6 @@ The test suite requires significant updates to align with the new modular archit
 | River | ✅ | ❌ | ❌ |
 | Wayfire | ✅ | ❌ | ❌ |
 | Niri | ✅ | ❌ | ❌ |
-| X11 EWMH | ✅ | ❌ | ❌ |
 | Generic | ✅ | N/A | ⚠️ |
 
 ## Required Actions
@@ -126,13 +125,12 @@ test:
 |----------|------------|------------|
 | Wayland | Hyprland, Sway, River | Full |
 | Wayland | Wayfire, Niri | Basic |
-| X11 | i3, bspwm, awesome | Basic |
 | Generic | wlr-layer-shell | Minimal |
 
 ## Mocking Strategy
 
 ### Module Mocks
-- **Mock Platform**: Simulates Wayland/X11 without display server
+- **Mock Platform**: Simulates Wayland without display server
 - **Mock Compositor**: Returns predetermined workspace events
 - **Mock Renderer**: Validates OpenGL calls without context
 

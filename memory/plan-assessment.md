@@ -8,19 +8,18 @@
 - Clear separation of concerns: core engine vs. adapters; good public API sketch.
 - Thoughtful capability detection and graceful degradation strategy.
 - Performance awareness (event batching, render skipping, adaptive quality).
-- Acknowledges protocol fallbacks (layer‑shell → xdg‑shell → X11) and outlines IPC per compositor.
+- Acknowledges protocol fallbacks (layer‑shell → xdg‑shell) and outlines IPC per compositor.
 - Sensible testing strata (unit/integration/system) and migration phases.
 
 ## Misalignments with Project Constraints
 - Build system: proposes CMake + multi‑repo feel; current standard is GNU Make. Switching build systems adds churn without direct user value.
 - Single‑binary requirement: plan moves to shared libraries and a plugin loader, conflicting with “single‑binary daemon” architecture. Packaging and startup reliability may suffer.
-- Graphics stack: introduces GLX for X11; project standard is OpenGL ES 2.0 with EGL. EGL works on X11 too and avoids divergent code paths and GL feature skew.
+- Graphics stack: project standard is OpenGL ES 2.0 with EGL, avoiding divergent code paths and GL feature skew.
 - Dependencies and tooling: CI/CD infra, plugin SDK, and test frameworks likely add dependencies (contrary to “don’t add deps without discussion”).
 
 ## Technical Risks and Oversights
 - Runtime adapter switching: of limited practical value (users don’t switch compositors mid‑session). Adds complex lifecycle/state migration with little payoff. Prefer restart‑on‑change.
 - GNOME/KDE background support: xdg‑shell alone is insufficient for a true wallpaper experience. GNOME typically requires gnome‑shell integration/extension; KDE uses Plasma plugins or specific protocols. The plan marks these with an asterisk but underestimates engineering effort and permissions/UX constraints.
-- X11 path details: to behave as a desktop background you likely need to manage the root window, EWMH atoms (`_XROOTPMAP_ID`), and interaction with desktop managers (or reparent behind panels). This is nontrivial and not covered in the plan’s tasks.
 - Security of plugin discovery: loading from `~/.local/lib/...` increases attack surface. If plugins remain, prefer opt‑in, signed or checksum‑verified paths, and never load from writable directories by default.
 - Performance overhead: vtable indirection is cheap, but adapter boundary placement matters. Ensure render‑loop hot paths contain no allocation, logging, or cross‑module chatter. The plan doesn’t explicitly call this out.
 - Software rendering fallback: unspecified implementation and likely to miss performance targets. Better to fail clearly or gate behind a compile‑time option.
@@ -29,7 +28,7 @@
 
 ## Scope and Sequencing Concerns
 - Timeline optimism: multi‑compositor support, plugin system, runtime switching, and “5+ compositors at launch” are aggressive for 1–3 devs in 16–20 weeks while preserving performance and stability.
-- Parallelization: many tasks depend on a stable core/adapter boundary. Start with a single adapter (Hyprland) moved behind the abstraction inside one binary, then add Sway, then X11, before considering plugins or runtime switching.
+- Parallelization: many tasks depend on a stable core/adapter boundary. Start with a single adapter (Hyprland) moved behind the abstraction inside one binary, then add Sway, before considering plugins or runtime switching.
 
 ## Testing and Toolchain Notes
 - Keep GNU Make; split the monolith into logical units under `src/` with headers in `src/include/`. Add a `make debug` target and a minimal test harness only for pure‑C core code (animation/easing, config parsing), avoiding new deps.
@@ -45,11 +44,11 @@
 2. Introduce internal modules with clear headers under `src/`:
    - `core/` (animation, layers, easing, config, image loading)
    - `gfx/` (shaders, textures, render) – consumes a provided GL context
-   - `platform/` (display + graphics context) with Wayland(EGL) and X11(EGL) implementations
-   - `compositor/` (Hyprland IPC first; later Sway/i3 via i3 IPC; X11 EWMH)
-3. Use EGL for both Wayland and X11 to maintain GLES2 uniformity.
+   - `platform/` (display + graphics context) with Wayland(EGL) implementation
+   - `compositor/` (Hyprland IPC first; later Sway/i3 via i3 IPC)
+3. Use EGL for Wayland to maintain GLES2 uniformity.
 4. Define adapter interfaces as plain C structs with function pointers, but link implementations statically at first; select at runtime by detection.
-5. Narrow initial target set to: Hyprland (Wayland) → Sway (Wayland) → X11 (EWMH), in that order. Defer GNOME/KDE “wallpaper” until a concrete integration approach is proven.
+5. Narrow initial target set to: Hyprland (Wayland) → Sway (Wayland), in that order. Defer GNOME/KDE “wallpaper” until a concrete integration approach is proven.
 6. Replace “runtime adapter switching” with “restart on adapter change”. Implement robust teardown/re‑init paths and leak checks.
 7. Establish strict hot‑path rules: no allocations, no I/O, no dlopen, no string formatting in `render_frame()` and animation tick. Add a micro‑benchmark target.
 8. Add focused tests only for pure core logic (easing, timeline, config) with a tiny in‑tree test harness. Avoid introducing a unit test framework dependency initially.
@@ -60,7 +59,6 @@
 - Step 1: Introduce `platform_wayland.c` (EGL+layer‑shell/xdg‑shell) and a narrow interface the renderer consumes; migrate current Wayland/EGL code there.
 - Step 2: Extract Hyprland IPC into `compositor_hyprland.c` behind a simple compositor interface already used by the main loop.
 - Step 3: Add Sway/i3 adapter (IPC) reusing the Wayland platform code; share render path, validate workspace events parity.
-- Step 4: Add X11 platform using EGL on X11 (avoid GLX); implement root‑window background behavior with EWMH, gated behind an experimental flag.
 - Step 5: Only after the above is stable and perf‑clean, consider optional pluginization as a separate milestone.
 
 ## Conclusion

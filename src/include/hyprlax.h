@@ -27,7 +27,7 @@ typedef enum {
 /* Backend selection */
 typedef struct {
     const char *renderer_backend;    /* "gles2", "gl3", "vulkan", "auto" */
-    const char *platform_backend;    /* "wayland", "x11", "auto" */
+    const char *platform_backend;    /* "wayland", "auto" */
     const char *compositor_backend;  /* "hyprland", "sway", "generic", "auto" */
 } backend_config_t;
 

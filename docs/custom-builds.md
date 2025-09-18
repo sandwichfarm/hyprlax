@@ -16,27 +16,19 @@ make all    # Same as above
 Build with only Wayland platform and Hyprland compositor support:
 ```bash
 make clean
-make ENABLE_X11=0 ENABLE_SWAY=0 ENABLE_WAYFIRE=0 ENABLE_NIRI=0 ENABLE_RIVER=0 ENABLE_X11_EWMH=0 ENABLE_GENERIC_WAYLAND=0
-```
-
-### X11-only Build
-Build with only X11 platform support:
-```bash
-make clean
-make ENABLE_WAYLAND=0 ENABLE_HYPRLAND=0 ENABLE_SWAY=0 ENABLE_WAYFIRE=0 ENABLE_NIRI=0 ENABLE_RIVER=0 ENABLE_GENERIC_WAYLAND=0
+make ENABLE_SWAY=0 ENABLE_WAYFIRE=0 ENABLE_NIRI=0 ENABLE_RIVER=0 ENABLE_GENERIC_WAYLAND=0
 ```
 
 ### Sway/Wayfire Build (i3/wlroots compositors)
 ```bash
 make clean
-make ENABLE_X11=0 ENABLE_HYPRLAND=0 ENABLE_NIRI=0 ENABLE_RIVER=0 ENABLE_X11_EWMH=0
+make ENABLE_HYPRLAND=0 ENABLE_NIRI=0 ENABLE_RIVER=0
 ```
 
 ## Build Flags
 
 ### Platform Flags
 - `ENABLE_WAYLAND` (default: 1) - Wayland platform support
-- `ENABLE_X11` (default: 1) - X11 platform support
 
 ### Renderer Flags
 - `ENABLE_GLES2` (default: 1) - OpenGL ES 2.0 renderer
@@ -48,21 +40,18 @@ make ENABLE_X11=0 ENABLE_HYPRLAND=0 ENABLE_NIRI=0 ENABLE_RIVER=0 ENABLE_X11_EWMH
 - `ENABLE_NIRI` (default: 1) - Niri compositor (scrollable workspaces)
 - `ENABLE_RIVER` (default: 1) - River compositor (tag-based)
 - `ENABLE_GENERIC_WAYLAND` (default: 1) - Generic Wayland fallback
-- `ENABLE_X11_EWMH` (default: 1) - X11 EWMH compositor support
 
 ## Binary Size Comparison
 
 Typical binary sizes with different configurations:
 - Full build (all features): ~200KB
 - Hyprland-only: ~120KB
-- X11-only: ~100KB
 - Single compositor: ~80-100KB
 
 ## Dependencies
 
 Custom builds will automatically adjust package dependencies:
 - Wayland builds require: `wayland-client`, `wayland-protocols`, `wayland-egl`
-- X11 builds require: `x11`, `xext`
 - GLES2 renderer requires: `egl`, `glesv2`
 
 ## Verification
@@ -91,7 +80,7 @@ sudo make install
 ### Embedded/Minimal System
 For resource-constrained systems, build with only essential features:
 ```bash
-make ENABLE_X11=0 ENABLE_SWAY=0 ENABLE_WAYFIRE=0 ENABLE_NIRI=0 ENABLE_RIVER=0 ENABLE_GENERIC_WAYLAND=0 ENABLE_X11_EWMH=0
+make ENABLE_SWAY=0 ENABLE_WAYFIRE=0 ENABLE_NIRI=0 ENABLE_RIVER=0 ENABLE_GENERIC_WAYLAND=0
 ```
 
 ### Distribution Package
@@ -104,7 +93,7 @@ make
 Test a specific compositor implementation:
 ```bash
 # Test only Sway implementation
-make ENABLE_X11=0 ENABLE_HYPRLAND=0 ENABLE_WAYFIRE=0 ENABLE_NIRI=0 ENABLE_RIVER=0 ENABLE_X11_EWMH=0 ENABLE_GENERIC_WAYLAND=0
+make ENABLE_HYPRLAND=0 ENABLE_WAYFIRE=0 ENABLE_NIRI=0 ENABLE_RIVER=0 ENABLE_GENERIC_WAYLAND=0
 ```
 
 ## Troubleshooting
@@ -118,8 +107,6 @@ The build will fail if required packages are missing. Install only the dependenc
 # For Wayland-only
 pkg-config --libs wayland-client wayland-egl egl glesv2
 
-# For X11-only  
-pkg-config --libs x11 xext egl glesv2
 ```
 
 ### Runtime Detection

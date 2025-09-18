@@ -2,7 +2,7 @@
  * platform.h - Platform abstraction interface
  * 
  * Provides an abstraction layer for windowing system operations,
- * allowing support for different platforms (Wayland, X11, etc.)
+ * allowing support for different platforms
  */
 
 #ifndef HYPRLAX_PLATFORM_H
@@ -15,7 +15,6 @@
 /* Platform types */
 typedef enum {
     PLATFORM_WAYLAND,
-    PLATFORM_X11,
     PLATFORM_AUTO,  /* Auto-detect */
 } platform_type_t;
 
@@ -123,6 +122,5 @@ platform_type_t platform_detect(void);
 
 /* Available platform backends */
 extern const platform_ops_t platform_wayland_ops;
-extern const platform_ops_t platform_x11_ops;
 
 #endif /* HYPRLAX_PLATFORM_H */

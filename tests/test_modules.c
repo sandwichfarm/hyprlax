@@ -125,9 +125,6 @@ START_TEST(test_platform_compositor_integration)
         { "wayland", "hyprland", 1 },
         { "wayland", "sway", 1 },
         { "wayland", "river", 1 },
-        { "x11", "i3", 1 },
-        { "x11", "bspwm", 1 },
-        { "x11", "hyprland", 0 },  // Hyprland doesn't run on X11
         { "wayland", "i3", 1 },     // i3 can run on Wayland (sway)
     };
     
@@ -152,26 +149,20 @@ START_TEST(test_renderer_platform_integration)
         const char *context_type;
     } contexts[] = {
         { "gles2", "wayland", "EGL" },
-        { "gles2", "x11", "EGL" },
-        { "gles2", "x11", "GLX" },  // Alternative
     };
     
     // Verify EGL is supported on both platforms
     int egl_wayland = 0;
-    int egl_x11 = 0;
     
     for (int i = 0; i < sizeof(contexts)/sizeof(contexts[0]); i++) {
         if (strcmp(contexts[i].context_type, "EGL") == 0) {
             if (strcmp(contexts[i].platform, "wayland") == 0) {
                 egl_wayland = 1;
-            } else if (strcmp(contexts[i].platform, "x11") == 0) {
-                egl_x11 = 1;
             }
         }
     }
     
     ck_assert_int_eq(egl_wayland, 1);
-    ck_assert_int_eq(egl_x11, 1);
 }
 END_TEST
 
@@ -190,8 +181,7 @@ START_TEST(test_module_registry)
         { "river", NULL, 1 },
         { "wayfire", NULL, 1 },
         { "niri", NULL, 1 },
-        { "generic_wayland", NULL, 1 },
-        { "x11_ewmh", NULL, 1 }
+        { "generic_wayland", NULL, 1 }
     };
     
     // Verify all compositors are registered

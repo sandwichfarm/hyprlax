@@ -13,13 +13,7 @@ hyprlax supports a wide range of compositors and window managers through its mod
 | **River** | Wayland | ✅ | Tags | ✅ | ❌ | ❌ | ✅ Control |
 | **Wayfire** | Wayland | ✅ | 2D Grid | ✅ H+V | ⚠️ | ✅ | ✅ Custom |
 | **Niri** | Wayland | ✅ | Scrollable | ✅ Smooth | ❌ | ✅ | ✅ Custom |
-| **i3** | X11 | ✅ | Linear | ✅ | ⚠️ | ❌ | ✅ i3 IPC |
-| **bspwm** | X11 | ✅ | Linear | ✅ | ⚠️ | ❌ | ❌ |
-| **awesome** | X11 | ✅ | Tags | ✅ | ⚠️ | ❌ | ❌ |
-| **xmonad** | X11 | ✅ | Linear | ✅ | ⚠️ | ❌ | ❌ |
-| **dwm** | X11 | ✅ | Tags | ✅ | ⚠️ | ❌ | ❌ |
 | **Generic Wayland** | Wayland | ✅ | Basic | ✅ | ❌ | ❌ | ❌ |
-| **Generic X11** | X11 | ✅ | Basic | ✅ | ⚠️ | ❌ | ❌ |
 
 **Legend:**
 - ✅ Full Support
@@ -211,139 +205,6 @@ HYPRLAX_COMPOSITOR=generic hyprlax ~/Pictures/wallpaper.jpg
 - Manual workspace switching only
 - No blur or advanced features
 
-## X11 Window Managers
-
-### i3
-
-**Detection:** `I3SOCK` environment variable
-
-**Features:**
-- Full i3 IPC support
-- Workspace change events
-- JSON protocol
-- Multi-monitor support
-
-**Configuration:**
-```bash
-# ~/.config/i3/config
-exec_always --no-startup-id pkill hyprlax; hyprlax ~/Pictures/wallpaper.jpg
-
-# Disable other wallpaper tools
-exec_always --no-startup-id pkill feh
-exec_always --no-startup-id pkill nitrogen
-```
-
-**With picom (for blur/transparency):**
-```bash
-# ~/.config/i3/config
-exec_always --no-startup-id picom -b
-exec_always --no-startup-id hyprlax ~/Pictures/wallpaper.jpg
-```
-
----
-
-### bspwm
-
-**Detection:** `BSPWM_SOCKET` environment variable
-
-**Features:**
-- EWMH desktop switching
-- Rule-based window management
-- Subscribe to desktop events
-
-**Configuration:**
-```bash
-# ~/.config/bspwm/bspwmrc
-pkill hyprlax
-hyprlax ~/Pictures/wallpaper.jpg &
-```
-
-**Desktop Rules:**
-```bash
-# Set hyprlax as desktop window
-bspc rule -a hyprlax state=below sticky=on
-```
-
----
-
-### awesome
-
-**Detection:** Checks for awesome in process list
-
-**Features:**
-- Tag-based system
-- EWMH support
-- Lua configuration
-
-**Configuration:**
-```lua
--- ~/.config/awesome/rc.lua
-awful.spawn.with_shell("pkill hyprlax; hyprlax ~/Pictures/wallpaper.jpg")
-```
-
----
-
-### xmonad
-
-**Detection:** EWMH WM name detection
-
-**Features:**
-- Workspace-based
-- EWMH support
-- Highly configurable
-
-**Configuration:**
-```haskell
--- ~/.xmonad/xmonad.hs
-import XMonad.Util.SpawnOnce
-
-myStartupHook = do
-    spawnOnce "pkill hyprlax; hyprlax ~/Pictures/wallpaper.jpg"
-```
-
----
-
-### dwm
-
-**Detection:** EWMH WM name detection
-
-**Features:**
-- Tag-based system
-- Minimal design
-- EWMH properties
-
-**Configuration:**
-```c
-// config.h - Add to autostart
-static const char *const autostart[] = {
-    "pkill", "hyprlax", NULL,
-    "hyprlax", "~/Pictures/wallpaper.jpg", NULL,
-    NULL
-};
-```
-
----
-
-### Generic X11/EWMH
-
-**Detection:** Fallback when `DISPLAY` is set
-
-**Features:**
-- Basic EWMH desktop switching
-- Works with any EWMH-compliant WM
-- Property-based events
-
-**Supported WMs:**
-- Openbox
-- Fluxbox
-- IceWM
-- Others with EWMH
-
-**Limitations:**
-- Basic desktop switching only
-- No advanced features
-- Requires compositor for transparency
-
 ## Environment Variables
 
 Control hyprlax behavior with environment variables:
@@ -354,9 +215,6 @@ HYPRLAX_COMPOSITOR=sway hyprlax wallpaper.jpg
 
 # Enable debug output
 HYPRLAX_DEBUG=1 hyprlax wallpaper.jpg
-
-# Force platform
-HYPRLAX_PLATFORM=x11 hyprlax wallpaper.jpg
 
 # Set IPC socket path
 HYPRLAX_IPC_SOCKET=/tmp/hyprlax.sock hyprlax wallpaper.jpg
@@ -403,17 +261,6 @@ Some features require compositor support:
 - **Transparency:** Requires compositor with alpha channel support
 - **Animations:** Requires smooth workspace switching
 
-### X11 Specific Issues
-
-For X11 window managers:
-```bash
-# Ensure compositor is running for transparency
-picom -b --config ~/.config/picom/picom.conf
-
-# Check EWMH support
-xprop -root | grep _NET_SUPPORTED
-```
-
 ### Wayland Specific Issues
 
 For Wayland compositors:
@@ -439,7 +286,6 @@ wayland-info | grep -E "zwlr_layer_shell|xdg_shell"
 - River - Minimal overhead
 
 **Consider Optimizations:**
-- X11 WMs - Use picom with GLX backend
 - Generic - Reduce layer count and effects
 
 ### Optimization Flags

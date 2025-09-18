@@ -3,7 +3,6 @@
  * 
  * Provides an abstraction layer for compositor-specific features,
  * allowing support for different Wayland compositors (Hyprland, Sway, etc.)
- * and X11 window managers.
  */
 
 #ifndef HYPRLAX_COMPOSITOR_H
@@ -21,7 +20,6 @@ typedef enum {
     COMPOSITOR_SWAY,
     COMPOSITOR_RIVER,            /* River (tag-based workspaces) */
     COMPOSITOR_GENERIC_WAYLAND,  /* Generic wlr-layer-shell */
-    COMPOSITOR_X11_EWMH,         /* X11 with EWMH support */
     COMPOSITOR_AUTO,             /* Auto-detect */
 } compositor_type_t;
 
@@ -175,6 +173,5 @@ extern const compositor_ops_t compositor_niri_ops;
 extern const compositor_ops_t compositor_sway_ops;
 extern const compositor_ops_t compositor_river_ops;
 extern const compositor_ops_t compositor_generic_wayland_ops;
-extern const compositor_ops_t compositor_x11_ewmh_ops;
 
 #endif /* HYPRLAX_COMPOSITOR_H */
