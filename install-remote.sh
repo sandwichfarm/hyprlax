@@ -23,6 +23,9 @@ NC='\033[0m' # No Color
 INSTALL_TYPE=""  # Will be set interactively if not specified
 FORCE_INSTALL=0
 VERSION="latest"
+VERSION_2=0
+INCLUDE_PRERELEASES=0
+ALLOW_DOWNGRADE=0
 
 # Print colored output
 print_info() {
@@ -54,6 +57,9 @@ OPTIONS:
     -s, --system      Install system-wide (requires sudo)
     -u, --user        Install for current user only
     -v, --version     Install specific version (default: latest)
+    -2, --v2          Install latest version 2.x.x release
+    -p, --prerelease  Include prereleases when using --v2
+    -d, --downgrade   Allow downgrades without confirmation
     -f, --force       Force reinstall even if same version exists
     -h, --help        Show this help message
 
@@ -61,6 +67,9 @@ EXAMPLES:
     curl -sSL https://hyprlax.com/install.sh | bash         # Interactive
     curl -sSL https://hyprlax.com/install.sh | bash -s -- --system
     curl -sSL https://hyprlax.com/install.sh | bash -s -- --version v1.2.3
+    curl -sSL https://hyprlax.com/install.sh | bash -s -- --v2
+    curl -sSL https://hyprlax.com/install.sh | bash -s -- --v2 --prerelease
+    curl -sSL https://hyprlax.com/install.sh | bash -s -- --version v1.0.0 --downgrade
 EOF
     exit 0
 }
@@ -127,6 +136,18 @@ while [[ $# -gt 0 ]]; do
         -v|--version)
             VERSION="$2"
             shift 2
+            ;;
+        -2|--v2)
+            VERSION_2=1
+            shift
+            ;;
+        -p|--prerelease)
+            INCLUDE_PRERELEASES=1
+            shift
+            ;;
+        -d|--downgrade)
+            ALLOW_DOWNGRADE=1
+            shift
             ;;
         -f|--force)
             FORCE_INSTALL=1
@@ -196,6 +217,102 @@ get_latest_version() {
     echo "$latest"
 }
 
+# Get latest v2.x.x release from GitHub
+get_latest_v2_version() {
+    local include_pre="$1"
+    local api_url="https://api.github.com/repos/${GITHUB_REPO}/releases"
+    
+    # If including prereleases, fetch all releases, otherwise just non-prereleases
+    local releases_json=$(curl -sSL "$api_url")
+    
+    if [ -z "$releases_json" ]; then
+        print_error "Failed to fetch releases from GitHub"
+        exit 1
+    fi
+    
+    # Extract all v2.x.x tags based on prerelease preference
+    local v2_versions
+    if [ "$include_pre" = "1" ]; then
+        # Include prereleases
+        v2_versions=$(echo "$releases_json" | \
+            grep -B1 '"tag_name"' | \
+            grep '"tag_name"' | \
+            sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' | \
+            grep -E '^v2\.')
+    else
+        # Exclude prereleases - look for releases where prerelease is false
+        v2_versions=$(echo "$releases_json" | \
+            python3 -c "
+import sys, json
+try:
+    releases = json.load(sys.stdin)
+    for r in releases:
+        if not r.get('prerelease', True) and r.get('tag_name', '').startswith('v2.'):
+            print(r['tag_name'])
+except:
+    pass
+" 2>/dev/null)
+        
+        # Fallback to jq if python3 is not available
+        if [ -z "$v2_versions" ] && command -v jq &> /dev/null; then
+            v2_versions=$(echo "$releases_json" | \
+                jq -r '.[] | select(.prerelease == false) | select(.tag_name | startswith("v2.")) | .tag_name')
+        fi
+        
+        # Final fallback - parse JSON manually (less reliable)
+        if [ -z "$v2_versions" ]; then
+            # This is a crude parser that looks for patterns
+            v2_versions=$(echo "$releases_json" | \
+                awk '/"tag_name".*v2\./ {
+                    tag = $0
+                    gsub(/.*"tag_name"[[:space:]]*:[[:space:]]*"/, "", tag)
+                    gsub(/".*/, "", tag)
+                    current_tag = tag
+                }
+                /"prerelease"[[:space:]]*:[[:space:]]*false/ {
+                    if (current_tag && substr(current_tag, 1, 2) == "v2") {
+                        print current_tag
+                        current_tag = ""
+                    }
+                }')
+        fi
+    fi
+    
+    if [ -z "$v2_versions" ]; then
+        print_error "No v2.x.x releases found"
+        if [ "$include_pre" = "0" ]; then
+            print_info "Try with --prerelease flag to include pre-release versions"
+        fi
+        exit 1
+    fi
+    
+    # Sort versions and get the latest
+    # Convert versions to sortable format and find max
+    local latest_v2=""
+    local max_version="000000000"
+    
+    while IFS= read -r version; do
+        # Remove 'v' prefix and any prerelease suffix for comparison
+        local clean_version="${version#v}"
+        local base_version="${clean_version%%-*}"
+        
+        # Convert to sortable format (e.g., 2.1.0 -> 002001000)
+        local sortable=$(echo "$base_version" | awk -F. '{printf "%03d%03d%03d", $1, $2, $3}' 2>/dev/null)
+        
+        if [ "$sortable" -gt "$max_version" ]; then
+            max_version="$sortable"
+            latest_v2="$version"
+        fi
+    done <<< "$v2_versions"
+    
+    if [ -z "$latest_v2" ]; then
+        print_error "Could not determine latest v2 version"
+        exit 1
+    fi
+    
+    echo "$latest_v2"
+}
+
 # Compare versions
 compare_versions() {
     local version1="$1"
@@ -215,6 +332,18 @@ compare_versions() {
         echo "-1" # version1 < version2
     else
         echo "0"  # version1 == version2
+    fi
+}
+
+# Check if version is v2.x.x
+is_v2_version() {
+    local version="$1"
+    # Remove 'v' prefix if present and check if it starts with 2.
+    version=${version#v}
+    if [[ "$version" =~ ^2\. ]]; then
+        echo "1"
+    else
+        echo "0"
     fi
 }
 
@@ -240,12 +369,13 @@ detect_arch() {
 download_binary() {
     local version="$1"
     local arch="$2"
-    local temp_file="/tmp/hyprlax-download"
+    local binary_name="$3"  # either "hyprlax" or "hyprlax-ctl"
+    local temp_file="/tmp/${binary_name}-download"
     
     # Construct download URL
-    local download_url="https://github.com/${GITHUB_REPO}/releases/download/${version}/hyprlax-${arch}"
+    local download_url="https://github.com/${GITHUB_REPO}/releases/download/${version}/${binary_name}-${arch}"
     
-    print_step "Downloading hyprlax ${version} for ${arch}..." >&2
+    print_step "Downloading ${binary_name} ${version} for ${arch}..." >&2
     
     if curl -sSL "$download_url" -o "$temp_file"; then
         # Verify it's actually a binary
@@ -301,17 +431,40 @@ install_single_binary() {
     print_success "${binary_name} installation complete"
 }
 
-# Install binary
+# Install both binaries (or just hyprlax for v2)
 install_binaries() {
     local hyprlax_file="$1"
+    local ctl_file="$2"
+    local is_v2="$3"
     local hyprlax_path=$(get_hyprlax_path)
     local install_dir=$(dirname "$hyprlax_path")
     
-    # Install hyprlax binary
+    # Define ctl_path based on install type
+    if [ "$INSTALL_TYPE" = "system" ]; then
+        local ctl_path="/usr/local/bin/hyprlax-ctl"
+    else
+        local ctl_path="$HOME/.local/bin/hyprlax-ctl"
+    fi
+    
+    # Always install hyprlax
     install_single_binary "$hyprlax_file" "$hyprlax_path" "hyprlax"
     
-    print_success "hyprlax installed successfully"
-    print_info "Control interface integrated: use 'hyprlax ctl <command>'"
+    # Only install hyprlax-ctl for v1.x versions
+    if [ "$is_v2" = "0" ]; then
+        install_single_binary "$ctl_file" "$ctl_path" "hyprlax-ctl"
+        print_success "Both binaries installed successfully"
+    else
+        # For v2, remove old hyprlax-ctl if it exists
+        if [ -f "$ctl_path" ]; then
+            print_step "Removing obsolete hyprlax-ctl (integrated in v2)..."
+            if [ "$INSTALL_TYPE" = "system" ]; then
+                sudo rm -f "$ctl_path"
+            else
+                rm -f "$ctl_path"
+            fi
+        fi
+        print_success "hyprlax v2 installed successfully (ctl functionality integrated)"
+    fi
     
     # Check if directory is in PATH
     if [ "$INSTALL_TYPE" = "user" ] && [[ ":$PATH:" != *":$install_dir:"* ]]; then
@@ -339,7 +492,15 @@ main() {
     INSTALLED_VERSION=$(get_installed_version)
     
     # Determine version to install
-    if [ "$VERSION" = "latest" ]; then
+    if [ "$VERSION_2" = "1" ]; then
+        # Get latest v2.x.x version
+        VERSION=$(get_latest_v2_version "$INCLUDE_PRERELEASES")
+        if [ "$INCLUDE_PRERELEASES" = "1" ]; then
+            print_info "Latest v2.x.x version (including prereleases): $VERSION"
+        else
+            print_info "Latest stable v2.x.x version: $VERSION"
+        fi
+    elif [ "$VERSION" = "latest" ]; then
         VERSION=$(get_latest_version)
         print_info "Latest version available: $VERSION"
     else
@@ -361,10 +522,41 @@ main() {
             print_info "Use --force to reinstall"
             exit 0
         elif [ "$CMP" = "1" ]; then
-            print_warning "Installed version ($INSTALLED_VERSION) is newer than requested ($VERSION_NUM)"
-            if [ "$FORCE_INSTALL" = "0" ]; then
-                print_info "Use --force to downgrade"
-                exit 0
+            # Downgrade warning
+            echo
+            echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo -e "${RED}⚠️  DOWNGRADE WARNING ⚠️${NC}"
+            echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo
+            echo -e "${YELLOW}Current version:${NC} ${GREEN}$INSTALLED_VERSION${NC}"
+            echo -e "${YELLOW}Target version:${NC}  ${RED}$VERSION_NUM${NC} ${RED}(OLDER)${NC}"
+            echo
+            echo -e "${RED}You are attempting to DOWNGRADE hyprlax!${NC}"
+            echo -e "${YELLOW}This may cause compatibility issues or data loss.${NC}"
+            echo
+            
+            if [ "$ALLOW_DOWNGRADE" = "0" ] && [ "$FORCE_INSTALL" = "0" ]; then
+                # Ask for confirmation
+                echo -e "${CYAN}Do you want to proceed with the downgrade?${NC}"
+                echo -e "${CYAN}Type ${YELLOW}yes${CYAN} to continue or ${YELLOW}no${CYAN} to cancel:${NC} "
+                
+                # Use /dev/tty for input when piped through bash
+                if [ -t 0 ]; then
+                    read -r RESPONSE
+                else
+                    read -r RESPONSE < /dev/tty
+                fi
+                
+                if [ "$RESPONSE" != "yes" ]; then
+                    print_info "Downgrade cancelled"
+                    exit 0
+                fi
+                echo
+                print_warning "Proceeding with downgrade..."
+            elif [ "$ALLOW_DOWNGRADE" = "1" ]; then
+                print_warning "Downgrade allowed via --downgrade flag"
+            elif [ "$FORCE_INSTALL" = "1" ]; then
+                print_warning "Downgrade forced via --force flag"
             fi
         elif [ "$CMP" = "-1" ]; then
             print_success "Upgrade available: $INSTALLED_VERSION → $VERSION_NUM"
@@ -402,12 +594,30 @@ main() {
         fi
     fi
     
-    # Download binary
-    HYPRLAX_FILE=$(download_binary "$VERSION" "$ARCH")
+    # Check if this is a v2 version
+    IS_V2=$(is_v2_version "$VERSION")
+    
+    # Download binaries
+    HYPRLAX_FILE=$(download_binary "$VERSION" "$ARCH" "hyprlax")
+    
+    # Only download hyprlax-ctl for v1.x versions
+    if [ "$IS_V2" = "0" ]; then
+        CTL_FILE=$(download_binary "$VERSION" "$ARCH" "hyprlax-ctl")
+    else
+        CTL_FILE=""
+        print_info "Skipping hyprlax-ctl download (integrated in v2)"
+    fi
     
     # Backup existing installation
     if [ "$INSTALLED_VERSION" != "none" ]; then
         local hyprlax_path=$(get_hyprlax_path)
+        
+        # Define ctl_path based on install type
+        if [ "$INSTALL_TYPE" = "system" ]; then
+            local ctl_path="/usr/local/bin/hyprlax-ctl"
+        else
+            local ctl_path="$HOME/.local/bin/hyprlax-ctl"
+        fi
         
         if [ -f "$hyprlax_path" ]; then
             local backup_path="${hyprlax_path}.backup.$(date +%Y%m%d_%H%M%S)"
@@ -419,22 +629,20 @@ main() {
             fi
         fi
         
-        # Clean up old hyprlax-ctl if it exists (now integrated)
-        if [ "$INSTALL_TYPE" = "system" ]; then
-            if [ -f "/usr/local/bin/hyprlax-ctl" ]; then
-                print_step "Removing old hyprlax-ctl (now integrated)..."
-                sudo rm -f "/usr/local/bin/hyprlax-ctl"
-            fi
-        else
-            if [ -f "$HOME/.local/bin/hyprlax-ctl" ]; then
-                print_step "Removing old hyprlax-ctl (now integrated)..."
-                rm -f "$HOME/.local/bin/hyprlax-ctl"
+        # Only backup hyprlax-ctl for v1 -> v1 upgrades
+        if [ "$IS_V2" = "0" ] && [ -f "$ctl_path" ]; then
+            local backup_path="${ctl_path}.backup.$(date +%Y%m%d_%H%M%S)"
+            print_step "Backing up existing hyprlax-ctl binary..."
+            if [ "$INSTALL_TYPE" = "system" ]; then
+                sudo cp "$ctl_path" "$backup_path"
+            else
+                cp "$ctl_path" "$backup_path"
             fi
         fi
     fi
     
-    # Install binary
-    install_binaries "$HYPRLAX_FILE"
+    # Install binaries (both for v1, just hyprlax for v2)
+    install_binaries "$HYPRLAX_FILE" "$CTL_FILE" "$IS_V2"
     
     # Restart if it was running
     if [ -n "$WALLPAPER_PATH" ] && [ -f "$WALLPAPER_PATH" ]; then
@@ -454,21 +662,48 @@ main() {
     echo
     
     if [ "$INSTALLED_VERSION" = "none" ]; then
+<<<<<<< HEAD
         print_info "hyprlax $VERSION_NUM has been installed"
+=======
+        if [ "$IS_V2" = "1" ]; then
+            print_info "hyprlax v2 $VERSION_NUM has been installed"
+            echo
+            print_info "Note: hyprlax-ctl functionality is now integrated into the main binary"
+        else
+            print_info "hyprlax and hyprlax-ctl $VERSION_NUM have been installed"
+        fi
+>>>>>>> master
         echo
         print_info "To get started:"
         print_step "1. Add to your compositor config:"
         echo "      exec-once = hyprlax /path/to/wallpaper.jpg"
         print_step "2. Reload your compositor or logout/login"
     else
+<<<<<<< HEAD
         print_success "hyprlax has been updated to $VERSION_NUM"
+=======
+        if [ "$IS_V2" = "1" ]; then
+            print_success "hyprlax has been updated to v2 $VERSION_NUM"
+            print_info "Note: hyprlax-ctl functionality is now integrated into the main binary"
+        else
+            print_success "hyprlax and hyprlax-ctl have been updated to $VERSION_NUM"
+        fi
+>>>>>>> master
     fi
     
     echo
     print_info "For more information:"
     print_step "GitHub: https://github.com/${GITHUB_REPO}"
+<<<<<<< HEAD
     print_step "Usage: hyprlax --help"
     print_step "Runtime control: hyprlax ctl --help"
+=======
+    if [ "$IS_V2" = "1" ]; then
+        print_step "Usage: hyprlax --help"
+    else
+        print_step "Usage: hyprlax --help, hyprlax-ctl --help"
+    fi
+>>>>>>> master
 }
 
 # Run main function

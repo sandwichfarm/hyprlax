@@ -84,15 +84,23 @@ jobs:
       
       - name: Prepare binaries
         run: |
-          # Rename binary to match release workflow naming
+          # Rename binaries to match release workflow naming
           mv hyprlax hyprlax-${{ matrix.arch }}
+          mv hyprlax-ctl hyprlax-ctl-${{ matrix.arch }}
           chmod +x hyprlax-${{ matrix.arch }}
+          chmod +x hyprlax-ctl-${{ matrix.arch }}
       
       - name: Upload hyprlax artifact
         uses: actions/upload-artifact@v4
         with:
           name: hyprlax-${{ matrix.arch }}
           path: hyprlax-${{ matrix.arch }}
+      
+      - name: Upload hyprlax-ctl artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyprlax-ctl-${{ matrix.arch }}
+          path: hyprlax-ctl-${{ matrix.arch }}
 
   create-pre-release:
     needs: [validate-branch, build-pre-release]
@@ -177,17 +185,20 @@ jobs:
           ### 🔧 Installation (Testing Only)
           
           \`\`\`bash
-          # Download binary
+          # Download binaries
           wget https://github.com/sandwichfarm/hyprlax/releases/download/${VERSION}/hyprlax-x86_64
+          wget https://github.com/sandwichfarm/hyprlax/releases/download/${VERSION}/hyprlax-ctl-x86_64
           
           # Make executable and install (at your own risk)
-          chmod +x hyprlax-x86_64
+          chmod +x hyprlax-x86_64 hyprlax-ctl-x86_64
           sudo mv hyprlax-x86_64 /usr/local/bin/hyprlax
+          sudo mv hyprlax-ctl-x86_64 /usr/local/bin/hyprlax-ctl
           \`\`\`
           
           ### 📦 Available Builds
           
-          - \`hyprlax-x86_64\` - hyprlax binary for x86_64 systems (control interface integrated)
+          - \`hyprlax-x86_64\` - Main hyprlax binary for Intel/AMD 64-bit
+          - \`hyprlax-ctl-x86_64\` - Control client for Intel/AMD 64-bit
           
           *Note: ARM64 builds not available for pre-releases. Please build from source.*
           
@@ -226,12 +237,13 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
-          name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }} - ${{ steps.version.outputs.stage }}
           body_path: release-notes.md
           draft: false
           prerelease: true  # ALWAYS true for pre-releases
           files: |
             hyprlax-x86_64
+            hyprlax-ctl-x86_64
             SHA256SUMS
           fail_on_unmatched_files: true
           generate_release_notes: false  # We generate our own

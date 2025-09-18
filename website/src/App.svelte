@@ -11,6 +11,8 @@
   let targetX = 0.5;
   let targetY = 0.5;
   let animationFrame;
+  let redditScore = null;
+  let redditLoading = true;
   
   const handleMouseMove = (e) => {
     targetX = e.clientX / window.innerWidth;
@@ -33,9 +35,32 @@
     animationFrame = requestAnimationFrame(animate);
   };
   
+  const fetchRedditScore = async () => {
+    try {
+      const response = await fetch('https://www.reddit.com/comments/1nh59j7.json');
+      
+      if (!response.ok) {
+        // Silently fail on any error including 429
+        redditLoading = false;
+        return;
+      }
+      
+      const data = await response.json();
+      if (data && data[0] && data[0].data && data[0].data.children && data[0].data.children[0]) {
+        redditScore = data[0].data.children[0].data.score;
+      }
+    } catch (error) {
+      // Silently fail on any error
+      console.debug('Could not fetch Reddit score:', error);
+    } finally {
+      redditLoading = false;
+    }
+  };
+  
   onMount(() => {
     window.addEventListener('mousemove', handleMouseMove);
     animate();
+    fetchRedditScore();
     
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
