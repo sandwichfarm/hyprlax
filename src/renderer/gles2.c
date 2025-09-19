@@ -182,7 +182,7 @@ static int gles2_init(void *native_display, void *native_window,
     data->height = config->height;
     data->vsync_enabled = config->vsync;
 
-    /* Set vsync if requested */
+    /* Set vsync if requested (default off to prevent GPU blocking when idle) */
     eglSwapInterval(data->egl_display, config->vsync ? 1 : 0);
 
     /* Store private data globally */
@@ -440,7 +440,6 @@ static void gles2_resize(int width, int height) {
 
 /* Set vsync */
 static void gles2_set_vsync(bool enabled) {
-    /* TODO: Implement vsync setting (requires access to EGL display) */
     if (g_gles2_data && g_gles2_data->egl_display != EGL_NO_DISPLAY) {
         eglSwapInterval(g_gles2_data->egl_display, enabled ? 1 : 0);
         g_gles2_data->vsync_enabled = enabled;

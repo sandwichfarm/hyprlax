@@ -74,6 +74,7 @@ typedef struct {
     int target_fps;
     int max_fps;
     float scale_factor;
+    bool vsync;  /* VSync enabled (default: false) */
 
     /* Animation settings */
     float shift_pixels;

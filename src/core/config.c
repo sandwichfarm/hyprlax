@@ -22,6 +22,7 @@ void config_set_defaults(config_t *cfg) {
     cfg->scale_factor = 1.5f;
     cfg->animation_duration = 1.0;
     cfg->default_easing = EASE_CUBIC_OUT;
+    cfg->vsync = false;  /* Default off to prevent GPU blocking when idle */
     cfg->debug = false;
     cfg->dry_run = false;
     cfg->blur_enabled = true;

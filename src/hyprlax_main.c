@@ -173,6 +173,11 @@ static int parse_config_file(hyprlax_context_t *ctx, const char *filename) {
             if (val) {
                 ctx->config.default_easing = easing_from_string(val);
             }
+        } else if (strcmp(cmd, "vsync") == 0) {
+            char *val = strtok(NULL, " \t");
+            if (val) {
+                ctx->config.vsync = (atoi(val) != 0);
+            }
         }
     }
 
@@ -195,13 +200,14 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
         {"renderer", required_argument, 0, 'r'},
         {"platform", required_argument, 0, 'p'},
         {"compositor", required_argument, 0, 'C'},
+        {"vsync", no_argument, 0, 'V'},
         {0, 0, 0, 0}
     };
 
     int opt;
     int option_index = 0;
 
-    while ((opt = getopt_long(argc, argv, "hvf:s:d:e:c:DL::r:p:C:",
+    while ((opt = getopt_long(argc, argv, "hvf:s:d:e:c:DL::r:p:C:V",
                               long_options, &option_index)) != -1) {
         switch (opt) {
             case 'h':
@@ -219,6 +225,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 printf("  -r, --renderer <backend>  Renderer backend (gles2, auto)\n");
                 printf("  -p, --platform <backend>  Platform backend (wayland, auto)\n");
                 printf("  -C, --compositor <backend> Compositor (hyprland, sway, generic, auto)\n");
+                printf("  -V, --vsync               Enable VSync (default: off)\n");
                 printf("\nEasing types:\n");
                 printf("  linear, quad, cubic, quart, quint, sine, expo, circ,\n");
                 printf("  back, elastic, bounce, snap\n");
@@ -279,6 +286,10 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
 
             case 'C':
                 ctx->backends.compositor_backend = optarg;
+                break;
+
+            case 'V':
+                ctx->config.vsync = true;
                 break;
 
             case 1001:  /* --primary-only */
@@ -456,7 +467,7 @@ int hyprlax_init_renderer(hyprlax_context_t *ctx) {
     renderer_config_t render_config = {
         .width = actual_width,
         .height = actual_height,
-        .vsync = true,
+        .vsync = ctx->config.vsync,  /* Use config setting (default: off) */
         .target_fps = ctx->config.target_fps,
         .capabilities = 0,
     };
@@ -615,6 +626,7 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
     LOG_DEBUG("  Shift amount: %.1f pixels", ctx->config.shift_pixels);
     LOG_DEBUG("  Animation duration: %.1f seconds", ctx->config.animation_duration);
     LOG_DEBUG("  Easing: %s", easing_to_string(ctx->config.default_easing));
+    LOG_DEBUG("  VSync: %s", ctx->config.vsync ? "enabled" : "disabled");
 
     return HYPRLAX_SUCCESS;
 }
@@ -1206,9 +1218,9 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             double target_wake_time = last_render_time + frame_time;
             double sleep_time = target_wake_time - current_time;
             
-            /* If no animations are active, sleep longer to reduce CPU usage */
+            /* If no animations are active, sleep longer to reduce CPU/GPU usage */
             if (!animations_active && !needs_render) {
-                sleep_time = 0.1;  /* Sleep for 100ms when idle (10 FPS polling rate) */
+                sleep_time = 0.5;  /* Sleep for 500ms when idle (2 FPS polling rate) */
             }
             
             if (sleep_time > 0) {
