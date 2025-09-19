@@ -1206,6 +1206,14 @@ int hyprlax_run(hyprlax_context_t *ctx) {
          * 2. Enough time has passed since last frame (respecting target FPS)
          */
         if (needs_render && time_since_render >= frame_time) {
+            if (ctx->config.debug) {
+                static double last_log_time = 0;
+                if (current_time - last_log_time > 1.0) {
+                    LOG_DEBUG("RENDERING: animations=%d, time_since_render=%.3f", 
+                              animations_active, time_since_render);
+                    last_log_time = current_time;
+                }
+            }
             hyprlax_render_frame(ctx);
             ctx->fps = 1.0 / time_since_render;
             last_render_time = current_time;
@@ -1226,12 +1234,23 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             }
         } else {
             /* Calculate sleep time */
-            double target_wake_time = last_render_time + frame_time;
-            double sleep_time = target_wake_time - current_time;
+            double sleep_time;
             
             /* If no animations are active, sleep longer to reduce CPU/GPU usage */
             if (!animations_active && !needs_render) {
                 sleep_time = 0.5;  /* Sleep for 500ms when idle (2 FPS polling rate) */
+                if (ctx->config.debug) {
+                    static int idle_count = 0;
+                    if (idle_count++ % 10 == 0) {  /* Log every 5 seconds */
+                        LOG_DEBUG("IDLE: animations=%d, needs_render=%d, sleeping %.3fs", 
+                                  animations_active, needs_render, sleep_time);
+                    }
+                }
+            } else {
+                /* Calculate normal frame timing */
+                double target_wake_time = last_render_time + frame_time;
+                sleep_time = target_wake_time - current_time;
+                if (sleep_time < 0) sleep_time = 0;
             }
             
             if (sleep_time > 0) {
