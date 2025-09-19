@@ -251,9 +251,12 @@ static bool process_cursor_event(hyprlax_context_t *ctx) {
 /* Apply a compositor workspace event (shared by immediate and debounced paths) */
 static void process_workspace_event(hyprlax_context_t *ctx, const compositor_event_t *comp_event) {
     if (!ctx || !comp_event) return;
-
-    /* In cursor-only mode, we still process workspace events for monitor state,
-       but we won't drive parallax offsets from them later in blending. */
+    /* In cursor-only mode, monitors are realized via Wayland output events.
+       Skip workspace event processing entirely to avoid any parallax updates. */
+    if (ctx->config.parallax_mode == PARALLAX_CURSOR) {
+        if (ctx->config.debug) LOG_TRACE("Ignoring workspace event in cursor-only parallax mode");
+        return;
+    }
 
     /* Find target monitor */
     monitor_instance_t *target_monitor = NULL;

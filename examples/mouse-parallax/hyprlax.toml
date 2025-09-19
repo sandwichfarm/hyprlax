@@ -13,7 +13,7 @@ mode = "cursor"           # Mouse-driven parallax for focus-follow effect
 
 [global.parallax.sources]
 workspace.weight = 0.0     # disable workspace-driven movement
-cursor.weight = 1.0        # fully cursor-driven
+cursor.weight = 1.0
 
 # Invert X so layers shift opposite cursor (stronger depth feeling)
 [global.parallax.invert.cursor]
@@ -31,7 +31,7 @@ sensitivity_x = 1.0
 sensitivity_y = 0.50
 deadzone_px = 3
 ema_alpha = 0.25
-animation_duration = 2.0
+animation_duration = 3.0
 easing = "expo"
 
 # Layers are rendered back -> front
