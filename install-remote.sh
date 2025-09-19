@@ -21,7 +21,7 @@ BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # Default values
-INSTALL_TYPE="user"
+INSTALL_TYPE=""  # No default - must ask user or use flag
 FORCE_INSTALL=0
 VERSION="latest"
 VERSION_2=0
@@ -195,21 +195,109 @@ find_all_installations() {
 get_active_binary_after_install() {
     local install_path="$1"
     
-    # Check PATH order
+    # First, let's simulate what would happen after install
+    # We need to check which binary would be found first in PATH
+    
+    # Clear hash table to get fresh results
+    hash -r 2>/dev/null || true
+    
+    # If we're going to install to install_path, check what would be active
+    # by looking at PATH order
     IFS=':' read -ra PATH_ARRAY <<< "$PATH"
     for dir in "${PATH_ARRAY[@]}"; do
-        # Check if this directory would have hyprlax
-        if [ "$dir/hyprlax" = "$install_path" ]; then
+        # Expand ~ to home directory
+        local expanded_dir="${dir/#\~/$HOME}"
+        local check_path="$expanded_dir/hyprlax"
+        
+        # If this is where we're installing, it would be active
+        if [ "$check_path" = "$install_path" ]; then
             echo "$install_path"
             return
-        elif [ -f "$dir/hyprlax" ] && [ -x "$dir/hyprlax" ]; then
-            # Another hyprlax exists earlier in PATH
-            echo "$dir/hyprlax"
+        fi
+        
+        # If another hyprlax exists here, it would shadow our installation
+        if [ -f "$check_path" ] && [ -x "$check_path" ] && [ "$check_path" != "$install_path" ]; then
+            echo "$check_path"
             return
         fi
     done
     
     echo "$install_path"
+}
+
+# Prompt user for installation location
+prompt_install_location() {
+    # Print all prompts to stderr so they don't get captured
+    echo >&2
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+    echo -e "${CYAN}📍 Installation Location${NC}" >&2
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+    echo >&2
+    
+    echo -e "${YELLOW}Where would you like to install hyprlax?${NC}" >&2
+    echo >&2
+    echo -e "  ${BOLD}1)${NC} User installation (~/.local/bin)" >&2
+    echo -e "      • No sudo required" >&2
+    echo -e "      • Only for current user" >&2
+    echo >&2
+    echo -e "  ${BOLD}2)${NC} System installation (/usr/local/bin)" >&2
+    echo -e "      • Requires sudo" >&2
+    echo -e "      • Available for all users" >&2
+    echo >&2
+    
+    # Show current PATH priority
+    echo -e "${CYAN}Your PATH priority:${NC}" >&2
+    local user_priority=999
+    local system_priority=999
+    local counter=1
+    
+    IFS=':' read -ra PATH_ARRAY <<< "$PATH"
+    for dir in "${PATH_ARRAY[@]}"; do
+        if [[ "$dir" == "$HOME/.local/bin" ]] || [[ "$dir" == "~/.local/bin" ]]; then
+            user_priority=$counter
+            echo -e "  $counter. ${GREEN}~/.local/bin (user)${NC}" >&2
+        elif [[ "$dir" == "/usr/local/bin" ]]; then
+            system_priority=$counter
+            echo -e "  $counter. ${GREEN}/usr/local/bin (system)${NC}" >&2
+        fi
+        counter=$((counter + 1))
+    done
+    
+    # Warn about PATH priority
+    echo >&2
+    if [ $user_priority -lt $system_priority ]; then
+        echo -e "${GREEN}✓ User installation will take priority over system${NC}" >&2
+    elif [ $system_priority -lt $user_priority ]; then
+        echo -e "${YELLOW}⚠ System installation will take priority over user${NC}" >&2
+    fi
+    
+    echo >&2
+    echo -n -e "${CYAN}Please choose (1-2): ${NC}" >&2
+    
+    # Read user choice
+    local CHOICE
+    if [ -t 0 ]; then
+        read -r CHOICE
+    elif [ -e /dev/tty ]; then
+        read -r CHOICE < /dev/tty
+    else
+        print_error "Cannot prompt for input in non-interactive mode" >&2
+        print_info "Use --user or --system flag to specify installation location" >&2
+        exit 1
+    fi
+    
+    case "$CHOICE" in
+        1)
+            echo "user"  # Only this goes to stdout
+            ;;
+        2)
+            echo "system"  # Only this goes to stdout
+            ;;
+        *)
+            print_error "Invalid choice" >&2
+            exit 1
+            ;;
+    esac
 }
 
 # Present installation options to user
@@ -218,57 +306,69 @@ prompt_installation_choice() {
     local target_path="$2"
     local installations="$3"
     
-    echo
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${CYAN}🔍 Multiple hyprlax installations detected${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo
+    # All output to stderr except the final choice
+    echo >&2
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+    echo -e "${CYAN}🔍 Multiple hyprlax installations detected${NC}" >&2
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+    echo >&2
     
     # Show existing installations
-    echo -e "${YELLOW}Existing installations:${NC}"
+    echo -e "${YELLOW}Existing installations:${NC}" >&2
     IFS='|' read -ra INSTALLS <<< "$installations"
     for install in "${INSTALLS[@]}"; do
         if [[ "$install" == PATH:* ]]; then
             IFS=':' read -r _ path version <<< "$install"
-            echo -e "  ${GREEN}→ $path${NC} (version: $version) ${CYAN}[CURRENTLY ACTIVE]${NC}"
+            echo -e "  ${GREEN}→ $path${NC} (version: $version) ${CYAN}[CURRENTLY ACTIVE]${NC}" >&2
         else
             IFS=':' read -r path version <<< "$install"
-            echo -e "  → $path (version: $version)"
+            echo -e "  → $path (version: $version)" >&2
         fi
     done
     
-    echo
-    echo -e "${YELLOW}Target installation:${NC}"
-    echo -e "  ${BLUE}→ $target_path${NC} (version: $target_version)"
+    echo >&2
+    echo -e "${YELLOW}Target installation:${NC}" >&2
+    echo -e "  ${BLUE}→ $target_path${NC} (version: $target_version)" >&2
     
     # Determine what would be active after installation
     local active_after=$(get_active_binary_after_install "$target_path")
-    echo
+    echo >&2
     if [ "$active_after" != "$target_path" ]; then
-        echo -e "${RED}⚠️  WARNING: After installation, the active binary would be:${NC}"
-        echo -e "  ${RED}$active_after${NC}"
-        echo -e "  ${YELLOW}(not your newly installed version!)${NC}"
+        echo -e "${RED}⚠️  WARNING: After installation, the active binary would be:${NC}" >&2
+        echo -e "  ${RED}$active_after${NC}" >&2
+        echo -e "  ${YELLOW}(not your newly installed version!)${NC}" >&2
     else
-        echo -e "${GREEN}✓ Your new installation would be the active binary${NC}"
+        echo -e "${GREEN}✓ Your new installation would be the active binary${NC}" >&2
     fi
     
-    echo
-    echo -e "${CYAN}Installation options:${NC}"
-    echo -e "  ${BOLD}1)${NC} Install to $target_path anyway"
-    echo -e "  ${BOLD}2)${NC} Remove ALL other installations and install fresh"
-    echo -e "  ${BOLD}3)${NC} Cancel installation"
+    echo >&2
+    echo -e "${CYAN}Installation options:${NC}" >&2
+    echo -e "  ${BOLD}1)${NC} Install to $target_path anyway" >&2
+    echo -e "  ${BOLD}2)${NC} Remove ALL other installations and install fresh" >&2
+    echo -e "  ${BOLD}3)${NC} Cancel installation" >&2
     
     if [ "$active_after" != "$target_path" ]; then
-        echo
-        echo -e "  ${YELLOW}Recommended: Option 2 to avoid conflicts${NC}"
+        echo >&2
+        echo -e "  ${YELLOW}Recommended: Option 2 to avoid conflicts${NC}" >&2
     fi
     
-    echo
-    echo -e "${CYAN}Please choose (1-3): ${NC}"
+    echo >&2
+    echo -n -e "${CYAN}Please choose (1-3): ${NC}" >&2
     
-    # Read user choice - always use /dev/tty when piped
+    # Read user choice - handle both piped and direct execution
     local CHOICE
-    read -r CHOICE < /dev/tty
+    if [ -t 0 ]; then
+        # Direct execution
+        read -r CHOICE
+    elif [ -e /dev/tty ]; then
+        # Piped but tty available
+        read -r CHOICE < /dev/tty
+    else
+        # No tty available (non-interactive)
+        print_error "Cannot prompt for input in non-interactive mode"
+        print_info "Use --force to bypass prompts or run interactively"
+        exit 1
+    fi
     
     # Return just the choice value
     echo "$CHOICE"
@@ -512,6 +612,60 @@ download_binary() {
     fi
 }
 
+# Verify installation success
+verify_installation() {
+    local installed_path="$1"
+    local expected_version="$2"
+    
+    # Clear bash cache
+    hash -r 2>/dev/null || true
+    
+    # Check what's actually active now
+    local active_binary=$(which hyprlax 2>/dev/null || echo "none")
+    
+    if [ "$active_binary" = "none" ]; then
+        print_error "Installation may have failed - hyprlax not found in PATH"
+        return 1
+    fi
+    
+    if [ "$active_binary" != "$installed_path" ]; then
+        echo
+        echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${RED}⚠️  CRITICAL WARNING ⚠️${NC}"
+        echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo
+        echo -e "${RED}The installed binary is NOT the active one!${NC}"
+        echo
+        echo -e "${YELLOW}Installed to:${NC} $installed_path"
+        echo -e "${RED}Active binary:${NC} $active_binary"
+        echo
+        echo -e "${RED}When you run 'hyprlax', you will get:${NC}"
+        echo -e "  $active_binary"
+        echo
+        echo -e "${YELLOW}To use your newly installed version, you must either:${NC}"
+        echo -e "  1. Remove the conflicting binary: ${RED}$active_binary${NC}"
+        echo -e "  2. Use the full path: ${GREEN}$installed_path${NC}"
+        echo -e "  3. Adjust your PATH environment variable"
+        echo
+        echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        return 1
+    fi
+    
+    # Verify version
+    local actual_version=$("$active_binary" --version 2>/dev/null | head -1 | grep -oP '\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?' || echo "unknown")
+    
+    if [ "$actual_version" != "$expected_version" ]; then
+        print_warning "Version mismatch!"
+        print_warning "Expected: $expected_version"
+        print_warning "Actual: $actual_version"
+        return 1
+    fi
+    
+    print_success "Installation verified successfully!"
+    print_info "Active binary: $active_binary (version $actual_version)"
+    return 0
+}
+
 # Install binary
 install_single_binary() {
     local source_file="$1"
@@ -611,33 +765,43 @@ main() {
     # Remove 'v' prefix for comparison
     VERSION_NUM=${VERSION#v}
     
-    # Check for multiple installations FIRST
+    # If INSTALL_TYPE not set via flag, ask the user
+    if [ -z "$INSTALL_TYPE" ]; then
+        INSTALL_TYPE=$(prompt_install_location)
+        print_info "Selected: $INSTALL_TYPE installation"
+    fi
+    
+    # ALWAYS check for ALL installations - don't assume anything!
     local all_installs=$(find_all_installations)
     local target_path=$(get_hyprlax_path)
     
-    # Check for PATH conflicts before doing version comparison
+    # If ANY installations exist, we need to check for conflicts
     if [ -n "$all_installs" ]; then
         local install_count=$(echo "$all_installs" | tr '|' '\n' | wc -l)
+        
+        # What WILL be active after we install to target_path?
         local active_after=$(get_active_binary_after_install "$target_path")
         
-        # If there's a PATH conflict, we must handle it first
+        # Show current situation
+        local current_active=$(which hyprlax 2>/dev/null || echo "")
+        if [ -n "$current_active" ]; then
+            local current_version=$("$current_active" --version 2>/dev/null | head -1 | grep -oP '\d+\.\d+\.\d+' || echo "unknown")
+            print_warning "Currently active binary: $current_active (version: $current_version)"
+        fi
+        
+        # ALWAYS warn if the target won't be active - this is critical!
         if [ "$active_after" != "$target_path" ]; then
-            print_warning "PATH conflict detected!"
-            print_info "The active hyprlax binary is not where you're trying to install"
-            
-            # Show what's currently active
-            local current_active=$(which hyprlax 2>/dev/null || echo "")
-            if [ -n "$current_active" ]; then
-                local current_version=$("$current_active" --version 2>/dev/null | head -1 | grep -oP '\d+\.\d+\.\d+' || echo "unknown")
-                print_info "Currently active: $current_active (version: $current_version)"
-            fi
+            print_error "⚠️  PATH CONFLICT DETECTED!"
+            print_error "After installation to $target_path"
+            print_error "The active binary will STILL be: $active_after"
+            print_warning "Your new installation will be IGNORED by the system!"
             
             local user_choice=$(prompt_installation_choice "$VERSION_NUM" "$target_path" "$all_installs")
             
             case "$user_choice" in
                 1)
-                    print_info "Proceeding with installation to $target_path"
-                    print_warning "Remember: $active_after will remain the active binary!"
+                    print_warning "Installing anyway - but $active_after will remain active!"
+                    print_warning "You'll need to manually fix your PATH or remove conflicts"
                     ;;
                 2)
                     remove_all_installations "$all_installs"
@@ -654,6 +818,34 @@ main() {
                     exit 1
                     ;;
             esac
+        elif [ "$install_count" -gt 1 ]; then
+            # Multiple installations but target will be active - still worth warning
+            print_warning "Multiple hyprlax installations detected ($install_count total)"
+            
+            if [ "$FORCE_INSTALL" = "0" ]; then
+                local user_choice=$(prompt_installation_choice "$VERSION_NUM" "$target_path" "$all_installs")
+                
+                case "$user_choice" in
+                    1)
+                        print_info "Proceeding with installation to $target_path"
+                        ;;
+                    2)
+                        remove_all_installations "$all_installs"
+                        print_success "All existing installations removed"
+                        INSTALLED_VERSION="none"
+                        ;;
+                    3)
+                        print_info "Installation cancelled"
+                        exit 0
+                        ;;
+                    *)
+                        print_error "Invalid choice. Installation cancelled"
+                        exit 1
+                        ;;
+                esac
+            else
+                print_info "Multiple installations exist but --force specified, continuing"
+            fi
         fi
     fi
     
@@ -825,12 +1017,25 @@ main() {
     fi
     
     echo
-    print_info "For more information:"
-    print_step "GitHub: https://github.com/${GITHUB_REPO}"
-    if [ "$IS_V2" = "1" ]; then
-        print_step "Usage: hyprlax --help"
+    
+    # VERIFY THE INSTALLATION
+    local hyprlax_path=$(get_hyprlax_path)
+    print_step "Verifying installation..."
+    
+    if ! verify_installation "$hyprlax_path" "$VERSION_NUM"; then
+        echo
+        print_error "⚠️  INSTALLATION VERIFICATION FAILED!"
+        print_error "The installed binary may not be accessible"
+        echo
     else
-        print_step "Usage: hyprlax --help, hyprlax-ctl --help"
+        echo
+        print_info "For more information:"
+        print_step "GitHub: https://github.com/${GITHUB_REPO}"
+        if [ "$IS_V2" = "1" ]; then
+            print_step "Usage: hyprlax --help"
+        else
+            print_step "Usage: hyprlax --help, hyprlax-ctl --help"
+        fi
     fi
 }
 
