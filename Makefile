@@ -1,10 +1,10 @@
 CC = gcc
 # Use generic architecture for CI compatibility
 ifdef CI
-CFLAGS = -Wall -Wextra -O2 -Isrc
+CFLAGS = -Wall -Wextra -O2 -Isrc -Isrc/include
 LDFLAGS =
 else
-CFLAGS = -Wall -Wextra -O3 -march=native -flto -Isrc
+CFLAGS = -Wall -Wextra -O3 -march=native -flto -Isrc -Isrc/include
 LDFLAGS = -flto
 endif
 
@@ -16,8 +16,54 @@ CFLAGS = -Wall -Wextra -O3 -flto -Isrc
 endif
 endif
 
-# Package dependencies
-PKG_DEPS = wayland-client wayland-protocols wayland-egl egl glesv2
+# Add build defines to CFLAGS
+CFLAGS += $(BUILD_DEFINES)
+
+# Feature flags (all enabled by default)
+ENABLE_WAYLAND ?= 1
+ENABLE_HYPRLAND ?= 1
+ENABLE_SWAY ?= 1
+ENABLE_WAYFIRE ?= 1
+ENABLE_NIRI ?= 1
+ENABLE_RIVER ?= 1
+ENABLE_GENERIC_WAYLAND ?= 1
+ENABLE_GLES2 ?= 1
+
+# Build defines based on feature flags
+BUILD_DEFINES =
+ifeq ($(ENABLE_WAYLAND),1)
+BUILD_DEFINES += -DENABLE_WAYLAND
+endif
+ifeq ($(ENABLE_HYPRLAND),1)
+BUILD_DEFINES += -DENABLE_HYPRLAND
+endif
+ifeq ($(ENABLE_SWAY),1)
+BUILD_DEFINES += -DENABLE_SWAY
+endif
+ifeq ($(ENABLE_WAYFIRE),1)
+BUILD_DEFINES += -DENABLE_WAYFIRE
+endif
+ifeq ($(ENABLE_NIRI),1)
+BUILD_DEFINES += -DENABLE_NIRI
+endif
+ifeq ($(ENABLE_RIVER),1)
+BUILD_DEFINES += -DENABLE_RIVER
+endif
+ifeq ($(ENABLE_GENERIC_WAYLAND),1)
+BUILD_DEFINES += -DENABLE_GENERIC_WAYLAND
+endif
+ifeq ($(ENABLE_GLES2),1)
+BUILD_DEFINES += -DENABLE_GLES2
+endif
+
+# Package dependencies (conditional)
+PKG_DEPS =
+ifeq ($(ENABLE_WAYLAND),1)
+PKG_DEPS += wayland-client wayland-protocols wayland-egl
+endif
+ifeq ($(ENABLE_GLES2),1)
+PKG_DEPS += egl glesv2
+endif
 
 # Get package flags
 PKG_CFLAGS = $(shell pkg-config --cflags $(PKG_DEPS))
@@ -27,25 +73,81 @@ PKG_LIBS = $(shell pkg-config --libs $(PKG_DEPS))
 WAYLAND_PROTOCOLS_DIR = $(shell pkg-config --variable=pkgdatadir wayland-protocols)
 WAYLAND_SCANNER = $(shell pkg-config --variable=wayland_scanner wayland-scanner)
 
-# Protocol files
+# Protocol files (conditional on Wayland)
+ifeq ($(ENABLE_WAYLAND),1)
 XDG_SHELL_PROTOCOL = $(WAYLAND_PROTOCOLS_DIR)/stable/xdg-shell/xdg-shell.xml
 LAYER_SHELL_PROTOCOL = protocols/wlr-layer-shell-unstable-v1.xml
-
-# Generated protocol files  
 PROTOCOL_SRCS = protocols/xdg-shell-protocol.c protocols/wlr-layer-shell-protocol.c
 PROTOCOL_HDRS = protocols/xdg-shell-client-protocol.h protocols/wlr-layer-shell-client-protocol.h
+else
+PROTOCOL_SRCS =
+PROTOCOL_HDRS =
+endif
 
-# Source files
-SRCS = src/hyprlax.c src/ipc.c $(PROTOCOL_SRCS)
+# Core module sources (always included)
+CORE_SRCS = src/core/easing.c src/core/animation.c src/core/layer.c src/core/config.c src/core/monitor.c src/core/log.c src/core/shared_buffer.c
+
+# Renderer module sources (conditional)
+RENDERER_SRCS = src/renderer/renderer.c src/renderer/shader.c src/renderer/headless_renderer.c
+ifeq ($(ENABLE_GLES2),1)
+RENDERER_SRCS += src/renderer/gles2.c
+endif
+
+# Platform module sources (conditional)
+PLATFORM_SRCS = src/platform/platform.c
+ifeq ($(ENABLE_WAYLAND),1)
+PLATFORM_SRCS += src/platform/wayland.c
+endif
+
+# Compositor module sources (conditional)
+COMPOSITOR_SRCS = src/compositor/compositor.c src/compositor/workspace_models.c
+ifeq ($(ENABLE_HYPRLAND),1)
+COMPOSITOR_SRCS += src/compositor/hyprland.c
+endif
+ifeq ($(ENABLE_SWAY),1)
+COMPOSITOR_SRCS += src/compositor/sway.c
+endif
+ifeq ($(ENABLE_WAYFIRE),1)
+COMPOSITOR_SRCS += src/compositor/wayfire.c
+endif
+ifeq ($(ENABLE_NIRI),1)
+COMPOSITOR_SRCS += src/compositor/niri.c
+endif
+ifeq ($(ENABLE_RIVER),1)
+COMPOSITOR_SRCS += src/compositor/river.c
+endif
+ifeq ($(ENABLE_GENERIC_WAYLAND),1)
+COMPOSITOR_SRCS += src/compositor/generic_wayland.c
+endif
+
+# Main module sources
+MAIN_SRCS = src/main.c src/hyprlax_main.c src/hyprlax_ctl.c
+
+# Source files - Choose between legacy monolithic or new modular
+ifdef USE_LEGACY
+SRCS = src/hyprlax.c src/ipc.c $(CORE_SRCS) $(RENDERER_SRCS) $(PLATFORM_SRCS) \
+       $(COMPOSITOR_SRCS) $(PROTOCOL_SRCS)
+else
+SRCS = $(MAIN_SRCS) src/ipc.c $(CORE_SRCS) $(RENDERER_SRCS) $(PLATFORM_SRCS) \
+       $(COMPOSITOR_SRCS) $(PROTOCOL_SRCS)
+endif
 OBJS = $(SRCS:.c=.o)
 TARGET = hyprlax
 
-# hyprlax-ctl client
-CTL_SRCS = src/hyprlax-ctl.c
-CTL_OBJS = $(CTL_SRCS:.c=.o)
-CTL_TARGET = hyprlax-ctl
+all: $(TARGET)
 
-all: $(TARGET) $(CTL_TARGET)
+# Convenience targets for common configurations
+hyprland-minimal:
+	$(MAKE) clean
+	$(MAKE) ENABLE_SWAY=0 ENABLE_WAYFIRE=0 ENABLE_NIRI=0 ENABLE_RIVER=0 ENABLE_GENERIC_WAYLAND=0
+
+wayland-only:
+	$(MAKE) clean
+	$(MAKE)
+
+sway-minimal:
+	$(MAKE) clean
+	$(MAKE) ENABLE_HYPRLAND=0 ENABLE_WAYFIRE=0 ENABLE_NIRI=0 ENABLE_RIVER=0 ENABLE_GENERIC_WAYLAND=0
 
 # Generate protocol files
 protocols/xdg-shell-protocol.c: $(XDG_SHELL_PROTOCOL)
@@ -72,32 +174,25 @@ protocols/wlr-layer-shell-client-protocol.h: $(LAYER_SHELL_PROTOCOL)
 $(TARGET): $(OBJS)
 	$(CC) $(LDFLAGS) $(OBJS) $(PKG_LIBS) -lm -o $@
 
-$(CTL_TARGET): $(CTL_OBJS)
-	$(CC) $(LDFLAGS) $(CTL_OBJS) -o $@
-
 clean:
-	rm -f $(TARGET) $(CTL_TARGET) $(OBJS) $(CTL_OBJS) $(PROTOCOL_SRCS) $(PROTOCOL_HDRS)
+	rm -f $(TARGET) $(OBJS) $(PROTOCOL_SRCS) $(PROTOCOL_HDRS)
 	rm -rf protocols/*.o src/*.o
 
 PREFIX ?= /usr/local
 BINDIR = $(PREFIX)/bin
 DESTDIR ?=
 
-install: $(TARGET) $(CTL_TARGET)
+install: $(TARGET)
 	install -Dm755 $(TARGET) $(DESTDIR)$(BINDIR)/$(TARGET)
-	install -Dm755 $(CTL_TARGET) $(DESTDIR)$(BINDIR)/$(CTL_TARGET)
 
-install-user: $(TARGET) $(CTL_TARGET)
+install-user: $(TARGET)
 	install -Dm755 $(TARGET) ~/.local/bin/$(TARGET)
-	install -Dm755 $(CTL_TARGET) ~/.local/bin/$(CTL_TARGET)
 
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/$(TARGET)
-	rm -f $(DESTDIR)$(BINDIR)/$(CTL_TARGET)
 
 uninstall-user:
 	rm -f ~/.local/bin/$(TARGET)
-	rm -f ~/.local/bin/$(CTL_TARGET)
 
 # Test suite with Check framework
 CHECK_CFLAGS = $(shell pkg-config --cflags check 2>/dev/null)
@@ -111,12 +206,18 @@ VALGRIND_FLAGS = --leak-check=full --show-leak-kinds=definite,indirect --track-o
 # For Arch Linux, enable debuginfod for symbol resolution
 export DEBUGINFOD_URLS ?= https://debuginfod.archlinux.org
 
-TEST_TARGETS = tests/test_hyprlax tests/test_ipc tests/test_blur tests/test_config tests/test_animation tests/test_easing tests/test_shader
+TEST_TARGETS = tests/test_integration tests/test_ipc tests/test_blur tests/test_config tests/test_animation tests/test_easing tests/test_shader tests/test_platform tests/test_compositor tests/test_modules tests/test_renderer tests/test_workspace_changes tests/test_animation_state tests/test_config_validation tests/test_hyprland_events
 ALL_TESTS = $(filter tests/test_%, $(wildcard tests/test_*.c))
 ALL_TEST_TARGETS = $(ALL_TESTS:.c=)
 
 # Individual test rules - updated for Check framework
-tests/test_hyprlax: tests/test_hyprlax.c
+tests/test_integration: tests/test_integration.c src/ipc.c
+	$(CC) $(TEST_CFLAGS) $^ $(TEST_LIBS) -lpthread -o $@
+
+tests/test_ctl: tests/test_ctl.c
+	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
+
+tests/test_renderer: tests/test_renderer.c
 	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
 
 tests/test_ipc: tests/test_ipc.c src/ipc.c
@@ -136,6 +237,28 @@ tests/test_easing: tests/test_easing.c
 
 tests/test_shader: tests/test_shader.c
 	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
+
+tests/test_platform: tests/test_platform.c
+	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
+
+tests/test_compositor: tests/test_compositor.c
+	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
+
+tests/test_modules: tests/test_modules.c
+	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
+
+tests/test_workspace_changes: tests/test_workspace_changes.c
+	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
+
+tests/test_animation_state: tests/test_animation_state.c
+	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
+
+tests/test_config_validation: tests/test_config_validation.c
+	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
+
+# Hyprland event parsing tests (link hyprland adapter and core compositor utils)
+tests/test_hyprland_events: tests/test_hyprland_events.c src/compositor/hyprland.c src/compositor/compositor.c src/core/log.c
+	$(CC) $(TEST_CFLAGS) -DUNIT_TEST -Isrc -Isrc/include $^ $(TEST_LIBS) -o $@
 
 # Run all tests
 test: $(ALL_TEST_TARGETS)
@@ -208,6 +331,6 @@ lint-fix:
 	fi
 
 clean-tests:
-	rm -f $(ALL_TEST_TARGETS) tests/*.valgrind.log
+	rm -f $(ALL_TEST_TARGETS) tests/*.valgrind.log tests/*.valgrind.log.* tests/*.valgrind.log.core.*
 
 .PHONY: all clean install install-user uninstall uninstall-user test memcheck clean-tests lint lint-fix

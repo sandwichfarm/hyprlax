@@ -10,7 +10,7 @@ Required tools:
 - GCC or Clang (C compiler)
 - GNU Make
 - pkg-config
-- Wayland scanner
+- Wayland scanner (for Wayland support)
 
 Required libraries:
 - Wayland client libraries
@@ -29,17 +29,19 @@ cd hyprlax
 ### Build Commands
 
 ```bash
-# Standard build
+# Standard build (auto-detects platform)
 make
 
-# Debug build
+# Debug build with symbols
 make debug
 
 # Clean build
 make clean && make
 
-# Specific architecture
+# Build for specific architecture
 make ARCH=aarch64
+# Verbose build output
+make VERBOSE=1
 ```
 
 ### Build Options
@@ -56,8 +58,8 @@ make CFLAGS="-O2 -march=native"
 # Custom installation prefix
 make PREFIX=/opt/hyprlax install
 
-# Verbose output
-make VERBOSE=1
+# Parallel build
+make -j$(nproc)
 ```
 
 ## Project Structure
@@ -65,93 +67,100 @@ make VERBOSE=1
 ```
 hyprlax/
 ├── src/
-│   ├── hyprlax.c          # Main source file
-│   └── stb_image.h        # Image loading library (header-only)
-├── protocols/
-│   ├── wlr-layer-shell-unstable-v1.xml  # Layer shell protocol
-│   └── (generated files)                 # Protocol implementations
-├── docs/                  # Documentation
-├── examples/              # Example configurations
-├── Makefile              # Build configuration
-├── install.sh            # Installation script
-└── README.md             # Project documentation
+│   ├── main.c                    # Entry point
+│   ├── hyprlax_main.c            # Main application logic
+│   ├── ipc.c                     # IPC server implementation
+│   ├── hyprlax_ctl.c            # Integrated control interface (hyprlax ctl)
+│   │
+│   ├── core/                    # Core functionality
+│   │   ├── animation.c          # Animation system
+│   │   ├── config.c             # Configuration parser
+│   │   ├── easing.c             # Easing functions
+│   │   └── layer.c              # Layer management
+│   │
+│   ├── platform/                # Platform abstraction
+│   │   ├── platform.c           # Platform interface
+│   │   ├── wayland.c            # Wayland implementation
+│   │
+│   ├── compositor/              # Compositor adapters
+│   │   ├── compositor.c         # Compositor interface
+│   │   ├── hyprland.c          # Hyprland adapter
+│   │   ├── sway.c              # Sway adapter
+│   │   ├── river.c             # River adapter
+│   │   ├── wayfire.c           # Wayfire adapter
+│   │   ├── niri.c              # Niri adapter
+│   │   └── generic_wayland.c   # Generic Wayland adapter
+│   │
+│   ├── renderer/                # Rendering backends
+│   │   ├── renderer.c           # Renderer interface
+│   │   ├── gles2.c             # OpenGL ES 2.0 renderer
+│   │   └── shader.c            # Shader compilation
+│   │
+│   └── include/                 # Header files
+│       ├── hyprlax_internal.h   # Internal definitions
+│       ├── compositor.h         # Compositor interface
+│       ├── platform.h           # Platform interface
+│       └── renderer.h           # Renderer interface
+│
+├── protocols/                    # Wayland protocol files
+│   ├── wlr-layer-shell-unstable-v1.xml
+│   └── (generated files)
+│
+├── tests/                        # Test suites
+│   ├── test_animation.c
+│   ├── test_config.c
+│   ├── test_blur.c
+│   └── ...
+│
+├── docs/                         # Documentation
+├── examples/                     # Example configurations
+├── scripts/                      # Build and utility scripts
+├── Makefile                      # Build configuration
+├── install.sh                    # Installation script
+└── README.md                     # Project documentation
 ```
 
 ## Architecture Overview
 
-### Main Components
+See [Architecture Documentation](architecture.md) for detailed system design.
 
-1. **Wayland Client**
-   - Connects to compositor
-   - Creates surface with layer-shell
-   - Handles display events
+### Key Components
 
-2. **OpenGL Renderer**
-   - EGL context creation
-   - Shader compilation
-   - Texture management
-   - Frame rendering
+1. **Platform Layer** - Abstracts platform differences
+2. **Compositor Adapters** - Handle compositor-specific features
+3. **Renderer** - OpenGL ES 2.0 rendering engine
+4. **Core Engine** - Animation, configuration, and layer management
+5. **IPC Server** - Runtime control interface
 
-3. **Animation System**
-   - Easing functions
-   - Per-layer timing
-   - Frame scheduling
+### Module Interfaces
 
-4. **Hyprland IPC**
-   - Socket connection
-   - Workspace change detection
-   - Event handling
-
-### Key Data Structures
+Each module implements a well-defined interface:
 
 ```c
-// Layer information
-struct layer {
-    GLuint texture;
-    int width, height;
-    float shift_multiplier;
-    float opacity;
-    char *image_path;
-    float current_offset;
-    float target_offset;
-    float start_offset;
-    easing_type_t easing;
-    float animation_delay;
-    float animation_duration;
-    double animation_start;
-    int animating;
-    float blur_amount;
-};
+// Platform interface example
+typedef struct platform_ops {
+    int (*init)(void);
+    void (*destroy)(void);
+    int (*create_window)(window_config_t *config);
+    int (*poll_events)(platform_event_t *event);
+    // ... more operations
+} platform_ops_t;
 
-// Global state
-struct {
-    // Wayland objects
-    struct wl_display *display;
-    struct wl_surface *surface;
-    struct zwlr_layer_surface_v1 *layer_surface;
-    
-    // OpenGL state
-    EGLDisplay egl_display;
-    EGLContext egl_context;
-    GLuint shader_program;
-    GLuint blur_shader_program;
-    
-    // Animation state
-    float current_offset;
-    float target_offset;
-    int animating;
-    
-    // Multi-layer support
-    struct layer *layers;
-    int layer_count;
-} state;
+// Compositor interface example
+typedef struct compositor_ops {
+    int (*init)(void *platform_data);
+    bool (*detect)(void);
+    int (*get_current_workspace)(void);
+    int (*poll_events)(compositor_event_t *event);
+    // ... more operations
+} compositor_ops_t;
 ```
 
 ## Adding Features
 
 ### Adding a New Easing Function
 
-1. Add enum value in `hyprlax.c`:
+1. **Add enum value** in `src/core/easing.c`:
 ```c
 typedef enum {
     // ... existing easings ...
@@ -159,7 +168,7 @@ typedef enum {
 } easing_type_t;
 ```
 
-2. Implement in `apply_easing()`:
+2. **Implement function** in `easing_apply()`:
 ```c
 case EASE_BOUNCE_OUT: {
     if (t < 0.363636) {
@@ -172,234 +181,398 @@ case EASE_BOUNCE_OUT: {
 }
 ```
 
-3. Add command-line parsing:
+3. **Add string parsing** in `easing_from_string()`:
 ```c
-else if (strcmp(optarg, "bounce") == 0) config.easing = EASE_BOUNCE_OUT;
+else if (strcmp(str, "bounce") == 0) return EASE_BOUNCE_OUT;
 ```
 
-### Adding a New Layer Property
+### Adding Compositor Support
 
-1. Add to layer structure:
+1. **Create adapter file** `src/compositor/newcomp.c`:
 ```c
-struct layer {
-    // ... existing fields ...
-    float rotation;  // New property
+#include "../include/compositor.h"
+#include "../include/hyprlax_internal.h"
+
+static bool newcomp_detect(void) {
+    // Check if running under this compositor
+    return getenv("NEWCOMP_SOCKET") != NULL;
+}
+
+static int newcomp_init(void *platform_data) {
+    // Initialize compositor adapter
+    return HYPRLAX_SUCCESS;
+}
+
+// ... implement all ops ...
+
+const compositor_ops_t compositor_newcomp_ops = {
+    .detect = newcomp_detect,
+    .init = newcomp_init,
+    // ... all operations
 };
 ```
 
-2. Parse in command line/config:
+2. **Add to registry** in `src/compositor/compositor.c`:
 ```c
-char *rotation_str = strtok(NULL, ":");
-layer->rotation = rotation_str ? atof(rotation_str) : 0.0f;
-```
-
-3. Apply in rendering:
-```c
-// Add rotation matrix to vertex shader
-// Update uniform values
-```
-
-### Adding a New Command-Line Option
-
-1. Add to long_options array:
-```c
-{"brightness", required_argument, 0, 0},
-```
-
-2. Handle in option parsing:
-```c
-if (strcmp(long_options[option_index].name, "brightness") == 0) {
-    config.brightness = atof(optarg);
+// In compositor_detect()
+if (compositor_newcomp_ops.detect && compositor_newcomp_ops.detect()) {
+    return COMPOSITOR_NEWCOMP;
 }
+
+// In compositor_create()
+case COMPOSITOR_NEWCOMP:
+    adapter->ops = &compositor_newcomp_ops;
+    break;
 ```
 
-3. Apply in appropriate location
+3. **Add type** to `src/include/compositor.h`:
+```c
+typedef enum {
+    // ... existing types ...
+    COMPOSITOR_NEWCOMP,
+} compositor_type_t;
+
+extern const compositor_ops_t compositor_newcomp_ops;
+```
+
+4. **Update Makefile**:
+```makefile
+COMPOSITOR_SRCS = ... src/compositor/newcomp.c
+```
+
+### Adding a New Platform
+
+Similar process for platform modules in `src/platform/`.
+
+### Adding a New Renderer
+
+1. Create `src/renderer/newrenderer.c`
+2. Implement `renderer_ops_t` interface
+3. Add to renderer selection logic
 
 ## Debugging
 
 ### Debug Build
 
 ```bash
-# Build with debug symbols
+# Build with debug symbols and no optimization
 make debug
 
 # Run with gdb
 gdb ./hyprlax
-(gdb) run wallpaper.jpg
+(gdb) run ~/Pictures/wallpaper.jpg
+(gdb) bt  # Backtrace on crash
 ```
 
 ### Debug Output
 
 ```bash
 # Enable debug messages
-hyprlax --debug wallpaper.jpg
-
-# Or set environment variable
 HYPRLAX_DEBUG=1 hyprlax wallpaper.jpg
+
+# Debug specific modules
+HYPRLAX_DEBUG_COMPOSITOR=1 hyprlax wallpaper.jpg
+HYPRLAX_DEBUG_RENDERER=1 hyprlax wallpaper.jpg
+HYPRLAX_DEBUG_ANIMATION=1 hyprlax wallpaper.jpg
 ```
 
 ### Common Debug Points
 
 ```c
 // Add debug output
-if (config.debug) {
-    printf("Debug: current_offset=%.2f target=%.2f\n", 
-           state.current_offset, state.target_offset);
-}
+DEBUG_LOG("Animation: offset=%.2f target=%.2f progress=%.2f",
+          current_offset, target_offset, progress);
 
 // Check OpenGL errors
 GLenum err = glGetError();
 if (err != GL_NO_ERROR) {
-    fprintf(stderr, "OpenGL error: 0x%x\n", err);
+    ERROR_LOG("OpenGL error: 0x%x", err);
 }
+
+// Platform events
+DEBUG_LOG("Event: type=%d workspace=%d", event.type, event.workspace);
 ```
 
-### Valgrind Memory Check
+### Memory Debugging
 
 ```bash
-valgrind --leak-check=full ./hyprlax wallpaper.jpg
+# Valgrind memory check
+valgrind --leak-check=full --show-leak-kinds=all \
+         --track-origins=yes ./hyprlax wallpaper.jpg
+
+# AddressSanitizer (compile-time)
+make CFLAGS="-fsanitize=address -g" clean all
+./hyprlax wallpaper.jpg
 ```
 
 ## Testing
 
-### Manual Testing
+### Unit Tests
 
 ```bash
-# Test single layer
-./hyprlax test.jpg
+# Build and run all tests
+make test
 
-# Test multi-layer
-./hyprlax --layer bg.jpg:0.3:1.0 --layer fg.png:1.0:0.8
+# Run specific test suite
+./tests/test_animation
+./tests/test_config
+./tests/test_compositor
 
-# Test animation
-./hyprlax -e elastic -d 2.0 test.jpg
-# Switch workspaces to see animation
+# Run with memory checking
+make memcheck
+
+# Coverage report
+make coverage
 ```
 
-### Automated Testing
+### Integration Testing
 
-Create `test.sh`:
 ```bash
-#!/bin/bash
+# Test compositor detection
+./scripts/test-compositors.sh
 
-# Test build
-make clean && make || exit 1
+# Test multi-layer rendering
+./scripts/test-layers.sh
 
-# Test single layer
-timeout 5 ./hyprlax test.jpg &
-PID=$!
-sleep 2
-kill $PID
+# Performance benchmarks
+./scripts/benchmark.sh
+```
 
-# Test multi-layer
-timeout 5 ./hyprlax --layer test.jpg:0.5:1.0 \
-                    --layer test.jpg:1.0:0.5 &
-PID=$!
-sleep 2
-kill $PID
+### Manual Testing Checklist
 
-echo "Tests passed!"
+- [ ] Single layer wallpaper
+- [ ] Multi-layer with different opacities
+- [ ] All easing functions
+- [ ] Workspace switching in each compositor
+- [ ] Wayland platform detection
+- [ ] Blur effects (where supported)
+- [ ] Config file loading
+- [ ] IPC commands via `hyprlax ctl`
+- [ ] Memory usage over time
+- [ ] CPU usage during animations
+
+## Code Style
+
+### Formatting Rules
+
+- **Indentation:** 4 spaces (no tabs)
+- **Line length:** Max 100 characters
+- **Braces:** K&R style
+- **Naming:**
+  - Functions: `snake_case`
+  - Types: `snake_case_t`
+  - Constants: `UPPER_SNAKE_CASE`
+  - Struct members: `snake_case`
+
+### Example:
+
+```c
+typedef struct {
+    int current_workspace;
+    float animation_progress;
+} compositor_state_t;
+
+static int compositor_update_workspace(compositor_state_t *state, 
+                                       int new_workspace) {
+    if (!state) {
+        return HYPRLAX_ERROR_INVALID_ARGS;
+    }
+    
+    if (state->current_workspace != new_workspace) {
+        DEBUG_LOG("Workspace change: %d -> %d", 
+                  state->current_workspace, new_workspace);
+        state->current_workspace = new_workspace;
+    }
+    
+    return HYPRLAX_SUCCESS;
+}
+```
+
+### Comments
+
+```c
+/* 
+ * Multi-line comment for file headers
+ * and function documentation
+ */
+
+// Single-line comments for inline explanations
+
+/* TODO: Add feature X */
+/* FIXME: Handle edge case Y */
+/* NOTE: Important information */
 ```
 
 ## Contributing
 
-### Code Style
-
-- Use 4 spaces for indentation
-- Keep lines under 100 characters
-- Use snake_case for functions and variables
-- Use UPPER_CASE for constants
-- Comment complex logic
-
-### Commit Messages
-
-Follow conventional commits:
-```
-feat: Add new blur shader
-fix: Resolve memory leak in layer cleanup
-docs: Update multi-layer guide
-perf: Optimize texture loading
-refactor: Simplify animation system
-```
-
 ### Pull Request Process
 
-1. Fork the repository
-2. Create feature branch: `git checkout -b feature/my-feature`
-3. Make changes and test
-4. Commit with clear messages
-5. Push to your fork
-6. Open pull request with description
+1. **Fork** the repository
+2. **Create branch**: `git checkout -b feature/your-feature`
+3. **Make changes** following code style
+4. **Add tests** for new functionality
+5. **Run tests**: `make test`
+6. **Commit** with clear messages
+7. **Push** to your fork
+8. **Open PR** with description
 
-### Areas for Contribution
+### Commit Message Format
 
-- **Features**
-  - Multi-monitor support
-  - Video wallpaper support
-  - Dynamic layer loading ([#1](https://github.com/sandwichfarm/hyprlax/issues/1))
-  
-- **Performance**
-  - Optimize blur shader
-  - Reduce memory usage
-  - Improve texture loading
-  
-- **Documentation**
-  - Add more examples
-  - Translate to other languages
-  - Create video tutorials
-  
-- **Testing**
-  - Add unit tests
-  - Create integration tests
-  - Test on different systems
+Follow conventional commits:
+
+```
+type(scope): description
+
+[optional body]
+
+[optional footer]
+```
+
+Types:
+- `feat`: New feature
+- `fix`: Bug fix
+- `docs`: Documentation
+- `perf`: Performance improvement
+- `refactor`: Code restructuring
+- `test`: Test additions/changes
+- `chore`: Build/tool changes
+
+Examples:
+```
+feat(compositor): add River compositor support
+fix(animation): resolve memory leak in layer cleanup
+docs(readme): update installation instructions
+perf(renderer): optimize texture loading
+```
+
+### Testing Requirements
+
+- All new features must have tests
+- All bug fixes should include regression tests
+- Maintain >80% code coverage
+- Pass CI checks
+
+### Documentation Requirements
+
+- Update relevant .md files
+- Add inline code comments
+- Update man pages if needed
+- Include examples
 
 ## Release Process
 
 ### Version Numbering
 
-Follow semantic versioning:
-- MAJOR.MINOR.PATCH
-- Example: 1.2.0
+Semantic versioning: `MAJOR.MINOR.PATCH`
+
+- **MAJOR**: Breaking changes
+- **MINOR**: New features, backward compatible
+- **PATCH**: Bug fixes
 
 ### Release Steps
 
-1. Update version in `hyprlax.c`:
+1. **Update version** in `src/hyprlax_main.c`:
 ```c
-#define HYPRLAX_VERSION "1.2.0"
+#define HYPRLAX_VERSION "1.3.0"
 ```
 
-2. Update CHANGELOG.md
+2. **Update CHANGELOG.md** with release notes
 
-3. Tag release:
+3. **Create tag**:
 ```bash
-git tag -a v1.2.0 -m "Release version 1.2.0"
-git push origin v1.2.0
+git tag -a v1.3.0 -m "Release version 1.3.0"
+git push origin v1.3.0
 ```
 
-4. GitHub Actions will automatically:
-   - Build binaries for x86_64 and aarch64
-   - Create GitHub release
-   - Upload artifacts
+4. **GitHub Actions** automatically:
+   - Builds binaries for multiple architectures
+   - Runs test suite
+   - Creates GitHub release
+   - Uploads artifacts
+
+## Performance Optimization
+
+### Profiling
+
+```bash
+# CPU profiling with perf
+perf record ./hyprlax wallpaper.jpg
+perf report
+
+# GPU profiling with apitrace
+apitrace trace ./hyprlax wallpaper.jpg
+qapitrace hyprlax.trace
+
+# Frame timing analysis
+HYPRLAX_DEBUG_TIMING=1 hyprlax wallpaper.jpg
+```
+
+### Optimization Areas
+
+1. **Texture Loading**
+   - Use texture atlases
+   - Implement mipmapping
+   - Cache decoded images
+
+2. **Rendering**
+   - Minimize state changes
+   - Batch draw calls
+   - Use VBOs effectively
+
+3. **Animation**
+   - Precalculate easing curves
+   - Skip redundant frames
+   - Adaptive frame rate
 
 ## Resources
 
 ### Documentation
 - [Wayland Protocol](https://wayland.freedesktop.org/docs/html/)
-- [Layer Shell Protocol](https://github.com/swaywm/wlr-protocols)
 - [OpenGL ES 2.0 Reference](https://www.khronos.org/opengles/sdk/docs/man/)
-- [EGL Reference](https://www.khronos.org/registry/EGL/sdk/docs/man/)
+- [Layer Shell Protocol](https://github.com/swaywm/wlr-protocols)
 
 ### Tools
 - [Wayland Debug](https://github.com/wmww/wayland-debug) - Protocol debugging
 - [RenderDoc](https://renderdoc.org/) - Graphics debugging
-- [apitrace](https://github.com/apitrace/apitrace) - OpenGL tracing
+- [WAYLAND_DEBUG=1](https://wayland.freedesktop.org/docs/html/ch04.html) - Built-in debugging
 
 ### Similar Projects
 - [swww](https://github.com/Horus645/swww) - Wayland wallpaper daemon
 - [hyprpaper](https://github.com/hyprwm/hyprpaper) - Hyprland wallpaper utility
-- [swaybg](https://github.com/swaywm/swaybg) - Sway wallpaper tool
+- [swaybg](https://github.com/swaywm/swaybg) - Sway background tool
+- [wpaperd](https://github.com/danyspin97/wpaperd) - Wallpaper daemon
+
+## Troubleshooting Development Issues
+
+### Build Errors
+
+```bash
+# Missing dependencies
+pkg-config --list-all | grep -E "wayland|egl|gles"
+
+# Protocol generation issues
+make clean-protocols
+make protocols
+
+# Linker errors
+ldd hyprlax | grep "not found"
+```
+
+### Runtime Issues
+
+```bash
+# Compositor detection failing
+HYPRLAX_DEBUG=1 hyprlax --version
+
+# Renderer initialization
+HYPRLAX_DEBUG_RENDERER=1 hyprlax test.jpg
+
+# Check capabilities
+hyprlax --capabilities
+```
 
 ## Contact
 
 - GitHub Issues: https://github.com/sandwichfarm/hyprlax/issues
 - Pull Requests: https://github.com/sandwichfarm/hyprlax/pulls
+- Discussions: https://github.com/sandwichfarm/hyprlax/discussions

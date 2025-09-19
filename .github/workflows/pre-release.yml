@@ -62,8 +62,6 @@ jobs:
             wayland-protocols \
             libegl1-mesa-dev \
             libgles2-mesa-dev \
-            libx11-dev \
-            libxext-dev \
             check
       
       - name: Build binary

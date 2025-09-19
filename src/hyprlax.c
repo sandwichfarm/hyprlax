@@ -1,5 +1,5 @@
 #define _GNU_SOURCE
-#define HYPRLAX_VERSION "1.3.1"
+#define HYPRLAX_VERSION "2.0.0-beta.2"
 #define INITIAL_MAX_LAYERS 8
 #define MAX_CONFIG_LINE_SIZE 512  // Maximum line length in config files
 #define BLUR_SHADER_MAX_SIZE 2048 // Maximum size for dynamically built shader
@@ -36,21 +36,8 @@
 #include "stb_image.h"
 
 #include "ipc.h"
+#include "include/core.h"
 
-// Easing functions
-typedef enum {
-    EASE_LINEAR,
-    EASE_QUAD_OUT,
-    EASE_CUBIC_OUT,
-    EASE_QUART_OUT,
-    EASE_QUINT_OUT,
-    EASE_SINE_OUT,
-    EASE_EXPO_OUT,
-    EASE_CIRC_OUT,
-    EASE_BACK_OUT,
-    EASE_ELASTIC_OUT,
-    EASE_CUSTOM_SNAP  // Extra snappy custom easing
-} easing_type_t;
 
 // Layer structure for multi-layer parallax
 struct layer {
@@ -168,60 +155,6 @@ struct {
     // Running state
     int running;
 } state = {0};
-
-// Easing functions implementation
-float apply_easing(float t, easing_type_t type) {
-    switch (type) {
-        case EASE_LINEAR:
-            return t;
-
-        case EASE_QUAD_OUT:
-            return 1.0f - (1.0f - t) * (1.0f - t);
-
-        case EASE_CUBIC_OUT:
-            return 1.0f - powf(1.0f - t, 3.0f);
-
-        case EASE_QUART_OUT:
-            return 1.0f - powf(1.0f - t, 4.0f);
-
-        case EASE_QUINT_OUT:
-            return 1.0f - powf(1.0f - t, 5.0f);
-
-        case EASE_SINE_OUT:
-            return sinf((t * M_PI) / 2.0f);
-
-        case EASE_EXPO_OUT:
-            return t == 1.0f ? 1.0f : 1.0f - powf(2.0f, -10.0f * t);
-
-        case EASE_CIRC_OUT:
-            return sqrtf(1.0f - powf(t - 1.0f, 2.0f));
-
-        case EASE_BACK_OUT: {
-            float c1 = 1.70158f;
-            float c3 = c1 + 1.0f;
-            return 1.0f + c3 * powf(t - 1.0f, 3.0f) + c1 * powf(t - 1.0f, 2.0f);
-        }
-
-        case EASE_ELASTIC_OUT: {
-            float c4 = (2.0f * M_PI) / 3.0f;
-            return t == 0 ? 0 : t == 1 ? 1 : powf(2.0f, -10.0f * t) * sinf((t * 10.0f - 0.75f) * c4) + 1.0f;
-        }
-
-        case EASE_CUSTOM_SNAP: {
-            // Custom extra snappy easing - fast start, very quick deceleration at the end
-            if (t < 0.4f) {
-                // Accelerate quickly for first 40% of time
-                return 1.0f - powf(1.0f - (t * 2.5f), 6.0f);
-            } else {
-                // Then ease out more gently
-                return 1.0f - powf(1.0f - t, 8.0f);
-            }
-        }
-
-        default:
-            return t;
-    }
-}
 
 // Shader sources with better precision
 const char *vertex_shader_src =
@@ -360,9 +293,9 @@ int init_gl() {
         fprintf(stderr, "Failed to build blur shader\n");
         return -1;
     }
-    
+
     if (config.debug) {
-        fprintf(stderr, "Building blur shader with BLUR_KERNEL_SIZE=%.1f, BLUR_WEIGHT_FALLOFF=%.2f\n", 
+        fprintf(stderr, "Building blur shader with BLUR_KERNEL_SIZE=%.1f, BLUR_WEIGHT_FALLOFF=%.2f\n",
                 BLUR_KERNEL_SIZE, BLUR_WEIGHT_FALLOFF);
     }
 
@@ -426,7 +359,7 @@ int init_gl() {
     if (state.blur_u_resolution == -1) {
         fprintf(stderr, "Warning: Failed to find uniform 'u_resolution' in blur shader\n");
     }
-    
+
     if (config.debug) {
         fprintf(stderr, "Blur shader uniform locations: texture=%d, opacity=%d, blur_amount=%d, resolution=%d\n",
                state.blur_u_texture, state.blur_u_opacity, state.blur_u_blur_amount, state.blur_u_resolution);
@@ -732,6 +665,10 @@ void render_frame() {
                     layer->animating = 0;
                 } else {
                     float t = elapsed / layer->animation_duration;
+                    // Smooth completion: treat very close to 1.0 as complete
+                    if (t > 0.995f) {
+                        t = 1.0f;
+                    }
                     float eased = apply_easing(t, layer->easing);
                     layer->current_offset = layer->start_offset +
                         (layer->target_offset - layer->start_offset) * eased;
@@ -750,6 +687,10 @@ void render_frame() {
                 state.animating = 0;
             } else {
                 float t = elapsed / config.animation_duration;
+                // Smooth completion: treat very close to 1.0 as complete
+                if (t > 0.995f) {
+                    t = 1.0f;
+                }
                 float eased = apply_easing(t, config.easing);
                 state.current_offset = state.start_offset +
                     (state.target_offset - state.start_offset) * eased;
@@ -812,7 +753,7 @@ void render_frame() {
                 if (config.debug) {
                     static int blur_count = 0;
                     if (blur_count++ < 5) {  // Only print first 5 times to avoid spam
-                        fprintf(stderr, "Using blur shader for layer %d with blur amount: %.2f\n", 
+                        fprintf(stderr, "Using blur shader for layer %d with blur amount: %.2f\n",
                                 i, layer->blur_amount);
                     }
                 }
@@ -824,7 +765,7 @@ void render_frame() {
                 glUniform1f(state.blur_u_opacity, layer->opacity);
                 glUniform1f(state.blur_u_blur_amount, layer->blur_amount);
                 glUniform2f(state.blur_u_resolution, (float)state.width, (float)state.height);
-                
+
             } else {
                 glUseProgram(state.shader_program);
 
@@ -1457,7 +1398,7 @@ int parse_config_file(const char *filename) {
             float shift = shift_str ? atof(shift_str) : 1.0f;
             float opacity = opacity_str ? atof(opacity_str) : 1.0f;
             float blur = blur_str ? atof(blur_str) : 0.0f;
-            
+
             if (config.debug) {
                 fprintf(stderr, "Config parse layer: image=%s, shift=%.2f, opacity=%.2f, blur=%.2f\n",
                         image, shift, opacity, blur);

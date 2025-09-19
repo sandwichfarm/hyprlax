@@ -17,9 +17,14 @@ protocols/*.h
 .idea/
 
 # Debug files
-core
+# Core dumps but not src/core directory
+/core
 vgcore.*
 *.log
+
+# Valgrind output files
+*.valgrind.log.*
+*.valgrind.log.core.*
 
 # Test files
 tests/test_hyprlax
