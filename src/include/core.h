@@ -75,6 +75,7 @@ typedef struct {
     int max_fps;
     float scale_factor;
     bool vsync;  /* VSync enabled (default: false) */
+    float idle_poll_rate;  /* Polling rate when idle in Hz (default: 2.0 = 500ms) */
 
     /* Animation settings */
     float shift_pixels;

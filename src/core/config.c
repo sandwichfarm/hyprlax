@@ -23,6 +23,7 @@ void config_set_defaults(config_t *cfg) {
     cfg->animation_duration = 1.0;
     cfg->default_easing = EASE_CUBIC_OUT;
     cfg->vsync = false;  /* Default off to prevent GPU blocking when idle */
+    cfg->idle_poll_rate = 2.0f;  /* Default 2 Hz = 500ms polling when idle */
     cfg->debug = false;
     cfg->dry_run = false;
     cfg->blur_enabled = true;

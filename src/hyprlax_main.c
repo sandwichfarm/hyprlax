@@ -178,6 +178,14 @@ static int parse_config_file(hyprlax_context_t *ctx, const char *filename) {
             if (val) {
                 ctx->config.vsync = (atoi(val) != 0);
             }
+        } else if (strcmp(cmd, "idle_poll_rate") == 0) {
+            char *val = strtok(NULL, " \t");
+            if (val) {
+                ctx->config.idle_poll_rate = atof(val);
+                if (ctx->config.idle_poll_rate < 0.1f || ctx->config.idle_poll_rate > 10.0f) {
+                    ctx->config.idle_poll_rate = 2.0f;
+                }
+            }
         }
     }
 
@@ -201,6 +209,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
         {"platform", required_argument, 0, 'p'},
         {"compositor", required_argument, 0, 'C'},
         {"vsync", no_argument, 0, 'V'},
+        {"idle-poll-rate", required_argument, 0, 1003},
         {0, 0, 0, 0}
     };
 
@@ -226,6 +235,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 printf("  -p, --platform <backend>  Platform backend (wayland, auto)\n");
                 printf("  -C, --compositor <backend> Compositor (hyprland, sway, generic, auto)\n");
                 printf("  -V, --vsync               Enable VSync (default: off)\n");
+                printf("  --idle-poll-rate <hz>     Polling rate when idle (default: 2.0 Hz)\n");
                 printf("\nEasing types:\n");
                 printf("  linear, quad, cubic, quart, quint, sine, expo, circ,\n");
                 printf("  back, elastic, bounce, snap\n");
@@ -301,8 +311,16 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 ctx->monitor_mode = MULTI_MON_SPECIFIC;
                 LOG_DEBUG("Monitor selection: %s", optarg);
                 break;
+                
+            case 1003:  /* --idle-poll-rate */
+                ctx->config.idle_poll_rate = atof(optarg);
+                if (ctx->config.idle_poll_rate < 0.1f || ctx->config.idle_poll_rate > 10.0f) {
+                    LOG_WARN("Invalid idle poll rate: %.1f, using default 2.0 Hz", ctx->config.idle_poll_rate);
+                    ctx->config.idle_poll_rate = 2.0f;
+                }
+                break;
 
-            case 1003:  /* --disable-monitor */
+            case 1004:  /* --disable-monitor */
                 /* TODO: Add monitor to exclusion list */
                 LOG_DEBUG("Excluding monitor: %s", optarg);
                 break;
@@ -627,6 +645,7 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
     LOG_DEBUG("  Animation duration: %.1f seconds", ctx->config.animation_duration);
     LOG_DEBUG("  Easing: %s", easing_to_string(ctx->config.default_easing));
     LOG_DEBUG("  VSync: %s", ctx->config.vsync ? "enabled" : "disabled");
+    LOG_DEBUG("  Idle poll rate: %.1f Hz (%.0fms)", ctx->config.idle_poll_rate, 1000.0 / ctx->config.idle_poll_rate);
 
     return HYPRLAX_SUCCESS;
 }
@@ -1252,7 +1271,8 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             
             /* If no animations are active, sleep longer to reduce CPU/GPU usage */
             if (!animations_active && !needs_render) {
-                sleep_time = 1.0;  /* Sleep for 1 second when idle (1 FPS polling rate) */
+                /* Use configured idle poll rate (default 2 Hz = 500ms) */
+                sleep_time = 1.0 / ctx->config.idle_poll_rate;
                 if (ctx->config.debug) {
                     static int idle_count = 0;
                     if (idle_count++ % 10 == 0) {  /* Log every 5 seconds */
