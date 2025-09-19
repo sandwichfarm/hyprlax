@@ -39,12 +39,6 @@ typedef struct {
     pid_t event_pid;      /* PID of niri msg process */
     bool connected;
     
-    /* Current state */
-    int current_workspace_id;
-    int focused_window_id;
-    int current_column;   /* Column of focused window */
-    int current_row;      /* Row of focused window */
-    
     /* Window tracking for column detection */
     niri_window_info_t *windows;
     int window_count;
@@ -63,7 +57,6 @@ static niri_data_t *g_niri_data = NULL;
 /* Forward declarations */
 static int niri_send_command(const char *command, char *response, size_t response_size);
 static void update_window_info(int id, int column, int row);
-static int get_window_column(int window_id);
 
 /* Update window info cache */
 static void update_window_info(int id, int column, int row) {
@@ -98,51 +91,6 @@ static void update_window_info(int id, int column, int row) {
     g_niri_data->window_count++;
 }
 
-/* Get window column by ID */
-static int get_window_column(int window_id) {
-    if (!g_niri_data) return -1;
-    
-    for (int i = 0; i < g_niri_data->window_count; i++) {
-        if (g_niri_data->windows[i].id == window_id) {
-            return g_niri_data->windows[i].column;
-        }
-    }
-    return -1;
-}
-
-/* Get Niri socket path */
-static bool get_niri_socket_path(char *path, size_t size) {
-    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
-
-    if (!runtime_dir) {
-        return false;
-    }
-
-    /* Niri socket is at $XDG_RUNTIME_DIR/niri.wayland-<number>.sock */
-    /* First try the environment variable */
-    const char *niri_socket = getenv("NIRI_SOCKET");
-    if (niri_socket) {
-        strncpy(path, niri_socket, size);
-        return true;
-    }
-
-    /* Try common socket paths */
-    const char *socket_patterns[] = {
-        "%s/niri.wayland-1.sock",
-        "%s/niri.wayland-0.sock",
-        "%s/niri.sock",
-        NULL
-    };
-
-    for (int i = 0; socket_patterns[i]; i++) {
-        snprintf(path, size, socket_patterns[i], runtime_dir);
-        if (access(path, F_OK) == 0) {
-            return true;
-        }
-    }
-
-    return false;
-}
 
 /* Initialize Niri adapter */
 static int niri_init(void *platform_data) {
@@ -160,56 +108,7 @@ static int niri_init(void *platform_data) {
     g_niri_data->event_stream = NULL;
     g_niri_data->event_pid = 0;
     g_niri_data->connected = false;
-    /* Query initial state from Niri */
-    FILE *query = popen("niri msg --json focused-window 2>/dev/null", "r");
-    if (query) {
-        char buffer[4096];
-        if (fgets(buffer, sizeof(buffer), query)) {
-            /* Parse workspace ID */
-            char *ws_str = strstr(buffer, "\"workspace_id\":");
-            if (ws_str) {
-                ws_str += 15;
-                g_niri_data->current_workspace_id = atoi(ws_str);
-            }
-            
-            /* Parse column position */
-            char *pos_str = strstr(buffer, "\"pos_in_scrolling_layout\":");
-            if (pos_str) {
-                pos_str += 26;
-                if (strncmp(pos_str, "null", 4) != 0) {
-                    char *bracket = strchr(pos_str, '[');
-                    if (bracket) {
-                        g_niri_data->current_column = atoi(bracket + 1);
-                        char *comma = strchr(bracket, ',');
-                        if (comma) {
-                            g_niri_data->current_row = atoi(comma + 1);
-                        }
-                    }
-                }
-            }
-            
-            /* Parse window ID */
-            char *id_str = strstr(buffer, "\"id\":");
-            if (id_str) {
-                id_str += 5;
-                g_niri_data->focused_window_id = atoi(id_str);
-            }
-        }
-        pclose(query);
-    } else {
-        /* Fallback to defaults if query fails */
-        g_niri_data->current_workspace_id = 1;
-        g_niri_data->focused_window_id = -1;
-        g_niri_data->current_column = 0;
-        g_niri_data->current_row = 0;
-    }
     g_niri_data->debug_enabled = getenv("HYPRLAX_DEBUG") != NULL;
-    
-    if (g_niri_data->debug_enabled) {
-        fprintf(stderr, "[DEBUG] Niri: Initial state - workspace %d, column %d, row %d, window %d\n",
-                g_niri_data->current_workspace_id, g_niri_data->current_column, 
-                g_niri_data->current_row, g_niri_data->focused_window_id);
-    }
     g_niri_data->windows = NULL;
     g_niri_data->window_count = 0;
     g_niri_data->window_capacity = 0;
@@ -261,13 +160,17 @@ static bool niri_detect(void) {
         return true;
     }
 
-    /* Check for Niri-specific socket */
-    char socket_path[256];
-    if (get_niri_socket_path(socket_path, sizeof(socket_path))) {
-        return true;
+    /* Check if niri command is available */
+    FILE *pipe = popen("niri msg --json version 2>/dev/null", "r");
+    if (!pipe) {
+        return false;
     }
-
-    return false;
+    
+    char response[256];
+    bool has_output = (fgets(response, sizeof(response), pipe) != NULL);
+    int status = pclose(pipe);
+    
+    return (status == 0 && has_output);
 }
 
 /* Get compositor name */
@@ -301,9 +204,36 @@ static void niri_destroy_layer_surface(void *layer_surface) {
 
 /* Get current workspace */
 static int niri_get_current_workspace(void) {
-    if (!g_niri_data) return 0;
+    /* Query current state from Niri */
+    char response[4096];
+    if (niri_send_command("msg --json focused-window", response, sizeof(response)) != 0) {
+        return 0;  /* Default if query fails */
+    }
+    
+    int workspace_id = 1;
+    int column = 0;
+    
+    /* Parse workspace ID */
+    char *ws_str = strstr(response, "\"workspace_id\":");
+    if (ws_str) {
+        ws_str += 15;
+        workspace_id = atoi(ws_str);
+    }
+    
+    /* Parse column position */
+    char *pos_str = strstr(response, "\"pos_in_scrolling_layout\":");
+    if (pos_str) {
+        pos_str += 26;
+        if (strncmp(pos_str, "null", 4) != 0) {
+            char *bracket = strchr(pos_str, '[');
+            if (bracket) {
+                column = atoi(bracket + 1);
+            }
+        }
+    }
+    
     /* Return encoded position for 2D tracking */
-    return g_niri_data->current_workspace_id * 1000 + g_niri_data->current_column;
+    return workspace_id * 1000 + column;
 }
 
 /* Get workspace count */
@@ -330,6 +260,10 @@ static int niri_list_workspaces(workspace_info_t **workspaces, int *count) {
     }
 
     /* Create placeholder workspace info */
+    /* Query current workspace to determine active one */
+    int current_encoded = niri_get_current_workspace();
+    int current_ws = current_encoded / 1000;
+    
     for (int i = 0; i < *count; i++) {
         (*workspaces)[i].id = i;
         snprintf((*workspaces)[i].name, sizeof((*workspaces)[i].name),
@@ -337,7 +271,7 @@ static int niri_list_workspaces(workspace_info_t **workspaces, int *count) {
         /* Niri arranges workspaces in columns and rows */
         (*workspaces)[i].x = i % 3;  /* Assuming 3 columns by default */
         (*workspaces)[i].y = i / 3;
-        (*workspaces)[i].active = (i == g_niri_data->current_workspace_id);
+        (*workspaces)[i].active = (i == current_ws);
         (*workspaces)[i].visible = (*workspaces)[i].active;
     }
 
@@ -372,30 +306,6 @@ static int niri_list_monitors(monitor_info_t **monitors, int *count) {
     (*monitors)[0].primary = true;
 
     return HYPRLAX_SUCCESS;
-}
-
-/* Connect socket helper */
-static int connect_niri_socket(const char *path) {
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) {
-        return -1;
-    }
-
-    struct sockaddr_un addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
-
-    if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        close(fd);
-        return -1;
-    }
-
-    /* Make socket non-blocking for event polling */
-    int flags = fcntl(fd, F_GETFL, 0);
-    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-
-    return fd;
 }
 
 /* Connect to Niri IPC */
@@ -544,39 +454,35 @@ static int niri_poll_events(compositor_event_t *event) {
                 new_window_id = atoi(id_str);
             }
             
-            if (new_window_id != g_niri_data->focused_window_id) {
-                /* Window focus changed, check if column changed */
-                int old_column = g_niri_data->current_column;
-                int new_column = get_window_column(new_window_id);
-                
-                if (g_niri_data->debug_enabled) {
-                    fprintf(stderr, "[DEBUG] Niri: Window focus changed %d -> %d, column %d -> %d\n",
-                            g_niri_data->focused_window_id, new_window_id,
-                            old_column, new_column);
+            if (new_window_id >= 0) {
+                /* Get column and row for this window */
+                int column = -1, row = -1;
+                for (int i = 0; i < g_niri_data->window_count; i++) {
+                    if (g_niri_data->windows[i].id == new_window_id) {
+                        column = g_niri_data->windows[i].column;
+                        row = g_niri_data->windows[i].row;
+                        break;
+                    }
                 }
                 
-                g_niri_data->focused_window_id = new_window_id;
-                
-                if (new_column >= 0 && new_column != old_column) {
-                    /* Column changed - generate workspace change event */
+                if (column >= 0 && row >= 0) {
+                    /* Report the position where focus moved to */
+                    /* The monitor context will handle "from" state */
                     event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
                     
-                    /* For backwards compatibility, encode both workspace and column */
-                    event->data.workspace.from_workspace = g_niri_data->current_workspace_id * 1000 + old_column;
-                    event->data.workspace.to_workspace = g_niri_data->current_workspace_id * 1000 + new_column;
+                    /* Only report the "to" position - let monitor track "from" */
+                    event->data.workspace.to_workspace = row * 1000 + column;
+                    event->data.workspace.from_workspace = -1; /* Indicate unknown */
                     
-                    /* Provide X coordinate change for 2D handling */
-                    /* Keep current workspace ID for Y coordinate */
-                    event->data.workspace.from_x = old_column;
-                    event->data.workspace.from_y = g_niri_data->current_workspace_id;
-                    event->data.workspace.to_x = new_column;
-                    event->data.workspace.to_y = g_niri_data->current_workspace_id;
-                    
-                    g_niri_data->current_column = new_column;
+                    /* Provide 2D coordinates */
+                    event->data.workspace.to_x = column;
+                    event->data.workspace.to_y = row;
+                    event->data.workspace.from_x = -1;  /* Unknown, let monitor handle */
+                    event->data.workspace.from_y = -1;  /* Unknown, let monitor handle */
                     
                     if (g_niri_data->debug_enabled) {
-                        fprintf(stderr, "[DEBUG] Niri: Generated workspace change event, column %d -> %d\n",
-                                old_column, new_column);
+                        fprintf(stderr, "[DEBUG] Niri: Focus moved to window %d at column %d, row %d\n",
+                                new_window_id, column, row);
                     }
                     
                     return HYPRLAX_SUCCESS;
@@ -668,73 +574,65 @@ static int niri_poll_events(compositor_event_t *event) {
             id_str += 5;
             int new_workspace_id = atoi(id_str);
             
-            if (new_workspace_id != g_niri_data->current_workspace_id) {
-                /* Vertical workspace change */
-                event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
-                event->data.workspace.from_workspace = g_niri_data->current_workspace_id * 1000 + g_niri_data->current_column;
-                event->data.workspace.to_workspace = new_workspace_id * 1000 + g_niri_data->current_column;
-                
-                /* Use Y coordinate for vertical changes */
-                /* Keep current column for X coordinate */
-                event->data.workspace.from_x = g_niri_data->current_column;
-                event->data.workspace.from_y = g_niri_data->current_workspace_id;
-                event->data.workspace.to_x = g_niri_data->current_column;
+            /* Report workspace change - let monitor handle "from" state */
+            event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
+            
+            /* We don't know the column, query current state */
+            int current_encoded = niri_get_current_workspace();
+            int column = current_encoded % 1000;
+            
+            event->data.workspace.to_workspace = new_workspace_id * 1000 + column;
+            event->data.workspace.from_workspace = -1; /* Unknown, let monitor handle */
+            
+            /* Use Y coordinate for vertical changes */
+                /* Provide 2D coordinates */
+                event->data.workspace.to_x = column;
                 event->data.workspace.to_y = new_workspace_id;
-                
-                g_niri_data->current_workspace_id = new_workspace_id;
+                event->data.workspace.from_x = -1;  /* Unknown, let monitor handle */
+                event->data.workspace.from_y = -1;  /* Unknown, let monitor handle */
                 
                 if (g_niri_data->debug_enabled) {
-                    fprintf(stderr, "[DEBUG] Niri: Workspace activated %d\n", new_workspace_id);
+                    fprintf(stderr, "[DEBUG] Niri: Workspace activated %d at column %d\n", 
+                            new_workspace_id, column);
                 }
                 
                 return HYPRLAX_SUCCESS;
-            }
         }
     }
     
     return HYPRLAX_ERROR_NO_DATA;
 }
-/* Send IPC command */
+/* Send IPC command via niri msg */
 static int niri_send_command(const char *command, char *response,
                             size_t response_size) {
-    if (!g_niri_data || !g_niri_data->connected) {
-        return HYPRLAX_ERROR_NO_DISPLAY;
-    }
-
     if (!command) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
 
-    /* Niri uses a separate socket per command */
-    char socket_path[256];
-    if (!get_niri_socket_path(socket_path, sizeof(socket_path))) {
-        return HYPRLAX_ERROR_NO_DISPLAY;
-    }
+    /* Build full command with 'niri' prefix */
+    char full_cmd[512];
+    snprintf(full_cmd, sizeof(full_cmd), "niri %s", command);
 
-    int cmd_fd = connect_niri_socket(socket_path);
-    if (cmd_fd < 0) {
+    /* Execute command and capture output */
+    FILE *pipe = popen(full_cmd, "r");
+    if (!pipe) {
         return HYPRLAX_ERROR_NO_DISPLAY;
-    }
-
-    /* Send command */
-    if (write(cmd_fd, command, strlen(command)) < 0) {
-        close(cmd_fd);
-        return HYPRLAX_ERROR_INVALID_ARGS;
     }
 
     /* Read response if buffer provided */
     if (response && response_size > 0) {
-        ssize_t total = 0;
-        while (total < (ssize_t)response_size - 1) {
-            ssize_t n = read(cmd_fd, response + total, response_size - total - 1);
-            if (n <= 0) break;
-            total += n;
+        size_t total = 0;
+        while (total < response_size - 1) {
+            if (!fgets(response + total, response_size - total, pipe)) {
+                break;
+            }
+            total = strlen(response);
         }
-        response[total] = '\0';
+        response[response_size - 1] = '\0';
     }
 
-    close(cmd_fd);
-    return HYPRLAX_SUCCESS;
+    int status = pclose(pipe);
+    return (status == 0) ? HYPRLAX_SUCCESS : HYPRLAX_ERROR_INVALID_ARGS;
 }
 
 /* Check blur support */

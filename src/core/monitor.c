@@ -308,10 +308,21 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
         
         if (is_2d) {
             /* For 2D models, accumulate the offsets */
-            monitor->parallax_offset_x += offset_2d.x;
-            monitor->parallax_offset_y += offset_2d.y;
-            absolute_target_x = monitor->parallax_offset_x;
-            absolute_target_y = monitor->parallax_offset_y;
+            /* If animating, accumulate from the target position, not current */
+            float base_x = monitor->animating ? monitor->animation_target_x : monitor->parallax_offset_x;
+            float base_y = monitor->animating ? monitor->animation_target_y : monitor->parallax_offset_y;
+            
+            if (ctx && ctx->config.debug) {
+                fprintf(stderr, "[DEBUG]   Base position: X=%.1f, Y=%.1f (animating=%d)\n",
+                        base_x, base_y, monitor->animating);
+            }
+            
+            absolute_target_x = base_x + offset_2d.x;
+            absolute_target_y = base_y + offset_2d.y;
+            
+            /* Update the accumulated position */
+            monitor->parallax_offset_x = absolute_target_x;
+            monitor->parallax_offset_y = absolute_target_y;
             if (ctx && ctx->config.debug) {
                 fprintf(stderr, "[DEBUG]   2D accumulative offset: X=%.1f, Y=%.1f\n",
                         monitor->parallax_offset_x, monitor->parallax_offset_y);
