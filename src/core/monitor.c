@@ -351,7 +351,7 @@ void monitor_update_animation(monitor_instance_t *monitor, double current_time) 
     if (!monitor || !monitor->animating || !monitor->config) return;
 
     double elapsed = current_time - monitor->animation_start_time;
-    double duration = monitor->config->animation_duration * 1000.0;  /* Convert to ms */
+    double duration = monitor->config->animation_duration;  /* Duration is in seconds */
 
     if (elapsed >= duration) {
         /* Animation complete */
