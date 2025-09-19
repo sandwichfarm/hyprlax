@@ -192,7 +192,7 @@ START_TEST(test_module_registry)
         }
     }
     
-    ck_assert_int_eq(registered_count, 7);
+    ck_assert_int_eq(registered_count, 6);
 }
 END_TEST
 

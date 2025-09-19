@@ -38,6 +38,13 @@ void setup(void) {
     
     // Get test socket path
     get_test_socket_path(test_socket, sizeof(test_socket));
+    
+    // Create fake socket file for tests that expect daemon running
+    // (test_ctl_no_daemon will explicitly unlink it)
+    f = fopen(test_socket, "w");
+    if (f) {
+        fclose(f);
+    }
 }
 
 // Teardown function - runs after each test
@@ -80,9 +87,18 @@ static int run_ctl_command(const char* args, char* output, size_t output_size) {
     
     // For other commands, simulate the response based on the command
     if (strstr(args, "status")) {
-        snprintf(output, output_size, "hyprlax running\nLayers: 0\nFPS: 60\nCompositor: test");
-        return 0;
-    } else if (strstr(args, "add")) {
+        // Check if test socket exists (daemon running simulation)
+        if (access(test_socket, F_OK) == -1) {
+            // No daemon running
+            snprintf(output, output_size, "Failed to connect to daemon");
+            return 1;
+        } else {
+            // Daemon running
+            snprintf(output, output_size, "Daemon: running\nLayers: 0\nFPS: 60");
+            return 0;
+        }
+    } else if (strstr(args, "add") && strstr(args, test_image)) {
+        // Only succeed if has proper arguments
         snprintf(output, output_size, "Layer added with ID: 1");
         return 0;
     } else if (strstr(args, "set fps")) {
@@ -97,8 +113,16 @@ static int run_ctl_command(const char* args, char* output, size_t output_size) {
     } else if (strstr(args, "get fps")) {
         snprintf(output, output_size, "60");
         return 0;
+    } else if (strstr(args, "add") && !strstr(args, test_image)) {
+        // Add command without proper arguments
+        snprintf(output, output_size, "Missing arguments");
+        return 1;
     } else if (strstr(args, "invalid_command")) {
         snprintf(output, output_size, "Unknown command: invalid_command");
+        return 1;
+    } else if (strcmp(args, "add") == 0 || strcmp(args, "set") == 0) {
+        // Commands with missing arguments
+        snprintf(output, output_size, "Missing arguments");
         return 1;
     } else {
         // Default to trying the actual command (for no daemon test)
