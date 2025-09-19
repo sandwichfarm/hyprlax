@@ -908,6 +908,15 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
     LOG_TRACE("Set viewport: %dx%d (scale=%d)",
               monitor->width * monitor->scale, monitor->height * monitor->scale, monitor->scale); */
 
+    /* Optional profiling */
+    static int s_profile = -1;
+    if (s_profile == -1) {
+        const char *p = getenv("HYPRLAX_PROFILE");
+        s_profile = (p && *p) ? 1 : 0;
+    }
+    double t_draw_start = 0.0;
+    double t_present_start = 0.0;
+
     /* Clear and prepare for rendering */
     RENDERER_BEGIN_FRAME(ctx->renderer);
     RENDERER_CLEAR(ctx->renderer, 0.0f, 0.0f, 0.0f, 1.0f);
@@ -933,6 +942,7 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
     }
 
     /* Render each layer with this monitor's offset */
+    if (s_profile) t_draw_start = get_time();
     parallax_layer_t *layer = ctx->layers;
     int layer_num = 0;
     /* Layer count debug - commented out for performance
@@ -982,7 +992,16 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
     /* Present debug - commented out for performance
     LOG_TRACE("Ending frame and presenting for monitor %s", monitor->name); */
     RENDERER_END_FRAME(ctx->renderer);
+    double t_draw_end = s_profile ? get_time() : 0.0;
+    if (s_profile) t_present_start = t_draw_end;
     RENDERER_PRESENT(ctx->renderer);
+    double t_present_end = s_profile ? get_time() : 0.0;
+
+    if (s_profile && ctx->config.debug) {
+        double draw_ms = (t_draw_end - t_draw_start) * 1000.0;
+        double present_ms = (t_present_end - t_present_start) * 1000.0;
+        LOG_DEBUG("[PROFILE] monitor=%s draw=%.2f ms present=%.2f ms", monitor->name, draw_ms, present_ms);
+    }
 
     /* Commit the Wayland surface to make the frame visible */
     if (monitor->wl_surface) {
