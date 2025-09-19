@@ -985,6 +985,34 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
     }
 }
 
+/* Check if any layer has active animations */
+static bool has_active_animations(hyprlax_context_t *ctx) {
+    if (!ctx) return false;
+    
+    /* Check layer animations */
+    parallax_layer_t *layer = ctx->layers;
+    while (layer) {
+        if (animation_is_active(&layer->x_animation) || 
+            animation_is_active(&layer->y_animation)) {
+            return true;
+        }
+        layer = layer->next;
+    }
+    
+    /* Check monitor animations */
+    if (ctx->monitors) {
+        monitor_instance_t *monitor = ctx->monitors->head;
+        while (monitor) {
+            if (monitor->animating) {
+                return true;
+            }
+            monitor = monitor->next;
+        }
+    }
+    
+    return false;
+}
+
 /* Main run loop */
 int hyprlax_run(hyprlax_context_t *ctx) {
     if (!ctx) return HYPRLAX_ERROR_INVALID_ARGS;
@@ -993,14 +1021,17 @@ int hyprlax_run(hyprlax_context_t *ctx) {
         LOG_DEBUG("Starting main loop (target FPS: %d)", ctx->config.target_fps);
     }
 
-    double last_time = get_time();
+    double last_render_time = get_time();
+    double last_frame_time = last_render_time;
     double frame_time = 1.0 / ctx->config.target_fps;
     int frame_count = 0;
     double debug_timer = 0.0;
+    bool needs_render = true;  /* Render first frame */
 
     while (ctx->running) {
         double current_time = get_time();
-        ctx->delta_time = current_time - last_time;
+        ctx->delta_time = current_time - last_frame_time;
+        last_frame_time = current_time;
 
         /* Frame timing debug - disabled for performance
         if (ctx->config.debug && frame_count < 5) {
@@ -1023,6 +1054,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                     hyprlax_handle_resize(ctx,
                                         platform_event.data.resize.width,
                                         platform_event.data.resize.height);
+                    needs_render = true;  /* Window resize requires re-render */
                     break;
                 default:
                     break;
@@ -1032,6 +1064,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
         /* Poll IPC commands */
         if (ctx->ipc_ctx && ipc_process_commands((ipc_context_t*)ctx->ipc_ctx)) {
             /* IPC processed - layers may have changed */
+            needs_render = true;  /* IPC commands may have changed layers */
             if (ctx->config.debug) {
                 LOG_TRACE("IPC command processed");
             }
@@ -1043,6 +1076,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             int poll_result = ctx->compositor->ops->poll_events(&comp_event);
             if (poll_result == HYPRLAX_SUCCESS) {
                 if (comp_event.type == COMPOSITOR_EVENT_WORKSPACE_CHANGE) {
+                    needs_render = true;  /* Workspace change requires re-render */
                     /* For multi-monitor support, find the correct monitor */
                     monitor_instance_t *target_monitor = NULL;
 
@@ -1123,52 +1157,64 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             }
         }
 
-        /* Update animations */
-        /* Animation debug - disabled for performance
-        if (ctx->config.debug && frame_count < 5) {
-            LOG_TRACE("Updating layer animations");
-        } */
-        hyprlax_update_layers(ctx, current_time);
+        /* Check if animations are active */
+        bool animations_active = has_active_animations(ctx);
+        
+        /* Only update animations if they're active */
+        if (animations_active) {
+            /* Update layer animations */
+            hyprlax_update_layers(ctx, current_time);
 
-        /* Update monitor animations for parallax */
-        if (ctx->monitors) {
-            monitor_instance_t *monitor = ctx->monitors->head;
-            while (monitor) {
-                monitor_update_animation(monitor, current_time);
-                monitor = monitor->next;
+            /* Update monitor animations for parallax */
+            if (ctx->monitors) {
+                monitor_instance_t *monitor = ctx->monitors->head;
+                while (monitor) {
+                    monitor_update_animation(monitor, current_time);
+                    monitor = monitor->next;
+                }
             }
+            
+            needs_render = true;  /* Animation updates require re-render */
         }
 
-        /* Render frame if enough time has passed */
-        if (ctx->delta_time >= frame_time) {
-            /* Render debug - disabled for performance
-            if (ctx->config.debug && frame_count < 5) {
-                LOG_TRACE("Rendering frame %d", frame_count);
-            } */
+        /* Calculate time since last render */
+        double time_since_render = current_time - last_render_time;
+        
+        /* Render frame if:
+         * 1. We need to render (animation active, workspace changed, etc.)
+         * 2. Enough time has passed since last frame (respecting target FPS)
+         */
+        if (needs_render && time_since_render >= frame_time) {
             hyprlax_render_frame(ctx);
-            ctx->fps = 1.0 / ctx->delta_time;
-            last_time = current_time;
+            ctx->fps = 1.0 / time_since_render;
+            last_render_time = current_time;
             frame_count++;
+            needs_render = animations_active;  /* Only keep rendering if animations are active */
 
             /* Print FPS every second in debug mode */
             if (ctx->config.debug) {
-                debug_timer += ctx->delta_time;
+                debug_timer += time_since_render;
                 if (debug_timer >= 1.0) {
-                    LOG_DEBUG("FPS: %.1f, Layers: %d", ctx->fps, ctx->layer_count);
+                    LOG_DEBUG("FPS: %.1f, Layers: %d, Animations: %s", 
+                             ctx->fps, ctx->layer_count,
+                             animations_active ? "active" : "idle");
                     debug_timer = 0.0;
                 }
             }
         } else {
-            /* Sleep to maintain target FPS using nanosleep for better precision */
-            double sleep_time = frame_time - ctx->delta_time;
-            /* Sleep debug - disabled for performance
-            if (ctx->config.debug && frame_count < 5) {
-                LOG_TRACE("Sleeping for %.4f seconds", sleep_time);
-            } */
+            /* Calculate sleep time */
+            double target_wake_time = last_render_time + frame_time;
+            double sleep_time = target_wake_time - current_time;
+            
+            /* If no animations are active, sleep longer to reduce CPU usage */
+            if (!animations_active && !needs_render) {
+                sleep_time = 0.1;  /* Sleep for 100ms when idle (10 FPS polling rate) */
+            }
+            
             if (sleep_time > 0) {
                 struct timespec ts;
-                ts.tv_sec = (time_t)(sleep_time);  /* Integer seconds (usually 0) */
-                ts.tv_nsec = (long)((sleep_time - (time_t)sleep_time) * 1e9);  /* Fractional part in nanoseconds */
+                ts.tv_sec = (time_t)(sleep_time);
+                ts.tv_nsec = (long)((sleep_time - (time_t)sleep_time) * 1e9);
                 if (ts.tv_nsec > 999999999) {
                     ts.tv_nsec = 999999999;
                 } else if (ts.tv_nsec < 0) {
