@@ -305,7 +305,7 @@ prompt_installation_choice() {
     local target_version="$1"
     local target_path="$2"
     local installations="$3"
-    
+
     # All output to stderr except the final choice
     echo >&2
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
@@ -315,6 +315,7 @@ prompt_installation_choice() {
     
     # Show existing installations
     echo -e "${YELLOW}Existing installations:${NC}" >&2
+
     IFS='|' read -ra INSTALLS <<< "$installations"
     for install in "${INSTALLS[@]}"; do
         if [[ "$install" == PATH:* ]]; then
@@ -935,6 +936,42 @@ main() {
     
     # Check if this is a v2 version
     IS_V2=$(is_v2_version "$VERSION")
+    
+    # Check for multiple installations
+    local all_installs=$(find_all_installations)
+    local target_path=$(get_hyprlax_path)
+    
+    if [ -n "$all_installs" ]; then
+        # Count the number of installations
+        local install_count=$(echo "$all_installs" | tr '|' '\n' | wc -l)
+        
+        # Check if there would be a conflict
+        local active_after=$(get_active_binary_after_install "$target_path")
+        
+        # If there are multiple installations or a conflict would occur, prompt the user
+        if [ "$install_count" -gt 1 ] || [ "$active_after" != "$target_path" ]; then
+            local user_choice=$(prompt_installation_choice "$VERSION_NUM" "$target_path" "$all_installs")
+            
+            case "$user_choice" in
+                1)
+                    print_info "Proceeding with installation to $target_path"
+                    print_warning "Remember: $active_after will be the active binary!"
+                    ;;
+                2)
+                    remove_all_installations "$all_installs"
+                    print_success "All existing installations removed"
+                    ;;
+                3)
+                    print_info "Installation cancelled"
+                    exit 0
+                    ;;
+                *)
+                    print_error "Invalid choice. Installation cancelled"
+                    exit 1
+                    ;;
+            esac
+        fi
+    fi
     
     # Download binaries
     HYPRLAX_FILE=$(download_binary "$VERSION" "$ARCH" "hyprlax")
