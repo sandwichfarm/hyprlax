@@ -1,6 +1,6 @@
 /*
  * monitor.h - Multi-monitor management
- * 
+ *
  * Handles monitor detection, lifecycle, and per-monitor state.
  */
 
@@ -35,40 +35,40 @@ typedef struct monitor_instance {
     char name[64];                     /* e.g., "DP-1", "HDMI-2" */
     uint32_t id;                       /* Unique ID for this session */
     bool is_primary;
-    
+
     /* Physical properties */
     int width, height;                 /* Resolution in pixels */
     int scale;                        /* Output scale factor */
     int refresh_rate;                 /* Hz */
     int transform;                    /* Rotation/flip */
-    
+
     /* Position in global coordinate space */
     int global_x, global_y;
-    
+
     /* Wayland objects */
     struct wl_output *wl_output;
     struct wl_surface *wl_surface;
     struct zwlr_layer_surface_v1 *layer_surface;
     void *wl_egl_window;              /* EGL window for this surface */
-    
+
     /* EGL surface (shares context with others) */
     EGLSurface egl_surface;
-    
+
     /* Frame scheduling */
     struct wl_callback *frame_callback;
     bool frame_pending;
     double last_frame_time;
     double target_frame_time;         /* Based on refresh rate */
-    
+
     /* Workspace tracking (flexible model support) */
     workspace_context_t current_context;  /* Current workspace/tag/set state */
     workspace_context_t previous_context; /* Previous state for comparison */
     float parallax_offset_x;             /* Calculated parallax offset */
     float parallax_offset_y;
-    
+
     /* Compositor capabilities for this monitor */
     compositor_capabilities_t capabilities;
-    
+
     /* Animation state */
     bool animating;
     double animation_start_time;
@@ -76,10 +76,10 @@ typedef struct monitor_instance {
     float animation_target_y;
     float animation_start_x;
     float animation_start_y;
-    
+
     /* Configuration (resolved for this monitor) */
     config_t *config;
-    
+
     /* Linked list */
     struct monitor_instance *next;
 } monitor_instance_t;
@@ -113,7 +113,7 @@ config_t* monitor_resolve_config(monitor_instance_t *monitor, config_t *global_c
 void monitor_apply_config(monitor_instance_t *monitor, config_t *config);
 
 /* Workspace handling */
-void monitor_handle_workspace_change(hyprlax_context_t *ctx, 
+void monitor_handle_workspace_change(hyprlax_context_t *ctx,
                                     monitor_instance_t *monitor,
                                     int new_workspace);
 void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,

@@ -1,6 +1,6 @@
 /*
  * shader.c - Shader management implementation
- * 
+ *
  * Handles shader compilation, linking, and uniform management for OpenGL.
  */
 
@@ -73,26 +73,26 @@ static const char *shader_fragment_blur_template =
 shader_program_t* shader_create_program(const char *name) {
     shader_program_t *program = calloc(1, sizeof(shader_program_t));
     if (!program) return NULL;
-    
+
     program->name = name ? strdup(name) : strdup("unnamed");
     program->id = 0;
     program->compiled = false;
-    
+
     return program;
 }
 
 /* Destroy shader program */
 void shader_destroy_program(shader_program_t *program) {
     if (!program) return;
-    
+
     if (program->id) {
         glDeleteProgram(program->id);
     }
-    
+
     if (program->name) {
         free(program->name);
     }
-    
+
     free(program);
 }
 
@@ -100,104 +100,104 @@ void shader_destroy_program(shader_program_t *program) {
 static GLuint compile_shader(const char *source, GLenum type) {
     GLuint shader = glCreateShader(type);
     if (!shader) return 0;
-    
+
     glShaderSource(shader, 1, &source, NULL);
     glCompileShader(shader);
-    
+
     GLint compiled = 0;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
-    
+
     if (!compiled) {
         GLint info_len = 0;
         glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &info_len);
-        
+
         if (info_len > 1) {
             char *info_log = malloc(info_len);
             glGetShaderInfoLog(shader, info_len, NULL, info_log);
             fprintf(stderr, "Shader compilation failed: %s\n", info_log);
             free(info_log);
         }
-        
+
         glDeleteShader(shader);
         return 0;
     }
-    
+
     return shader;
 }
 
 /* Compile and link shader program */
-int shader_compile(shader_program_t *program, 
-                  const char *vertex_src, 
+int shader_compile(shader_program_t *program,
+                  const char *vertex_src,
                   const char *fragment_src) {
     if (!program || !vertex_src || !fragment_src) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
-    
+
     GLuint vertex_shader = compile_shader(vertex_src, GL_VERTEX_SHADER);
     if (!vertex_shader) {
         return HYPRLAX_ERROR_GL_INIT;
     }
-    
+
     GLuint fragment_shader = compile_shader(fragment_src, GL_FRAGMENT_SHADER);
     if (!fragment_shader) {
         glDeleteShader(vertex_shader);
         return HYPRLAX_ERROR_GL_INIT;
     }
-    
+
     GLuint prog = glCreateProgram();
     if (!prog) {
         glDeleteShader(vertex_shader);
         glDeleteShader(fragment_shader);
         return HYPRLAX_ERROR_GL_INIT;
     }
-    
+
     glAttachShader(prog, vertex_shader);
     glAttachShader(prog, fragment_shader);
     glLinkProgram(prog);
-    
+
     GLint linked = 0;
     glGetProgramiv(prog, GL_LINK_STATUS, &linked);
-    
+
     if (!linked) {
         GLint info_len = 0;
         glGetProgramiv(prog, GL_INFO_LOG_LENGTH, &info_len);
-        
+
         if (info_len > 1) {
             char *info_log = malloc(info_len);
             glGetProgramInfoLog(prog, info_len, NULL, info_log);
             fprintf(stderr, "Program linking failed: %s\n", info_log);
             free(info_log);
         }
-        
+
         glDeleteProgram(prog);
         glDeleteShader(vertex_shader);
         glDeleteShader(fragment_shader);
         return HYPRLAX_ERROR_GL_INIT;
     }
-    
+
     /* Clean up shaders (they're linked into the program now) */
     glDeleteShader(vertex_shader);
     glDeleteShader(fragment_shader);
-    
+
     program->id = prog;
     program->compiled = true;
-    
+
     return HYPRLAX_SUCCESS;
 }
 
 /* Compile blur shader with dynamic generation */
 int shader_compile_blur(shader_program_t *program) {
     if (!program) return HYPRLAX_ERROR_INVALID_ARGS;
-    
+
     /* Build the blur fragment shader dynamically */
     char *blur_fragment_src = shader_build_blur_fragment(5.0f, BLUR_KERNEL_SIZE);
     if (!blur_fragment_src) {
         return HYPRLAX_ERROR_NO_MEMORY;
     }
-    
+
     /* Compile with the basic vertex shader and blur fragment shader */
     int result = shader_compile(program, shader_vertex_basic, blur_fragment_src);
-    
+
     free(blur_fragment_src);
     return result;
 }
@@ -210,10 +210,10 @@ void shader_use(const shader_program_t *program) {
 }
 
 /* Set uniform float */
-void shader_set_uniform_float(const shader_program_t *program, 
+void shader_set_uniform_float(const shader_program_t *program,
                              const char *name, float value) {
     if (!program || !program->id || !name) return;
-    
+
     GLint location = glGetUniformLocation(program->id, name);
     if (location != -1) {
         glUniform1f(location, value);
@@ -221,10 +221,10 @@ void shader_set_uniform_float(const shader_program_t *program,
 }
 
 /* Set uniform vec2 */
-void shader_set_uniform_vec2(const shader_program_t *program, 
+void shader_set_uniform_vec2(const shader_program_t *program,
                            const char *name, float x, float y) {
     if (!program || !program->id || !name) return;
-    
+
     GLint location = glGetUniformLocation(program->id, name);
     if (location != -1) {
         glUniform2f(location, x, y);
@@ -232,10 +232,10 @@ void shader_set_uniform_vec2(const shader_program_t *program,
 }
 
 /* Set uniform int */
-void shader_set_uniform_int(const shader_program_t *program, 
+void shader_set_uniform_int(const shader_program_t *program,
                           const char *name, int value) {
     if (!program || !program->id || !name) return;
-    
+
     GLint location = glGetUniformLocation(program->id, name);
     if (location != -1) {
         glUniform1i(location, value);
@@ -245,20 +245,20 @@ void shader_set_uniform_int(const shader_program_t *program,
 /* Build dynamic blur shader */
 char* shader_build_blur_fragment(float blur_amount, int kernel_size) {
     (void)kernel_size; /* Currently using fixed BLUR_KERNEL_SIZE */
-    
+
     if (blur_amount <= 0.001f) {
         /* No blur needed, return basic shader */
         return strdup(shader_fragment_basic);
     }
-    
+
     /* Allocate buffer for shader source */
     char *shader = malloc(SHADER_BUFFER_SIZE);
     if (!shader) return NULL;
-    
+
     /* Build shader with specific blur parameters */
     snprintf(shader, SHADER_BUFFER_SIZE, shader_fragment_blur_template,
              BLUR_KERNEL_SIZE,      /* Kernel size */
              BLUR_WEIGHT_FALLOFF, BLUR_WEIGHT_FALLOFF);  /* Weight falloff */
-    
+
     return shader;
 }

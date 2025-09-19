@@ -1,6 +1,6 @@
 /*
  * hyprlax_internal.h - Internal shared definitions
- * 
+ *
  * This header contains definitions shared across modules but not exposed
  * to external users. All modules can include this header.
  */

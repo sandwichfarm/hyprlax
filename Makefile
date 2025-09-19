@@ -85,10 +85,10 @@ PROTOCOL_HDRS =
 endif
 
 # Core module sources (always included)
-CORE_SRCS = src/core/easing.c src/core/animation.c src/core/layer.c src/core/config.c src/core/monitor.c src/core/log.c
+CORE_SRCS = src/core/easing.c src/core/animation.c src/core/layer.c src/core/config.c src/core/monitor.c src/core/log.c src/core/shared_buffer.c
 
 # Renderer module sources (conditional)
-RENDERER_SRCS = src/renderer/renderer.c src/renderer/shader.c
+RENDERER_SRCS = src/renderer/renderer.c src/renderer/shader.c src/renderer/headless_renderer.c
 ifeq ($(ENABLE_GLES2),1)
 RENDERER_SRCS += src/renderer/gles2.c
 endif
@@ -206,7 +206,7 @@ VALGRIND_FLAGS = --leak-check=full --show-leak-kinds=definite,indirect --track-o
 # For Arch Linux, enable debuginfod for symbol resolution
 export DEBUGINFOD_URLS ?= https://debuginfod.archlinux.org
 
-TEST_TARGETS = tests/test_integration tests/test_ipc tests/test_blur tests/test_config tests/test_animation tests/test_easing tests/test_shader tests/test_platform tests/test_compositor tests/test_modules tests/test_renderer tests/test_workspace_changes tests/test_animation_state tests/test_config_validation
+TEST_TARGETS = tests/test_integration tests/test_ipc tests/test_blur tests/test_config tests/test_animation tests/test_easing tests/test_shader tests/test_platform tests/test_compositor tests/test_modules tests/test_renderer tests/test_workspace_changes tests/test_animation_state tests/test_config_validation tests/test_hyprland_events
 ALL_TESTS = $(filter tests/test_%, $(wildcard tests/test_*.c))
 ALL_TEST_TARGETS = $(ALL_TESTS:.c=)
 
@@ -255,6 +255,10 @@ tests/test_animation_state: tests/test_animation_state.c
 
 tests/test_config_validation: tests/test_config_validation.c
 	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
+
+# Hyprland event parsing tests (link hyprland adapter and core compositor utils)
+tests/test_hyprland_events: tests/test_hyprland_events.c src/compositor/hyprland.c src/compositor/compositor.c src/core/log.c
+	$(CC) $(TEST_CFLAGS) -DUNIT_TEST -Isrc -Isrc/include $^ $(TEST_LIBS) -o $@
 
 # Run all tests
 test: $(ALL_TEST_TARGETS)
@@ -329,4 +333,19 @@ lint-fix:
 clean-tests:
 	rm -f $(ALL_TEST_TARGETS) tests/*.valgrind.log tests/*.valgrind.log.* tests/*.valgrind.log.core.*
 
-.PHONY: all clean install install-user uninstall uninstall-user test memcheck clean-tests lint lint-fix
+# Wayfire plugin build target
+wayfire-plugin:
+	@echo "Building Wayfire plugin..."
+	@mkdir -p plugins/wayfire/build
+	@g++ -shared -fPIC \
+		-o plugins/wayfire/build/libhyprlax.so \
+		plugins/wayfire/libhyprlax.cpp \
+		`pkg-config --cflags --libs wayfire` \
+		`pkg-config --cflags --libs glesv2` \
+		-std=c++17 -pthread
+
+wayfire-plugin-install: wayfire-plugin
+	@echo "Installing Wayfire plugin..."
+	@sudo cp plugins/wayfire/build/libhyprlax.so /usr/lib/wayfire/
+
+.PHONY: all clean install install-user uninstall uninstall-user test memcheck clean-tests lint lint-fix wayfire-plugin wayfire-plugin-install

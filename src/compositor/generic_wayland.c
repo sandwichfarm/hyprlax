@@ -1,6 +1,6 @@
 /*
  * generic_wayland.c - Generic Wayland compositor adapter
- * 
+ *
  * Implements basic wlr-layer-shell support for compositors that
  * don't have specific IPC interfaces (River, Wayfire, etc.)
  */
@@ -22,19 +22,19 @@ static generic_wayland_data_t *g_generic_data = NULL;
 /* Initialize generic Wayland adapter */
 static int generic_wayland_init(void *platform_data) {
     (void)platform_data;
-    
+
     if (g_generic_data) {
         return HYPRLAX_SUCCESS;
     }
-    
+
     g_generic_data = calloc(1, sizeof(generic_wayland_data_t));
     if (!g_generic_data) {
         return HYPRLAX_ERROR_NO_MEMORY;
     }
-    
+
     g_generic_data->current_workspace = 1;
     g_generic_data->current_monitor = 0;
-    
+
     return HYPRLAX_SUCCESS;
 }
 
@@ -64,7 +64,7 @@ static const char* generic_wayland_get_name(void) {
 }
 
 /* Create layer surface using wlr-layer-shell */
-static int generic_wayland_create_layer_surface(void *surface, 
+static int generic_wayland_create_layer_surface(void *surface,
                                                const layer_surface_config_t *config) {
     (void)surface;
     (void)config;
@@ -73,7 +73,7 @@ static int generic_wayland_create_layer_surface(void *surface,
 }
 
 /* Configure layer surface */
-static void generic_wayland_configure_layer_surface(void *layer_surface, 
+static void generic_wayland_configure_layer_surface(void *layer_surface,
                                                    int width, int height) {
     (void)layer_surface;
     (void)width;
@@ -101,19 +101,19 @@ static int generic_wayland_list_workspaces(workspace_info_t **workspaces, int *c
     if (!workspaces || !count) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
-    
+
     /* Single workspace for generic compositor */
     *count = 1;
     *workspaces = calloc(1, sizeof(workspace_info_t));
     if (!*workspaces) {
         return HYPRLAX_ERROR_NO_MEMORY;
     }
-    
+
     (*workspaces)[0].id = 1;
     strncpy((*workspaces)[0].name, "1", sizeof((*workspaces)[0].name));
     (*workspaces)[0].active = true;
     (*workspaces)[0].visible = true;
-    
+
     return HYPRLAX_SUCCESS;
 }
 
@@ -128,14 +128,14 @@ static int generic_wayland_list_monitors(monitor_info_t **monitors, int *count) 
     if (!monitors || !count) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
-    
+
     /* Single monitor assumption */
     *count = 1;
     *monitors = calloc(1, sizeof(monitor_info_t));
     if (!*monitors) {
         return HYPRLAX_ERROR_NO_MEMORY;
     }
-    
+
     (*monitors)[0].id = 0;
     strncpy((*monitors)[0].name, "default", sizeof((*monitors)[0].name));
     (*monitors)[0].x = 0;
@@ -144,7 +144,7 @@ static int generic_wayland_list_monitors(monitor_info_t **monitors, int *count) 
     (*monitors)[0].height = 1080;
     (*monitors)[0].scale = 1.0;
     (*monitors)[0].primary = true;
-    
+
     return HYPRLAX_SUCCESS;
 }
 
@@ -166,7 +166,7 @@ static int generic_wayland_poll_events(compositor_event_t *event) {
     return HYPRLAX_SUCCESS;
 }
 
-static int generic_wayland_send_command(const char *command, char *response, 
+static int generic_wayland_send_command(const char *command, char *response,
                                        size_t response_size) {
     (void)command;
     (void)response;
@@ -222,4 +222,6 @@ const compositor_ops_t compositor_generic_wayland_ops = {
     .supports_animations = generic_wayland_supports_animations,
     .set_blur = generic_wayland_set_blur,
     .set_wallpaper_offset = generic_wayland_set_wallpaper_offset,
+    .is_headless_mode = NULL,
+    .send_frame = NULL,
 };

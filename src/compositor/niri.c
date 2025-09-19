@@ -1,6 +1,6 @@
 /*
  * niri.c - Niri compositor adapter
- * 
+ *
  * Implements compositor interface for Niri, including
  * support for its scrollable workspace model with both
  * horizontal and vertical movement.
@@ -50,11 +50,11 @@ static int niri_send_command(const char *command, char *response, size_t respons
 /* Get Niri socket path */
 static bool get_niri_socket_path(char *path, size_t size) {
     const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
-    
+
     if (!runtime_dir) {
         return false;
     }
-    
+
     /* Niri socket is at $XDG_RUNTIME_DIR/niri.wayland-<number>.sock */
     /* First try the environment variable */
     const char *niri_socket = getenv("NIRI_SOCKET");
@@ -62,7 +62,7 @@ static bool get_niri_socket_path(char *path, size_t size) {
         strncpy(path, niri_socket, size);
         return true;
     }
-    
+
     /* Try common socket paths */
     const char *socket_patterns[] = {
         "%s/niri.wayland-1.sock",
@@ -70,30 +70,30 @@ static bool get_niri_socket_path(char *path, size_t size) {
         "%s/niri.sock",
         NULL
     };
-    
+
     for (int i = 0; socket_patterns[i]; i++) {
         snprintf(path, size, socket_patterns[i], runtime_dir);
         if (access(path, F_OK) == 0) {
             return true;
         }
     }
-    
+
     return false;
 }
 
 /* Initialize Niri adapter */
 static int niri_init(void *platform_data) {
     (void)platform_data;
-    
+
     if (g_niri_data) {
         return HYPRLAX_SUCCESS;  /* Already initialized */
     }
-    
+
     g_niri_data = calloc(1, sizeof(niri_data_t));
     if (!g_niri_data) {
         return HYPRLAX_ERROR_NO_MEMORY;
     }
-    
+
     g_niri_data->ipc_fd = -1;
     g_niri_data->connected = false;
     g_niri_data->current_workspace_id = 0;
@@ -102,18 +102,18 @@ static int niri_init(void *platform_data) {
     g_niri_data->num_workspaces = 1;
     g_niri_data->scroll_offset_x = 0.0f;
     g_niri_data->scroll_offset_y = 0.0f;
-    
+
     return HYPRLAX_SUCCESS;
 }
 
 /* Destroy Niri adapter */
 static void niri_destroy(void) {
     if (!g_niri_data) return;
-    
+
     if (g_niri_data->ipc_fd >= 0) {
         close(g_niri_data->ipc_fd);
     }
-    
+
     free(g_niri_data);
     g_niri_data = NULL;
 }
@@ -124,25 +124,25 @@ static bool niri_detect(void) {
     const char *desktop = getenv("XDG_CURRENT_DESKTOP");
     const char *session = getenv("XDG_SESSION_DESKTOP");
     const char *niri_socket = getenv("NIRI_SOCKET");
-    
+
     if (niri_socket && *niri_socket) {
         return true;
     }
-    
+
     if (desktop && strcasecmp(desktop, "niri") == 0) {
         return true;
     }
-    
+
     if (session && strcasecmp(session, "niri") == 0) {
         return true;
     }
-    
+
     /* Check for Niri-specific socket */
     char socket_path[256];
     if (get_niri_socket_path(socket_path, sizeof(socket_path))) {
         return true;
     }
-    
+
     return false;
 }
 
@@ -152,7 +152,7 @@ static const char* niri_get_name(void) {
 }
 
 /* Create layer surface (uses wlr-layer-shell) */
-static int niri_create_layer_surface(void *surface, 
+static int niri_create_layer_surface(void *surface,
                                     const layer_surface_config_t *config) {
     (void)surface;
     (void)config;
@@ -161,7 +161,7 @@ static int niri_create_layer_surface(void *surface,
 }
 
 /* Configure layer surface */
-static void niri_configure_layer_surface(void *layer_surface, 
+static void niri_configure_layer_surface(void *layer_surface,
                                         int width, int height) {
     (void)layer_surface;
     (void)width;
@@ -192,18 +192,18 @@ static int niri_list_workspaces(workspace_info_t **workspaces, int *count) {
     if (!workspaces || !count) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
-    
+
     if (!g_niri_data) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
-    
+
     /* Query actual workspaces via IPC */
     char response[4096];
     if (niri_send_command("{\"action\": \"Workspaces\"}", response, sizeof(response)) == HYPRLAX_SUCCESS) {
         /* Parse JSON response to count workspaces */
         /* Simplified - would need proper JSON parsing */
         g_niri_data->num_workspaces = 1; /* Default */
-        
+
         /* Count occurrences of "id" in response */
         char *pos = response;
         int ws_count = 0;
@@ -215,17 +215,17 @@ static int niri_list_workspaces(workspace_info_t **workspaces, int *count) {
             g_niri_data->num_workspaces = ws_count;
         }
     }
-    
+
     *count = g_niri_data->num_workspaces;
     *workspaces = calloc(*count, sizeof(workspace_info_t));
     if (!*workspaces) {
         return HYPRLAX_ERROR_NO_MEMORY;
     }
-    
+
     /* Niri workspaces are dynamically positioned */
     for (int i = 0; i < *count; i++) {
         (*workspaces)[i].id = i;
-        snprintf((*workspaces)[i].name, sizeof((*workspaces)[i].name), 
+        snprintf((*workspaces)[i].name, sizeof((*workspaces)[i].name),
                  "Workspace %d", i + 1);
         /* Niri arranges workspaces in columns and rows */
         (*workspaces)[i].x = i % 3;  /* Assuming 3 columns by default */
@@ -233,7 +233,7 @@ static int niri_list_workspaces(workspace_info_t **workspaces, int *count) {
         (*workspaces)[i].active = (i == g_niri_data->current_workspace_id);
         (*workspaces)[i].visible = (*workspaces)[i].active;
     }
-    
+
     return HYPRLAX_SUCCESS;
 }
 
@@ -247,14 +247,14 @@ static int niri_list_monitors(monitor_info_t **monitors, int *count) {
     if (!monitors || !count) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
-    
+
     /* Simplified implementation */
     *count = 1;
     *monitors = calloc(1, sizeof(monitor_info_t));
     if (!*monitors) {
         return HYPRLAX_ERROR_NO_MEMORY;
     }
-    
+
     (*monitors)[0].id = 0;
     strncpy((*monitors)[0].name, "default", sizeof((*monitors)[0].name));
     (*monitors)[0].x = 0;
@@ -263,7 +263,7 @@ static int niri_list_monitors(monitor_info_t **monitors, int *count) {
     (*monitors)[0].height = 1080;
     (*monitors)[0].scale = 1.0;
     (*monitors)[0].primary = true;
-    
+
     return HYPRLAX_SUCCESS;
 }
 
@@ -273,42 +273,42 @@ static int connect_niri_socket(const char *path) {
     if (fd < 0) {
         return -1;
     }
-    
+
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
-    
+
     if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
         close(fd);
         return -1;
     }
-    
+
     /* Make socket non-blocking for event polling */
     int flags = fcntl(fd, F_GETFL, 0);
     fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-    
+
     return fd;
 }
 
 /* Connect to Niri IPC */
 static int niri_connect_ipc(const char *socket_path) {
     (void)socket_path; /* Optional parameter */
-    
+
     if (!g_niri_data) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
-    
+
     if (g_niri_data->connected) {
         return HYPRLAX_SUCCESS;
     }
-    
+
     /* Get socket path */
-    if (!get_niri_socket_path(g_niri_data->socket_path, 
+    if (!get_niri_socket_path(g_niri_data->socket_path,
                              sizeof(g_niri_data->socket_path))) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
-    
+
     /* Connect to IPC socket with retries for startup race condition */
     g_niri_data->ipc_fd = compositor_connect_socket_with_retry(
         g_niri_data->socket_path,
@@ -319,9 +319,9 @@ static int niri_connect_ipc(const char *socket_path) {
     if (g_niri_data->ipc_fd < 0) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
-    
+
     g_niri_data->connected = true;
-    
+
     /* Subscribe to events */
     const char *subscribe = "{\"action\": \"EventStream\"}";
     if (write(g_niri_data->ipc_fd, subscribe, strlen(subscribe)) < 0) {
@@ -330,19 +330,19 @@ static int niri_connect_ipc(const char *socket_path) {
         g_niri_data->connected = false;
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
-    
+
     return HYPRLAX_SUCCESS;
 }
 
 /* Disconnect from IPC */
 static void niri_disconnect_ipc(void) {
     if (!g_niri_data) return;
-    
+
     if (g_niri_data->ipc_fd >= 0) {
         close(g_niri_data->ipc_fd);
         g_niri_data->ipc_fd = -1;
     }
-    
+
     g_niri_data->connected = false;
 }
 
@@ -351,7 +351,7 @@ static void parse_workspace_position(int workspace_id, int *x, int *y) {
     /* Niri arranges workspaces in a scrollable grid */
     /* This is a simplified model - actual implementation would need
      * to query Niri for the exact layout */
-    
+
     /* Default to 3 columns layout */
     const int columns = 3;
     *x = workspace_id % columns;
@@ -363,17 +363,17 @@ static int niri_poll_events(compositor_event_t *event) {
     if (!event || !g_niri_data || !g_niri_data->connected) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
-    
+
     /* Poll IPC socket */
     struct pollfd pfd = {
         .fd = g_niri_data->ipc_fd,
         .events = POLLIN
     };
-    
+
     if (poll(&pfd, 1, 0) <= 0) {
         return HYPRLAX_ERROR_NO_DATA;
     }
-    
+
     /* Read event data */
     char buffer[4096];
     ssize_t n = read(g_niri_data->ipc_fd, buffer, sizeof(buffer) - 1);
@@ -381,7 +381,7 @@ static int niri_poll_events(compositor_event_t *event) {
         return HYPRLAX_ERROR_NO_DATA;
     }
     buffer[n] = '\0';
-    
+
     /* Parse Niri events (JSON format) */
     if (strstr(buffer, NIRI_IPC_EVENT_WORKSPACE_ACTIVATED)) {
         /* Extract workspace ID from event */
@@ -389,13 +389,13 @@ static int niri_poll_events(compositor_event_t *event) {
         char *id_str = strstr(buffer, "\"id\":");
         if (id_str) {
             int new_workspace_id = atoi(id_str + 5);
-            
+
             if (new_workspace_id != g_niri_data->current_workspace_id) {
                 /* Calculate old and new positions */
                 int old_x, old_y, new_x, new_y;
                 parse_workspace_position(g_niri_data->current_workspace_id, &old_x, &old_y);
                 parse_workspace_position(new_workspace_id, &new_x, &new_y);
-                
+
                 event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
                 event->data.workspace.from_workspace = g_niri_data->current_workspace_id;
                 event->data.workspace.to_workspace = new_workspace_id;
@@ -403,11 +403,11 @@ static int niri_poll_events(compositor_event_t *event) {
                 event->data.workspace.from_y = old_y;
                 event->data.workspace.to_x = new_x;
                 event->data.workspace.to_y = new_y;
-                
+
                 g_niri_data->current_workspace_id = new_workspace_id;
                 g_niri_data->current_column = new_x;
                 g_niri_data->current_row = new_y;
-                
+
                 if (getenv("HYPRLAX_DEBUG")) {
                     fprintf(stderr, "[DEBUG] Niri workspace change: %d (%d,%d) -> %d (%d,%d)\n",
                             event->data.workspace.from_workspace,
@@ -415,7 +415,7 @@ static int niri_poll_events(compositor_event_t *event) {
                             event->data.workspace.to_workspace,
                             new_x, new_y);
                 }
-                
+
                 return HYPRLAX_SUCCESS;
             }
         }
@@ -424,7 +424,7 @@ static int niri_poll_events(compositor_event_t *event) {
         /* Format: {"Scroll": {"dx": 0.0, "dy": -100.0}} */
         char *dx_str = strstr(buffer, "\"dx\":");
         char *dy_str = strstr(buffer, "\"dy\":");
-        
+
         if (dx_str || dy_str) {
             float dx = 0.0f, dy = 0.0f;
             if (dx_str) {
@@ -433,73 +433,73 @@ static int niri_poll_events(compositor_event_t *event) {
             if (dy_str) {
                 dy = atof(dy_str + 5);
             }
-            
+
             /* Update smooth scroll position */
             g_niri_data->scroll_offset_x += dx;
             g_niri_data->scroll_offset_y += dy;
-            
+
             /* Convert scroll offset to workspace coordinates */
             /* Assuming each workspace is ~1000 pixels */
             const float workspace_size = 1000.0f;
             int new_x = (int)roundf(g_niri_data->scroll_offset_x / workspace_size);
             int new_y = (int)roundf(g_niri_data->scroll_offset_y / workspace_size);
-            
+
             if (new_x != g_niri_data->current_column || new_y != g_niri_data->current_row) {
                 event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
                 event->data.workspace.from_x = g_niri_data->current_column;
                 event->data.workspace.from_y = g_niri_data->current_row;
                 event->data.workspace.to_x = new_x;
                 event->data.workspace.to_y = new_y;
-                
+
                 /* Calculate linear workspace IDs for compatibility */
-                event->data.workspace.from_workspace = 
+                event->data.workspace.from_workspace =
                     g_niri_data->current_row * 3 + g_niri_data->current_column;
                 event->data.workspace.to_workspace = new_y * 3 + new_x;
-                
+
                 g_niri_data->current_column = new_x;
                 g_niri_data->current_row = new_y;
-                
+
                 if (getenv("HYPRLAX_DEBUG")) {
                     fprintf(stderr, "[DEBUG] Niri scroll: (%.1f, %.1f) -> workspace (%d,%d)\n",
                             dx, dy, new_x, new_y);
                 }
-                
+
                 return HYPRLAX_SUCCESS;
             }
         }
     }
-    
+
     return HYPRLAX_ERROR_NO_DATA;
 }
 
 /* Send IPC command */
-static int niri_send_command(const char *command, char *response, 
+static int niri_send_command(const char *command, char *response,
                             size_t response_size) {
     if (!g_niri_data || !g_niri_data->connected) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
-    
+
     if (!command) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
-    
+
     /* Niri uses a separate socket per command */
     char socket_path[256];
     if (!get_niri_socket_path(socket_path, sizeof(socket_path))) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
-    
+
     int cmd_fd = connect_niri_socket(socket_path);
     if (cmd_fd < 0) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
-    
+
     /* Send command */
     if (write(cmd_fd, command, strlen(command)) < 0) {
         close(cmd_fd);
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
-    
+
     /* Read response if buffer provided */
     if (response && response_size > 0) {
         ssize_t total = 0;
@@ -510,7 +510,7 @@ static int niri_send_command(const char *command, char *response,
         }
         response[total] = '\0';
     }
-    
+
     close(cmd_fd);
     return HYPRLAX_SUCCESS;
 }
@@ -535,12 +535,12 @@ static int niri_set_blur(float amount) {
     if (!g_niri_data || !g_niri_data->connected) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
-    
+
     /* Would send Niri-specific blur configuration */
     char command[256];
-    snprintf(command, sizeof(command), 
+    snprintf(command, sizeof(command),
              "{\"action\": \"SetConfig\", \"blur\": %.2f}", amount);
-    
+
     return niri_send_command(command, NULL, 0);
 }
 
@@ -575,4 +575,6 @@ const compositor_ops_t compositor_niri_ops = {
     .supports_animations = niri_supports_animations,
     .set_blur = niri_set_blur,
     .set_wallpaper_offset = niri_set_wallpaper_offset,
+    .is_headless_mode = NULL,
+    .send_frame = NULL,
 };

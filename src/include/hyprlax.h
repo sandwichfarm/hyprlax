@@ -1,6 +1,6 @@
 /*
  * hyprlax.h - Main application interface
- * 
+ *
  * Ties together all modules and provides the main application context.
  */
 
@@ -36,40 +36,40 @@ typedef struct hyprlax_context {
     /* Configuration */
     config_t config;
     backend_config_t backends;
-    
+
     /* Module instances */
     renderer_t *renderer;
     platform_t *platform;
     compositor_adapter_t *compositor;
-    
+
     /* Application state */
     app_state_t state;
     bool running;
-    
+
     /* Layers */
     parallax_layer_t *layers;
     int layer_count;
-    
+
     /* Timing */
     double last_frame_time;
     double delta_time;
     double fps;
-    
+
     /* Multi-monitor support */
     monitor_list_t *monitors;           /* All active monitors */
     multi_monitor_mode_t monitor_mode;  /* ALL, PRIMARY, SPECIFIC */
     char **specific_monitors;           /* For SPECIFIC mode */
     int specific_monitor_count;
-    
+
     /* Legacy single-monitor fields (kept for compatibility) */
     int current_workspace;
     int current_monitor;
     float workspace_offset_x;
     float workspace_offset_y;
-    
+
     /* IPC context (legacy, will be removed) */
     void *ipc_ctx;
-    
+
 } hyprlax_context_t;
 
 /* Main application functions */
@@ -86,14 +86,14 @@ int hyprlax_init_compositor(hyprlax_context_t *ctx);
 int hyprlax_init_renderer(hyprlax_context_t *ctx);
 
 /* Layer management */
-int hyprlax_add_layer(hyprlax_context_t *ctx, const char *image_path, 
+int hyprlax_add_layer(hyprlax_context_t *ctx, const char *image_path,
                      float shift_multiplier, float opacity, float blur);
 void hyprlax_remove_layer(hyprlax_context_t *ctx, uint32_t layer_id);
 void hyprlax_update_layers(hyprlax_context_t *ctx, double current_time);
 
 /* Event handling */
 void hyprlax_handle_workspace_change(hyprlax_context_t *ctx, int new_workspace);
-void hyprlax_handle_monitor_workspace_change(hyprlax_context_t *ctx, 
+void hyprlax_handle_monitor_workspace_change(hyprlax_context_t *ctx,
                                             const char *monitor_name,
                                             int new_workspace);
 void hyprlax_handle_resize(hyprlax_context_t *ctx, int width, int height);

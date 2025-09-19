@@ -1,6 +1,6 @@
 /*
  * core.h - Core module interface
- * 
+ *
  * This module contains platform-agnostic parallax engine logic including
  * animation, easing functions, and layer management.
  */
@@ -42,13 +42,13 @@ typedef struct animation_state {
 typedef struct parallax_layer {
     uint32_t id;
     char *image_path;
-    
+
     /* Parallax parameters */
     float shift_multiplier;
     float opacity;
     float blur_amount;
     int z_index;
-    
+
     /* Animation state */
     animation_state_t x_animation;
     animation_state_t y_animation;
@@ -56,14 +56,14 @@ typedef struct parallax_layer {
     float current_y;
     float offset_x;  /* Current parallax offset */
     float offset_y;
-    
+
     /* OpenGL resources */
     uint32_t texture_id;
     int width;       /* Texture width */
     int height;      /* Texture height */
     int texture_width;
     int texture_height;
-    
+
     /* Linked list */
     struct parallax_layer *next;
 } parallax_layer_t;
@@ -74,21 +74,22 @@ typedef struct {
     int target_fps;
     int max_fps;
     float scale_factor;
-    
+
     /* Animation settings */
     float shift_pixels;
     double animation_duration;
     easing_type_t default_easing;
-    
+
     /* Debug settings */
     bool debug;
+    bool trace;
     bool dry_run;
     char *debug_log_path;
-    
+
     /* Paths */
     char *config_path;
     char *socket_path;
-    
+
     /* Feature flags */
     bool blur_enabled;
     bool ipc_enabled;
@@ -118,7 +119,7 @@ easing_type_t easing_from_string(const char *name);
 const char* easing_to_string(easing_type_t type);
 
 /* Animation functions - no allocations in evaluate path */
-void animation_start(animation_state_t *anim, float from, float to, 
+void animation_start(animation_state_t *anim, float from, float to,
                     double duration, easing_type_t easing);
 void animation_stop(animation_state_t *anim);
 float animation_evaluate(animation_state_t *anim, double current_time);
@@ -128,7 +129,7 @@ bool animation_is_complete(const animation_state_t *anim, double current_time);
 /* Layer management */
 parallax_layer_t* layer_create(const char *image_path, float shift_multiplier, float opacity);
 void layer_destroy(parallax_layer_t *layer);
-void layer_update_offset(parallax_layer_t *layer, float target_x, float target_y, 
+void layer_update_offset(parallax_layer_t *layer, float target_x, float target_y,
                         double duration, easing_type_t easing);
 void layer_tick(parallax_layer_t *layer, double current_time);
 

@@ -40,7 +40,7 @@ static ipc_command_t parse_command(const char* cmd) {
 
 ipc_context_t* ipc_init(void) {
     fprintf(stderr, "[IPC] Initializing IPC subsystem\n");
-    
+
     ipc_context_t* ctx = calloc(1, sizeof(ipc_context_t));
     if (!ctx) {
         fprintf(stderr, "[IPC] Failed to allocate IPC context\n");
@@ -57,7 +57,7 @@ ipc_context_t* ipc_init(void) {
         memset(&test_addr, 0, sizeof(test_addr));
         test_addr.sun_family = AF_UNIX;
         strncpy(test_addr.sun_path, ctx->socket_path, sizeof(test_addr.sun_path) - 1);
-        
+
         if (connect(test_fd, (struct sockaddr*)&test_addr, sizeof(test_addr)) == 0) {
             // Successfully connected - another instance is running
             fprintf(stderr, "[IPC] Error: Another instance of hyprlax is already running\n");
@@ -77,18 +77,18 @@ ipc_context_t* ipc_init(void) {
     int max_retries = 10;
     int retry_delay_ms = 200;
     ctx->socket_fd = -1;
-    
+
     for (int i = 0; i < max_retries; i++) {
         ctx->socket_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0);
         if (ctx->socket_fd >= 0) {
             fprintf(stderr, "[IPC] Socket created successfully\n");
             break;
         }
-        
+
         if (i == 0) {
             fprintf(stderr, "[IPC] Failed to create socket: %s, retrying...\n", strerror(errno));
         }
-        
+
         struct timespec ts;
         ts.tv_sec = 0;
         ts.tv_nsec = retry_delay_ms * 1000000L;
@@ -290,12 +290,12 @@ bool ipc_process_commands(ipc_context_t* ctx) {
         case IPC_CMD_SET_PROPERTY: {
             char* property = strtok(NULL, " \n");
             char* value = strtok(NULL, " \n");
-            
+
             if (!property || !value) {
                 snprintf(response, sizeof(response), "Error: Usage: set <property> <value>\n");
                 break;
             }
-            
+
             /* Handle property setting via callback to main context */
             if (ctx->app_context) {
                 /* This will be implemented via a callback function */
@@ -309,12 +309,12 @@ bool ipc_process_commands(ipc_context_t* ctx) {
 
         case IPC_CMD_GET_PROPERTY: {
             char* property = strtok(NULL, " \n");
-            
+
             if (!property) {
                 snprintf(response, sizeof(response), "Error: Usage: get <property>\n");
                 break;
             }
-            
+
             /* Handle property getting via callback to main context */
             if (ctx->app_context) {
                 /* This will be implemented via a callback function */
@@ -484,17 +484,17 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
     if (!ctx || !request || !response || response_size == 0) {
         return -1;
     }
-    
+
     // Parse command
     char cmd[64] = {0};
     char args[256] = {0};
     sscanf(request, "%63s %255[^\n]", cmd, args);
-    
+
     if (strlen(cmd) == 0) {
         snprintf(response, response_size, "Error: Empty command");
         return -1;
     }
-    
+
     // Handle ADD command
     if (strcmp(cmd, "ADD") == 0) {
         char path[256];
@@ -504,7 +504,7 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
             snprintf(response, response_size, "Error: ADD requires at least an image path");
             return -1;
         }
-        
+
         uint32_t id = ipc_add_layer(ctx, path, scale, opacity, 0.0f, blur, 0);
         if (id > 0) {
             snprintf(response, response_size, "Layer added with ID: %u", id);
@@ -514,7 +514,7 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
             return -1;
         }
     }
-    
+
     // Handle REMOVE command
     else if (strcmp(cmd, "REMOVE") == 0) {
         uint32_t id = 0;
@@ -522,7 +522,7 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
             snprintf(response, response_size, "Error: REMOVE requires a layer ID");
             return -1;
         }
-        
+
         if (ipc_remove_layer(ctx, id)) {
             snprintf(response, response_size, "Layer %u removed", id);
             return 0;
@@ -531,7 +531,7 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
             return -1;
         }
     }
-    
+
     // Handle MODIFY command
     else if (strcmp(cmd, "MODIFY") == 0) {
         uint32_t id = 0;
@@ -540,7 +540,7 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
             snprintf(response, response_size, "Error: MODIFY requires ID, property, and value");
             return -1;
         }
-        
+
         if (ipc_modify_layer(ctx, id, property, value)) {
             snprintf(response, response_size, "Layer %u modified", id);
             return 0;
@@ -549,7 +549,7 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
             return -1;
         }
     }
-    
+
     // Handle LIST command
     else if (strcmp(cmd, "LIST") == 0) {
         char* list = ipc_list_layers(ctx);
@@ -562,31 +562,31 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
             return 0;
         }
     }
-    
+
     // Handle CLEAR command
     else if (strcmp(cmd, "CLEAR") == 0) {
         ipc_clear_layers(ctx);
         snprintf(response, response_size, "All layers cleared");
         return 0;
     }
-    
+
     // Handle STATUS command
     else if (strcmp(cmd, "STATUS") == 0) {
         const char* compositor = getenv("HYPRLAX_COMPOSITOR");
         if (!compositor) compositor = "auto";
-        
-        snprintf(response, response_size, 
+
+        snprintf(response, response_size,
                  "hyprlax running\nLayers: %d\nFPS: 60\nCompositor: %s",
                  ctx->layer_count, compositor);
         return 0;
     }
-    
+
     // Handle RELOAD command
     else if (strcmp(cmd, "RELOAD") == 0) {
         snprintf(response, response_size, "Configuration reloaded");
         return 0;
     }
-    
+
     // Handle SET_PROPERTY command
     else if (strcmp(cmd, "SET_PROPERTY") == 0) {
         char property[64], value[64];
@@ -594,16 +594,16 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
             snprintf(response, response_size, "Error: SET_PROPERTY requires property and value");
             return -1;
         }
-        
+
         // Validate known properties
-        if (strcmp(property, "fps") == 0 || 
+        if (strcmp(property, "fps") == 0 ||
             strcmp(property, "shift") == 0 ||
             strcmp(property, "duration") == 0 ||
             strcmp(property, "easing") == 0 ||
             strcmp(property, "blur_passes") == 0 ||
             strcmp(property, "blur_size") == 0 ||
             strcmp(property, "debug") == 0) {
-            
+
             // Store in app_context if available (for real implementation)
             // For tests, just acknowledge
             snprintf(response, response_size, "Property '%s' set to '%s'", property, value);
@@ -613,7 +613,7 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
             return -1;
         }
     }
-    
+
     // Handle GET_PROPERTY command
     else if (strcmp(cmd, "GET_PROPERTY") == 0) {
         char property[64];
@@ -621,7 +621,7 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
             snprintf(response, response_size, "Error: GET_PROPERTY requires property name");
             return -1;
         }
-        
+
         // Return test values for known properties
         if (strcmp(property, "fps") == 0) {
             snprintf(response, response_size, "60");
@@ -640,7 +640,7 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
             return -1;
         }
     }
-    
+
     // Unknown command
     else {
         snprintf(response, response_size, "Error: Unknown command '%s'", cmd);

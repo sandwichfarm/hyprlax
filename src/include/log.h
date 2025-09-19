@@ -19,6 +19,8 @@ typedef enum {
 
 /* Initialize logging system */
 void log_init(bool debug, const char *log_file);
+/* Enable or disable TRACE logs independently of debug */
+void log_set_trace(bool enable);
 
 /* Cleanup logging system */
 void log_cleanup(void);

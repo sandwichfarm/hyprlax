@@ -1,6 +1,6 @@
 /*
  * compositor.h - Compositor adapter interface
- * 
+ *
  * Provides an abstraction layer for compositor-specific features,
  * allowing support for different Wayland compositors (Hyprland, Sway, etc.)
  */
@@ -103,37 +103,41 @@ typedef struct compositor_ops {
     /* Lifecycle */
     int (*init)(void *platform_data);
     void (*destroy)(void);
-    
+
     /* Detection */
     bool (*detect)(void);
     const char* (*get_name)(void);
-    
+
     /* Layer surface management */
     int (*create_layer_surface)(void *surface, const layer_surface_config_t *config);
     void (*configure_layer_surface)(void *layer_surface, int width, int height);
     void (*destroy_layer_surface)(void *layer_surface);
-    
+
     /* Workspace management */
     int (*get_current_workspace)(void);
     int (*get_workspace_count)(void);
     int (*list_workspaces)(workspace_info_t **workspaces, int *count);
-    
+
     /* Monitor management */
     int (*get_current_monitor)(void);
     int (*list_monitors)(monitor_info_t **monitors, int *count);
-    
+
     /* IPC/Events */
     int (*connect_ipc)(const char *socket_path);
     void (*disconnect_ipc)(void);
     int (*poll_events)(compositor_event_t *event);
     int (*send_command)(const char *command, char *response, size_t response_size);
-    
+
     /* Compositor-specific features */
     bool (*supports_blur)(void);
     bool (*supports_transparency)(void);
     bool (*supports_animations)(void);
     int (*set_blur)(float amount);
     int (*set_wallpaper_offset)(float x, float y);
+    
+    /* Headless mode support (external rendering) */
+    bool (*is_headless_mode)(void);
+    int (*send_frame)(void *buffer);
 } compositor_ops_t;
 
 /* Compositor adapter instance */
@@ -143,6 +147,8 @@ typedef struct compositor_adapter {
     void *private_data;
     bool initialized;
     bool connected;
+    layer_position_t preferred_layer;  /* Preferred layer for background surfaces */
+    int preferred_exclusive_zone;      /* Preferred exclusive zone (-1 for exclusive, 0 for non-exclusive) */
 } compositor_adapter_t;
 
 /* Global compositor management */
@@ -150,7 +156,7 @@ int compositor_create(compositor_adapter_t **adapter, compositor_type_t type);
 void compositor_destroy(compositor_adapter_t *adapter);
 
 /* Utility function for socket connection with retry (for startup readiness) */
-int compositor_connect_socket_with_retry(const char *socket_path, 
+int compositor_connect_socket_with_retry(const char *socket_path,
                                          const char *compositor_name,
                                          int max_retries,
                                          int retry_delay_ms);
