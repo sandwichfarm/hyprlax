@@ -18,6 +18,7 @@
 #include "include/hyprlax.h"
 #include "include/hyprlax_internal.h"
 #include "include/log.h"
+#include "include/shared_buffer.h"
 #include "include/renderer.h"
 #include "ipc.h"
 
@@ -191,6 +192,8 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
         {"easing", required_argument, 0, 'e'},
         {"config", required_argument, 0, 'c'},
         {"debug", no_argument, 0, 'D'},
+        {"trace", no_argument, 0, 1004},
+        {"vvv", no_argument, 0, 1005},
         {"debug-log", optional_argument, 0, 'L'},
         {"renderer", required_argument, 0, 'r'},
         {"platform", required_argument, 0, 'p'},
@@ -215,6 +218,8 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 printf("  -e, --easing <type>       Easing function (default: cubic)\n");
                 printf("  -c, --config <file>       Load configuration from file\n");
                 printf("  -D, --debug               Enable debug output\n");
+                printf("      --trace               Enable very verbose TRACE logs (frame-by-frame)\n");
+                printf("      --vvv                 Convenience alias for --debug --trace\n");
                 printf("  -L, --debug-log[=FILE]    Write debug output to file (default: /tmp/hyprlax-PID.log)\n");
                 printf("  -r, --renderer <backend>  Renderer backend (gles2, auto)\n");
                 printf("  -p, --platform <backend>  Platform backend (wayland, auto)\n");
@@ -255,6 +260,16 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
 
             case 'D':
                 ctx->config.debug = true;
+                break;
+
+            case 1004:  /* --trace */
+                ctx->config.trace = true;
+                /* Trace implies debug-level enabling of subsystems but TRACE printed selectively */
+                break;
+
+            case 1005:  /* --vvv */
+                ctx->config.debug = true;
+                ctx->config.trace = true;
                 break;
 
             case 'L':
@@ -509,6 +524,7 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
 
     /* Initialize logging system */
     log_init(ctx->config.debug, ctx->config.debug_log_path);
+    log_set_trace(ctx->config.trace);
     if (ctx->config.debug_log_path) {
         LOG_INFO("Debug logging to file: %s", ctx->config.debug_log_path);
     }
@@ -571,34 +587,55 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
         return ret;
     }
 
-    /* 5. Renderer (OpenGL context) */
-    LOG_INFO("[INIT] Step 5: Initializing renderer");
-    ret = hyprlax_init_renderer(ctx);
-    if (ret != HYPRLAX_SUCCESS) {
-        LOG_ERROR("[INIT] Renderer initialization failed with code %d", ret);
-        return ret;
+    /* 5. Renderer (OpenGL context) - skip if in headless mode */
+    bool headless_mode = false;
+    if (ctx->compositor && ctx->compositor->ops && ctx->compositor->ops->is_headless_mode) {
+        headless_mode = ctx->compositor->ops->is_headless_mode();
+    }
+    
+    if (headless_mode) {
+        LOG_INFO("[INIT] Step 5: Initializing headless renderer");
+        /* Initialize headless renderer for offscreen rendering */
+        extern int headless_renderer_init(int width, int height);
+        ret = headless_renderer_init(1920, 1080);  /* Default size, will be adjusted per monitor */
+        if (ret != HYPRLAX_SUCCESS) {
+            LOG_ERROR("[INIT] Headless renderer initialization failed with code %d", ret);
+            return ret;
+        }
+        ctx->renderer = NULL;  /* We use a separate headless renderer */
+    } else {
+        LOG_INFO("[INIT] Step 5: Initializing renderer");
+        ret = hyprlax_init_renderer(ctx);
+        if (ret != HYPRLAX_SUCCESS) {
+            LOG_ERROR("[INIT] Renderer initialization failed with code %d", ret);
+            return ret;
+        }
     }
 
     /* 6. Create EGL surfaces for all monitors now that renderer exists */
-    LOG_INFO("[INIT] Step 6: Creating EGL surfaces for monitors");
-    if (ctx->monitors) {
-        monitor_instance_t *monitor = ctx->monitors->head;
-        while (monitor) {
-            if (monitor->wl_egl_window && !monitor->egl_surface) {
-                monitor->egl_surface = gles2_create_monitor_surface(monitor->wl_egl_window);
-                if (monitor->egl_surface) {
-                    LOG_DEBUG("Created EGL surface for monitor %s", monitor->name);
-                } else {
-                    LOG_ERROR("Failed to create EGL surface for monitor %s", monitor->name);
+    if (!headless_mode) {
+        LOG_INFO("[INIT] Step 6: Creating EGL surfaces for monitors");
+        if (ctx->monitors) {
+            monitor_instance_t *monitor = ctx->monitors->head;
+            while (monitor) {
+                if (monitor->wl_egl_window && !monitor->egl_surface) {
+                    monitor->egl_surface = gles2_create_monitor_surface(monitor->wl_egl_window);
+                    if (monitor->egl_surface) {
+                        LOG_DEBUG("Created EGL surface for monitor %s", monitor->name);
+                    } else {
+                        LOG_ERROR("Failed to create EGL surface for monitor %s", monitor->name);
+                    }
                 }
+                monitor = monitor->next;
             }
-            monitor = monitor->next;
         }
+    } else {
+        LOG_INFO("[INIT] Step 6: Skipping EGL surface creation - using headless mode");
     }
 
     /* 7. Load textures for all layers now that GL is initialized */
     LOG_INFO("[INIT] Step 7: Loading layer textures");
-    ret = hyprlax_load_layer_textures(ctx);
+    ret = hyprlax_load_layer_textures(ctx);  /* Load textures even in headless mode */
     if (ret != HYPRLAX_SUCCESS) {
         LOG_WARN("[INIT] Warning: Some textures failed to load");
         /* Continue anyway - we can still run with missing textures */
@@ -654,8 +691,13 @@ int hyprlax_add_layer(hyprlax_context_t *ctx, const char *image_path,
         return HYPRLAX_ERROR_NO_MEMORY;
     }
 
-    /* Load texture if OpenGL is initialized */
-    if (ctx->renderer && ctx->renderer->initialized) {
+    /* Load texture if OpenGL is initialized (either normal renderer or headless) */
+    bool headless_mode = false;
+    if (ctx->compositor && ctx->compositor->ops && ctx->compositor->ops->is_headless_mode) {
+        headless_mode = ctx->compositor->ops->is_headless_mode();
+    }
+    
+    if ((ctx->renderer && ctx->renderer->initialized) || headless_mode) {
         int img_width, img_height;
         GLuint texture = load_texture(image_path, &img_width, &img_height);
         if (texture != 0) {
@@ -681,6 +723,9 @@ int hyprlax_add_layer(hyprlax_context_t *ctx, const char *image_path,
 static int hyprlax_load_layer_textures(hyprlax_context_t *ctx) {
     if (!ctx) return HYPRLAX_ERROR_INVALID_ARGS;
 
+    /* In headless mode, we have a GL context from the headless renderer */
+    /* So we can load textures normally */
+    
     int loaded = 0;
     parallax_layer_t *layer = ctx->layers;
     while (layer) {
@@ -855,8 +900,14 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
         return;
     }
 
-    /* Skip if monitor doesn't have an EGL surface */
-    if (!monitor->egl_surface) {
+    /* Check if we're in headless mode */
+    bool headless_mode = false;
+    if (ctx->compositor && ctx->compositor->ops && ctx->compositor->ops->is_headless_mode) {
+        headless_mode = ctx->compositor->ops->is_headless_mode();
+    }
+    
+    /* Skip if monitor doesn't have an EGL surface (unless in headless mode) */
+    if (!headless_mode && !monitor->egl_surface) {
         LOG_WARN("Monitor %s has no EGL surface", monitor->name);
         return;
     }
@@ -865,10 +916,20 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
     LOG_TRACE("Rendering to monitor %s (%dx%d, surface=%p)",
               monitor->name, monitor->width, monitor->height, monitor->egl_surface); */
 
-    /* Switch to this monitor's EGL surface */
-    if (gles2_make_current(monitor->egl_surface) != HYPRLAX_SUCCESS) {
-        LOG_ERROR("Failed to make EGL surface current for monitor %s", monitor->name);
-        return;
+    /* In headless mode, we render offscreen. Otherwise use the monitor's surface */
+    if (headless_mode) {
+        /* Create an offscreen framebuffer for plugin rendering */
+        /* For now, use the default framebuffer - we'll capture from it */
+        if (gles2_make_current(NULL) != HYPRLAX_SUCCESS) {
+            LOG_ERROR("Failed to make context current for offscreen rendering");
+            return;
+        }
+    } else {
+        /* Switch to this monitor's EGL surface */
+        if (gles2_make_current(monitor->egl_surface) != HYPRLAX_SUCCESS) {
+            LOG_ERROR("Failed to make EGL surface current for monitor %s", monitor->name);
+            return;
+        }
     }
 
     /* Set viewport for this monitor */
@@ -940,19 +1001,44 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
         layer = layer->next;
     }
 
-    /* Present this monitor's frame */
-    /* Present debug - commented out for performance
-    LOG_TRACE("Ending frame and presenting for monitor %s", monitor->name); */
-    RENDERER_END_FRAME(ctx->renderer);
-    RENDERER_PRESENT(ctx->renderer);
+    /* Check if we're in headless mode and need to send frame to compositor */
+    /* headless_mode already defined above */
+    
+    if (headless_mode && ctx->compositor->ops->send_frame) {
+        /* Create shared buffer and capture framebuffer */
+        shared_buffer_t *buffer = shared_buffer_create(
+            monitor->width, monitor->height, GL_RGBA);
+        
+        if (buffer) {
+            /* Read pixels from framebuffer */
+            glReadPixels(0, 0, monitor->width, monitor->height, 
+                        GL_RGBA, GL_UNSIGNED_BYTE, buffer->pixels);
+            
+            /* Send frame to plugin */
+            ctx->compositor->ops->send_frame(buffer);
+            
+            /* Clean up */
+            shared_buffer_destroy(buffer);
+        }
+        
+        /* Still need to end frame but skip present */
+        RENDERER_END_FRAME(ctx->renderer);
+    } else {
+        /* Normal rendering path */
+        /* Present this monitor's frame */
+        /* Present debug - commented out for performance
+        LOG_TRACE("Ending frame and presenting for monitor %s", monitor->name); */
+        RENDERER_END_FRAME(ctx->renderer);
+        RENDERER_PRESENT(ctx->renderer);
 
-    /* Commit the Wayland surface to make the frame visible */
-    if (monitor->wl_surface) {
-        /* Need platform to commit the surface */
-        extern void wayland_commit_monitor_surface(monitor_instance_t *monitor);
-        wayland_commit_monitor_surface(monitor);
-        /* Commit debug - commented out for performance
-        LOG_TRACE("Committed surface for monitor %s", monitor->name); */
+        /* Commit the Wayland surface to make the frame visible */
+        if (monitor->wl_surface) {
+            /* Need platform to commit the surface */
+            extern void wayland_commit_monitor_surface(monitor_instance_t *monitor);
+            wayland_commit_monitor_surface(monitor);
+            /* Commit debug - commented out for performance
+            LOG_TRACE("Committed surface for monitor %s", monitor->name); */
+        }
     }
 
     /* Frame presented debug - commented out for performance
@@ -961,7 +1047,76 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
 
 /* Render frame to all monitors */
 void hyprlax_render_frame(hyprlax_context_t *ctx) {
-    if (!ctx || !ctx->renderer) {
+    if (!ctx) {
+        LOG_ERROR("render_frame: No context");
+        return;
+    }
+    
+    /* In headless mode, we don't render - the plugin handles display */
+    bool headless_mode = false;
+    if (ctx->compositor && ctx->compositor->ops && ctx->compositor->ops->is_headless_mode) {
+        headless_mode = ctx->compositor->ops->is_headless_mode();
+    }
+    
+    if (headless_mode) {
+        /* In headless mode, render actual layers and send frame */
+        extern void headless_renderer_begin_frame(void);
+        extern shared_buffer_t* headless_renderer_capture_frame(void);
+        extern void headless_renderer_render_texture(GLuint texture, float x, float y, float width, float height, float opacity);
+        
+        /* Begin frame rendering */
+        headless_renderer_begin_frame();
+        
+        /* Render all layers with parallax effect */
+        if (ctx->layers) {
+            /* Use the animated offset from layers (they handle their own animation) */
+            parallax_layer_t *layer = ctx->layers;
+            int layer_num = 0;
+            
+            while (layer) {
+                if (layer->texture_id != 0) {
+                    /* Calculate the position and size for this layer */
+                    /* The layer offset is already animated through layer_tick() */
+                    float x_offset = -layer->offset_x;  /* Negative because we move the background */
+                    float y_offset = -layer->offset_y;
+                    
+                    /* Scale the layer to be larger than viewport for parallax effect */
+                    float scale_factor = ctx->config.scale_factor;
+                    if (scale_factor <= 1.0f) {
+                        scale_factor = 1.5f;  /* Default scale for parallax */
+                    }
+                    
+                    /* Render the texture with parallax offset */
+                    /* Position is centered with offset applied */
+                    float render_width = 1920.0f * scale_factor;  /* TODO: Use actual screen dimensions */
+                    float render_height = 1080.0f * scale_factor;
+                    float render_x = (1920.0f - render_width) / 2.0f + x_offset;
+                    float render_y = (1080.0f - render_height) / 2.0f + y_offset;
+                    
+                    LOG_TRACE("Rendering layer %d: tex_id=%u, pos=(%.1f,%.1f), size=(%.1f,%.1f), opacity=%.2f",
+                             layer_num++, layer->texture_id, render_x, render_y,
+                             render_width, render_height, layer->opacity);
+                    
+                    headless_renderer_render_texture(layer->texture_id, 
+                                                    render_x, render_y,
+                                                    render_width, render_height,
+                                                    layer->opacity);
+                }
+                layer = layer->next;
+            }
+        }
+        
+        /* Capture and send the frame */
+        shared_buffer_t *buffer = headless_renderer_capture_frame();
+        if (buffer && ctx->compositor && ctx->compositor->ops && ctx->compositor->ops->send_frame) {
+            /* Send frame to external renderer */
+            ctx->compositor->ops->send_frame(buffer);
+            shared_buffer_destroy(buffer);
+        }
+        return;
+    }
+    
+    if (!ctx->renderer) {
         LOG_ERROR("render_frame: No renderer available");
         return;
     }

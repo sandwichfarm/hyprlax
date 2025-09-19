@@ -58,7 +58,8 @@ static const GLfloat quad_vertices[] = {
 /* Initialize OpenGL ES 2.0 renderer */
 static int gles2_init(void *native_display, void *native_window,
                      const renderer_config_t *config) {
-    if (!native_display || !native_window || !config) {
+    /* native_window can be NULL for offscreen rendering (plugin mode) */
+    if (!native_display || !config) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
 
@@ -82,7 +83,7 @@ static int gles2_init(void *native_display, void *native_window,
 
     /* Choose EGL config */
     EGLint config_attribs[] = {
-        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+        EGL_SURFACE_TYPE, native_window ? EGL_WINDOW_BIT : EGL_PBUFFER_BIT,
         EGL_RED_SIZE, 8,
         EGL_GREEN_SIZE, 8,
         EGL_BLUE_SIZE, 8,
@@ -114,13 +115,30 @@ static int gles2_init(void *native_display, void *native_window,
     }
 
     /* Create EGL surface */
-    data->egl_surface = eglCreateWindowSurface(data->egl_display, data->egl_config,
-                                               (EGLNativeWindowType)native_window, NULL);
-    if (data->egl_surface == EGL_NO_SURFACE) {
-        eglDestroyContext(data->egl_display, data->egl_context);
-        eglTerminate(data->egl_display);
-        free(data);
-        return HYPRLAX_ERROR_GL_INIT;
+    if (native_window) {
+        data->egl_surface = eglCreateWindowSurface(data->egl_display, data->egl_config,
+                                                   (EGLNativeWindowType)native_window, NULL);
+        if (data->egl_surface == EGL_NO_SURFACE) {
+            eglDestroyContext(data->egl_display, data->egl_context);
+            eglTerminate(data->egl_display);
+            free(data);
+            return HYPRLAX_ERROR_GL_INIT;
+        }
+    } else {
+        /* Create a pbuffer surface for offscreen rendering (plugin mode) */
+        EGLint pbuffer_attribs[] = {
+            EGL_WIDTH, 1920,  /* Default size, will be resized as needed */
+            EGL_HEIGHT, 1080,
+            EGL_NONE
+        };
+        data->egl_surface = eglCreatePbufferSurface(data->egl_display, data->egl_config,
+                                                    pbuffer_attribs);
+        if (data->egl_surface == EGL_NO_SURFACE) {
+            eglDestroyContext(data->egl_display, data->egl_context);
+            eglTerminate(data->egl_display);
+            free(data);
+            return HYPRLAX_ERROR_GL_INIT;
+        }
     }
 
     /* Make context current */

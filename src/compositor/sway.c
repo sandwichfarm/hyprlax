@@ -766,4 +766,6 @@ const compositor_ops_t compositor_sway_ops = {
     .supports_animations = sway_supports_animations,
     .set_blur = sway_set_blur,
     .set_wallpaper_offset = sway_set_wallpaper_offset,
+    .is_headless_mode = NULL,
+    .send_frame = NULL,
 };

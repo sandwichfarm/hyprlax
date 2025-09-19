@@ -222,4 +222,6 @@ const compositor_ops_t compositor_generic_wayland_ops = {
     .supports_animations = generic_wayland_supports_animations,
     .set_blur = generic_wayland_set_blur,
     .set_wallpaper_offset = generic_wayland_set_wallpaper_offset,
+    .is_headless_mode = NULL,
+    .send_frame = NULL,
 };

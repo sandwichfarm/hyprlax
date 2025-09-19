@@ -575,4 +575,6 @@ const compositor_ops_t compositor_niri_ops = {
     .supports_animations = niri_supports_animations,
     .set_blur = niri_set_blur,
     .set_wallpaper_offset = niri_set_wallpaper_offset,
+    .is_headless_mode = NULL,
+    .send_frame = NULL,
 };

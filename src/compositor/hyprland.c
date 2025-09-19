@@ -578,6 +578,8 @@ const compositor_ops_t compositor_hyprland_ops = {
     .supports_animations = hyprland_supports_animations,
     .set_blur = hyprland_set_blur,
     .set_wallpaper_offset = hyprland_set_wallpaper_offset,
+    .is_headless_mode = NULL,
+    .send_frame = NULL,
 };
 
 #ifdef UNIT_TEST

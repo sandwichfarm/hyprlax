@@ -134,6 +134,10 @@ typedef struct compositor_ops {
     bool (*supports_animations)(void);
     int (*set_blur)(float amount);
     int (*set_wallpaper_offset)(float x, float y);
+    
+    /* Headless mode support (external rendering) */
+    bool (*is_headless_mode)(void);
+    int (*send_frame)(void *buffer);
 } compositor_ops_t;
 
 /* Compositor adapter instance */
@@ -143,6 +147,8 @@ typedef struct compositor_adapter {
     void *private_data;
     bool initialized;
     bool connected;
+    layer_position_t preferred_layer;  /* Preferred layer for background surfaces */
+    int preferred_exclusive_zone;      /* Preferred exclusive zone (-1 for exclusive, 0 for non-exclusive) */
 } compositor_adapter_t;
 
 /* Global compositor management */

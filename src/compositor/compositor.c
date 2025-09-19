@@ -156,6 +156,8 @@ int compositor_create(compositor_adapter_t **out_adapter, compositor_type_t type
         case COMPOSITOR_HYPRLAND:
             adapter->ops = &compositor_hyprland_ops;
             adapter->type = COMPOSITOR_HYPRLAND;
+            adapter->preferred_layer = LAYER_BACKGROUND;  /* Default layer */
+            adapter->preferred_exclusive_zone = -1;  /* Default exclusive zone */
             break;
 #endif
 
@@ -163,6 +165,8 @@ int compositor_create(compositor_adapter_t **out_adapter, compositor_type_t type
         case COMPOSITOR_WAYFIRE:
             adapter->ops = &compositor_wayfire_ops;
             adapter->type = COMPOSITOR_WAYFIRE;
+            adapter->preferred_layer = LAYER_BACKGROUND;  /* Try BACKGROUND with non-exclusive */
+            adapter->preferred_exclusive_zone = 0;  /* Non-exclusive zone for Wayfire */
             break;
 #endif
 
@@ -170,6 +174,8 @@ int compositor_create(compositor_adapter_t **out_adapter, compositor_type_t type
         case COMPOSITOR_NIRI:
             adapter->ops = &compositor_niri_ops;
             adapter->type = COMPOSITOR_NIRI;
+            adapter->preferred_layer = LAYER_BACKGROUND;  /* Default layer */
+            adapter->preferred_exclusive_zone = -1;  /* Default exclusive zone */
             break;
 #endif
 
@@ -177,6 +183,8 @@ int compositor_create(compositor_adapter_t **out_adapter, compositor_type_t type
         case COMPOSITOR_SWAY:
             adapter->ops = &compositor_sway_ops;
             adapter->type = COMPOSITOR_SWAY;
+            adapter->preferred_layer = LAYER_BACKGROUND;  /* Default layer */
+            adapter->preferred_exclusive_zone = -1;  /* Default exclusive zone */
             break;
 #endif
 
@@ -184,6 +192,8 @@ int compositor_create(compositor_adapter_t **out_adapter, compositor_type_t type
         case COMPOSITOR_RIVER:
             adapter->ops = &compositor_river_ops;
             adapter->type = COMPOSITOR_RIVER;
+            adapter->preferred_layer = LAYER_BACKGROUND;  /* Default layer */
+            adapter->preferred_exclusive_zone = -1;  /* Default exclusive zone */
             break;
 #endif
 
@@ -191,6 +201,8 @@ int compositor_create(compositor_adapter_t **out_adapter, compositor_type_t type
         case COMPOSITOR_GENERIC_WAYLAND:
             adapter->ops = &compositor_generic_wayland_ops;
             adapter->type = COMPOSITOR_GENERIC_WAYLAND;
+            adapter->preferred_layer = LAYER_BACKGROUND;  /* Default layer */
+            adapter->preferred_exclusive_zone = -1;  /* Default exclusive zone */
             break;
 #endif
             

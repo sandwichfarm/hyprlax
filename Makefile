@@ -85,10 +85,10 @@ PROTOCOL_HDRS =
 endif
 
 # Core module sources (always included)
-CORE_SRCS = src/core/easing.c src/core/animation.c src/core/layer.c src/core/config.c src/core/monitor.c src/core/log.c
+CORE_SRCS = src/core/easing.c src/core/animation.c src/core/layer.c src/core/config.c src/core/monitor.c src/core/log.c src/core/shared_buffer.c
 
 # Renderer module sources (conditional)
-RENDERER_SRCS = src/renderer/renderer.c src/renderer/shader.c
+RENDERER_SRCS = src/renderer/renderer.c src/renderer/shader.c src/renderer/headless_renderer.c
 ifeq ($(ENABLE_GLES2),1)
 RENDERER_SRCS += src/renderer/gles2.c
 endif
@@ -333,4 +333,19 @@ lint-fix:
 clean-tests:
 	rm -f $(ALL_TEST_TARGETS) tests/*.valgrind.log tests/*.valgrind.log.* tests/*.valgrind.log.core.*
 
-.PHONY: all clean install install-user uninstall uninstall-user test memcheck clean-tests lint lint-fix
+# Wayfire plugin build target
+wayfire-plugin:
+	@echo "Building Wayfire plugin..."
+	@mkdir -p plugins/wayfire/build
+	@g++ -shared -fPIC \
+		-o plugins/wayfire/build/libhyprlax.so \
+		plugins/wayfire/libhyprlax.cpp \
+		`pkg-config --cflags --libs wayfire` \
+		`pkg-config --cflags --libs glesv2` \
+		-std=c++17 -pthread
+
+wayfire-plugin-install: wayfire-plugin
+	@echo "Installing Wayfire plugin..."
+	@sudo cp plugins/wayfire/build/libhyprlax.so /usr/lib/wayfire/
+
+.PHONY: all clean install install-user uninstall uninstall-user test memcheck clean-tests lint lint-fix wayfire-plugin wayfire-plugin-install

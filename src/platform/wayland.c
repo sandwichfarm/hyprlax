@@ -318,6 +318,20 @@ static int wayland_create_window(const window_config_t *config) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
 
+    /* Check if we're in headless mode (e.g., Wayfire plugin) */
+    bool headless_mode = false;
+    if (g_wayland_data->ctx && g_wayland_data->ctx->compositor && 
+        g_wayland_data->ctx->compositor->ops && 
+        g_wayland_data->ctx->compositor->ops->is_headless_mode) {
+        headless_mode = g_wayland_data->ctx->compositor->ops->is_headless_mode();
+    }
+    
+    /* Skip surface creation if in headless mode */
+    if (headless_mode) {
+        LOG_DEBUG("Using headless mode - skipping Wayland surface creation");
+        return HYPRLAX_SUCCESS;
+    }
+    
     /* Create surface */
     g_wayland_data->surface = wl_compositor_create_surface(g_wayland_data->compositor);
     if (!g_wayland_data->surface) {
@@ -326,16 +340,43 @@ static int wayland_create_window(const window_config_t *config) {
 
     /* Create layer surface if layer shell is available */
     if (g_wayland_data->layer_shell) {
+        /* Determine layer based on compositor preference */
+        int layer = ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND;  /* Default */
+        
+        if (g_wayland_data->ctx && g_wayland_data->ctx->compositor) {
+            /* Use compositor's preferred layer */
+            switch (g_wayland_data->ctx->compositor->preferred_layer) {
+                case LAYER_BOTTOM:
+                    layer = ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM;
+                    LOG_DEBUG("Using BOTTOM layer as requested by compositor");
+                    break;
+                case LAYER_TOP:
+                    layer = ZWLR_LAYER_SHELL_V1_LAYER_TOP;
+                    break;
+                case LAYER_OVERLAY:
+                    layer = ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY;
+                    break;
+                case LAYER_BACKGROUND:
+                default:
+                    layer = ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND;
+                    break;
+            }
+        }
+        
         g_wayland_data->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
             g_wayland_data->layer_shell,
             g_wayland_data->surface,
             g_wayland_data->output,  /* NULL means default output */
-            ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND,
+            layer,
             "hyprlax");
 
         if (g_wayland_data->layer_surface) {
             /* Configure as fullscreen background */
-            zwlr_layer_surface_v1_set_exclusive_zone(g_wayland_data->layer_surface, -1);
+            int exclusive_zone = -1;  /* Default */
+            if (g_wayland_data->ctx && g_wayland_data->ctx->compositor) {
+                exclusive_zone = g_wayland_data->ctx->compositor->preferred_exclusive_zone;
+            }
+            zwlr_layer_surface_v1_set_exclusive_zone(g_wayland_data->layer_surface, exclusive_zone);
             zwlr_layer_surface_v1_set_anchor(g_wayland_data->layer_surface,
                 ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
                 ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
@@ -439,16 +480,43 @@ int wayland_create_monitor_surface(monitor_instance_t *monitor) {
 
     /* Create layer surface bound to specific output */
     if (g_wayland_data->layer_shell && monitor->wl_output) {
+        /* Determine layer based on compositor preference */
+        int layer = ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND;  /* Default */
+        
+        if (g_wayland_data->ctx && g_wayland_data->ctx->compositor) {
+            /* Use compositor's preferred layer */
+            switch (g_wayland_data->ctx->compositor->preferred_layer) {
+                case LAYER_BOTTOM:
+                    layer = ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM;
+                    LOG_DEBUG("Using BOTTOM layer for monitor %s as requested by compositor", monitor->name);
+                    break;
+                case LAYER_TOP:
+                    layer = ZWLR_LAYER_SHELL_V1_LAYER_TOP;
+                    break;
+                case LAYER_OVERLAY:
+                    layer = ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY;
+                    break;
+                case LAYER_BACKGROUND:
+                default:
+                    layer = ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND;
+                    break;
+            }
+        }
+        
         monitor->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
             g_wayland_data->layer_shell,
             monitor->wl_surface,
             monitor->wl_output,  /* Bind to specific output */
-            ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND,
+            layer,
             "hyprlax");
 
         if (monitor->layer_surface) {
             /* Configure as fullscreen background */
-            zwlr_layer_surface_v1_set_exclusive_zone(monitor->layer_surface, -1);
+            int exclusive_zone = -1;  /* Default */
+            if (g_wayland_data->ctx && g_wayland_data->ctx->compositor) {
+                exclusive_zone = g_wayland_data->ctx->compositor->preferred_exclusive_zone;
+            }
+            zwlr_layer_surface_v1_set_exclusive_zone(monitor->layer_surface, exclusive_zone);
             zwlr_layer_surface_v1_set_anchor(monitor->layer_surface,
                 ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
                 ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
