@@ -977,6 +977,10 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
         LOG_ERROR("render_frame: No renderer available");
         return;
     }
+    
+    /* Track if this frame is actually different from last frame */
+    static float last_rendered_offset_x = -999999.0f;
+    static float last_rendered_offset_y = -999999.0f;
 
     /* Always use monitor list - single monitor is just count=1 */
     if (!ctx->monitors || ctx->monitors->count == 0) {
@@ -1248,7 +1252,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             
             /* If no animations are active, sleep longer to reduce CPU/GPU usage */
             if (!animations_active && !needs_render) {
-                sleep_time = 0.5;  /* Sleep for 500ms when idle (2 FPS polling rate) */
+                sleep_time = 1.0;  /* Sleep for 1 second when idle (1 FPS polling rate) */
                 if (ctx->config.debug) {
                     static int idle_count = 0;
                     if (idle_count++ % 10 == 0) {  /* Log every 5 seconds */

@@ -247,6 +247,8 @@ static void gles2_present(void) {
                         g_gles2_data->current_surface :
                         g_gles2_data->egl_surface;
 
+    /* Ensure all GL commands are complete before swapping */
+    glFinish();
     eglSwapBuffers(g_gles2_data->egl_display, surface);
 }
 
