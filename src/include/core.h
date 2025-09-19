@@ -38,16 +38,33 @@ typedef struct animation_state {
     bool completed;
 } animation_state_t;
 
+/* Content scaling modes for layers */
+typedef enum {
+    LAYER_FIT_STRETCH = 0,   /* Default: stretch to fill viewport */
+    LAYER_FIT_COVER,         /* Scale to cover viewport; crop excess */
+    LAYER_FIT_CONTAIN,       /* Scale to contain; letterbox if needed */
+    LAYER_FIT_WIDTH,         /* Fit width exactly; crop or letterbox vertically */
+    LAYER_FIT_HEIGHT         /* Fit height exactly; crop or letterbox horizontally */
+} layer_fit_mode_t;
+
 /* Layer definition - temporarily named differently to avoid conflict with ipc.h */
 typedef struct parallax_layer {
     uint32_t id;
     char *image_path;
 
     /* Parallax parameters */
-    float shift_multiplier;
+    float shift_multiplier;           /* legacy scalar multiplier */
+    float shift_multiplier_x;         /* per-axis multiplier (defaults to shift_multiplier) */
+    float shift_multiplier_y;
     float opacity;
     float blur_amount;
     int z_index;
+
+    /* Per-layer inversion flags */
+    bool invert_workspace_x;
+    bool invert_workspace_y;
+    bool invert_cursor_x;
+    bool invert_cursor_y;
 
     /* Animation state */
     animation_state_t x_animation;
@@ -64,9 +81,23 @@ typedef struct parallax_layer {
     int texture_width;
     int texture_height;
 
+    layer_fit_mode_t fit_mode;
+    float content_scale;          /* Additional scale multiplier (1.0 = no change) */
+    float align_x;                /* 0.0 left, 0.5 center, 1.0 right (for cover/crop alignment) */
+    float align_y;                /* 0.0 top, 0.5 center, 1.0 bottom */
+    float base_uv_x;              /* Initial UV pan offset (adds to parallax) */
+    float base_uv_y;
+
     /* Linked list */
     struct parallax_layer *next;
 } parallax_layer_t;
+
+/* Parallax mode */
+typedef enum {
+    PARALLAX_WORKSPACE = 0,
+    PARALLAX_CURSOR = 1,
+    PARALLAX_HYBRID = 2,
+} parallax_mode_t;
 
 /* Configuration structure */
 typedef struct {
@@ -94,6 +125,25 @@ typedef struct {
     /* Feature flags */
     bool blur_enabled;
     bool ipc_enabled;
+
+    /* Parallax configuration */
+    parallax_mode_t parallax_mode;    /* workspace | cursor | hybrid */
+    float parallax_workspace_weight;  /* 0..1 */
+    float parallax_cursor_weight;     /* 0..1 */
+    bool invert_workspace_x;
+    bool invert_workspace_y;
+    bool invert_cursor_x;
+    bool invert_cursor_y;
+    float parallax_max_offset_x;      /* pixel clamp after blend */
+    float parallax_max_offset_y;
+
+    /* Cursor input configuration */
+    float cursor_sensitivity_x;       /* multiplier on normalized input */
+    float cursor_sensitivity_y;
+    float cursor_deadzone_px;         /* deadzone in screen pixels */
+    float cursor_ema_alpha;           /* 0..1 smoothing factor */
+    double cursor_anim_duration;      /* seconds; 0 disables easing */
+    easing_type_t cursor_easing;      /* easing for cursor animation */
 } config_t;
 
 /* Easing functions - pure math, no side effects */
@@ -118,6 +168,10 @@ easing_type_t easing_from_string(const char *name);
 
 /* Get string name from easing type */
 const char* easing_to_string(easing_type_t type);
+
+/* Parallax helpers */
+parallax_mode_t parallax_mode_from_string(const char *name);
+const char* parallax_mode_to_string(parallax_mode_t mode);
 
 /* Animation functions - no allocations in evaluate path */
 void animation_start(animation_state_t *anim, float from, float to,

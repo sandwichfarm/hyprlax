@@ -21,6 +21,8 @@
 #include "include/hyprlax_internal.h"
 #include "include/log.h"
 #include "include/renderer.h"
+#include "include/compositor.h"
+#include "include/config_toml.h"
 #include "ipc.h"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -90,6 +92,9 @@ static void hyprlax_setup_epoll(hyprlax_context_t *ctx) {
     /* Register sources */
     epoll_add_fd(ctx->epoll_fd, ctx->platform_event_fd, EPOLLIN);
     epoll_add_fd(ctx->epoll_fd, ctx->compositor_event_fd, EPOLLIN);
+    if (ctx->cursor_event_fd >= 0) {
+        epoll_add_fd(ctx->epoll_fd, ctx->cursor_event_fd, EPOLLIN);
+    }
     epoll_add_fd(ctx->epoll_fd, ctx->ipc_event_fd, EPOLLIN);
     epoll_add_fd(ctx->epoll_fd, ctx->frame_timer_fd, EPOLLIN);
     epoll_add_fd(ctx->epoll_fd, ctx->debounce_timer_fd, EPOLLIN);
@@ -128,9 +133,130 @@ static void hyprlax_clear_timerfd(int fd) {
     (void)r;
 }
 
+/* Update cursor smoothed normalized values */
+static void cursor_apply_sample(hyprlax_context_t *ctx, float norm_x, float norm_y) {
+    if (!ctx) return;
+    /* Sensitivity */
+    float sx = norm_x * ctx->config.cursor_sensitivity_x;
+    float sy = norm_y * ctx->config.cursor_sensitivity_y;
+
+    /* EMA smoothing */
+    float a = ctx->config.cursor_ema_alpha;
+    if (a < 0.0f) a = 0.0f;
+    if (a > 1.0f) a = 1.0f;
+    ctx->cursor_ema_x = ctx->cursor_ema_x + a * (sx - ctx->cursor_ema_x);
+    ctx->cursor_ema_y = ctx->cursor_ema_y + a * (sy - ctx->cursor_ema_y);
+
+    /* Clamp */
+    if (ctx->cursor_ema_x < -1.0f) ctx->cursor_ema_x = -1.0f;
+    if (ctx->cursor_ema_x >  1.0f) ctx->cursor_ema_x =  1.0f;
+    if (ctx->cursor_ema_y < -1.0f) ctx->cursor_ema_y = -1.0f;
+    if (ctx->cursor_ema_y >  1.0f) ctx->cursor_ema_y =  1.0f;
+
+    ctx->cursor_norm_x = ctx->cursor_ema_x;
+    ctx->cursor_norm_y = ctx->cursor_ema_y;
+}
+
+/* Placeholder: read cursor provider event, if implemented */
+static bool process_cursor_event(hyprlax_context_t *ctx) {
+    if (!ctx) return false;
+    if (ctx->cursor_event_fd >= 0) {
+        hyprlax_clear_timerfd(ctx->cursor_event_fd);
+    }
+
+    if (!ctx->compositor || !ctx->compositor->ops || !ctx->compositor->ops->send_command) {
+        return false;
+    }
+
+    char resp[512] = {0};
+    int rc = ctx->compositor->ops->send_command("j/cursorpos", resp, sizeof(resp));
+    if (rc != HYPRLAX_SUCCESS || resp[0] == '\0') {
+        rc = ctx->compositor->ops->send_command("j/cursor", resp, sizeof(resp));
+        if (rc != HYPRLAX_SUCCESS || resp[0] == '\0') {
+            return false;
+        }
+    }
+
+    char *px = strstr(resp, "\"x\"");
+    char *py = strstr(resp, "\"y\"");
+    if (!px || !py) return false;
+    char *pcolon;
+    double x = 0.0, y = 0.0;
+    pcolon = strchr(px, ':');
+    if (pcolon) x = strtod(pcolon + 1, NULL);
+    pcolon = strchr(py, ':');
+    if (pcolon) y = strtod(pcolon + 1, NULL);
+
+    int mon_x = 0, mon_y = 0, mon_w = 1920, mon_h = 1080;
+    if (ctx->monitors && ctx->monitors->head) {
+        monitor_instance_t *m = ctx->monitors->head;
+        monitor_instance_t *found = NULL;
+        while (m) {
+            if (x >= m->global_x && x < (m->global_x + m->width) &&
+                y >= m->global_y && y < (m->global_y + m->height)) {
+                found = m; break;
+            }
+            m = m->next;
+        }
+        if (!found) found = ctx->monitors->primary ? ctx->monitors->primary : ctx->monitors->head;
+        if (found) {
+            mon_x = found->global_x; mon_y = found->global_y; mon_w = found->width; mon_h = found->height;
+        }
+    }
+
+    double cx = mon_x + mon_w * 0.5;
+    double cy = mon_y + mon_h * 0.5;
+    double dx = x - cx;
+    double dy = y - cy;
+
+    double dz = ctx->config.cursor_deadzone_px;
+    if (fabs(dx) < dz) dx = 0.0;
+    if (fabs(dy) < dz) dy = 0.0;
+
+    float nx = 0.0f, ny = 0.0f;
+    if (mon_w > 0) nx = (float)(dx / (mon_w * 0.5));
+    if (mon_h > 0) ny = (float)(dy / (mon_h * 0.5));
+    if (nx < -1.0f) nx = -1.0f;
+    if (nx > 1.0f) nx = 1.0f;
+    if (ny < -1.0f) ny = -1.0f;
+    if (ny > 1.0f) ny = 1.0f;
+
+    float prev_x = ctx->cursor_norm_x;
+    float prev_y = ctx->cursor_norm_y;
+    cursor_apply_sample(ctx, nx, ny);
+
+    /* Start easing animations toward the new smoothed target, if enabled */
+    if (ctx->config.cursor_anim_duration > 0.0) {
+        float ex = ctx->cursor_eased_x;
+        float ey = ctx->cursor_eased_y;
+        /* When not yet initialized, start from current smoothed value */
+        if (!animation_is_active(&ctx->cursor_anim_x)) ex = ctx->cursor_norm_x;
+        if (!animation_is_active(&ctx->cursor_anim_y)) ey = ctx->cursor_norm_y;
+        /* Only start if change is meaningful */
+        if (fabsf(ctx->cursor_norm_x - ex) > 0.0005f) {
+            animation_start(&ctx->cursor_anim_x, ex, ctx->cursor_norm_x,
+                            ctx->config.cursor_anim_duration, ctx->config.cursor_easing);
+        }
+        if (fabsf(ctx->cursor_norm_y - ey) > 0.0005f) {
+            animation_start(&ctx->cursor_anim_y, ey, ctx->cursor_norm_y,
+                            ctx->config.cursor_anim_duration, ctx->config.cursor_easing);
+        }
+    }
+
+    float dxn = fabsf(ctx->cursor_norm_x - prev_x);
+    float dyn = fabsf(ctx->cursor_norm_y - prev_y);
+    return (dxn > 0.0015f || dyn > 0.0015f);
+}
+
 /* Apply a compositor workspace event (shared by immediate and debounced paths) */
 static void process_workspace_event(hyprlax_context_t *ctx, const compositor_event_t *comp_event) {
     if (!ctx || !comp_event) return;
+    /* In cursor-only mode, monitors are realized via Wayland output events.
+       Skip workspace event processing entirely to avoid any parallax updates. */
+    if (ctx->config.parallax_mode == PARALLAX_CURSOR) {
+        if (ctx->config.debug) LOG_TRACE("Ignoring workspace event in cursor-only parallax mode");
+        return;
+    }
 
     /* Find target monitor */
     monitor_instance_t *target_monitor = NULL;
@@ -212,6 +338,15 @@ hyprlax_context_t* hyprlax_create(void) {
     ctx->current_monitor = 0;
     ctx->workspace_offset_x = 0.0f;
     ctx->workspace_offset_y = 0.0f;
+
+    /* Cursor state defaults */
+    ctx->cursor_event_fd = -1;
+    ctx->cursor_norm_x = 0.0f;
+    ctx->cursor_norm_y = 0.0f;
+    ctx->cursor_ema_x = 0.0f;
+    ctx->cursor_ema_y = 0.0f;
+    ctx->cursor_last_time = 0.0;
+    ctx->cursor_supported = false;
 
     /* Set default configuration */
     config_set_defaults(&ctx->config);
@@ -387,6 +522,9 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
         {"compositor", required_argument, 0, 'C'},
         {"vsync", no_argument, 0, 'V'},
         {"idle-poll-rate", required_argument, 0, 1003},
+        {"parallax", required_argument, 0, 1005},
+        {"mouse-weight", required_argument, 0, 1006},
+        {"workspace-weight", required_argument, 0, 1007},
         {0, 0, 0, 0}
     };
 
@@ -412,6 +550,9 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 printf("  -p, --platform <backend>  Platform backend (wayland, auto)\n");
                 printf("  -C, --compositor <backend> Compositor (hyprland, sway, generic, auto)\n");
                 printf("  -V, --vsync               Enable VSync (default: off)\n");
+                printf("      --parallax <mode>     Parallax mode: workspace|cursor|hybrid\n");
+                printf("      --mouse-weight <w>    Weight of cursor source (0..1)\n");
+                printf("      --workspace-weight <w> Weight of workspace source (0..1)\n");
                 printf("  --idle-poll-rate <hz>     Polling rate when idle (default: 2.0 Hz)\n");
                 printf("\nEasing types:\n");
                 printf("  linear, quad, cubic, quart, quint, sine, expo, circ,\n");
@@ -441,9 +582,19 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
 
             case 'c':
                 ctx->config.config_path = strdup(optarg);
-                if (parse_config_file(ctx, ctx->config.config_path) < 0) {
-                    LOG_ERROR("Failed to load config file: %s", optarg);
-                    return -1;
+                /* If TOML, use TOML parser; otherwise legacy parser */
+                const char *ext = strrchr(optarg, '.');
+                if (ext && (strcmp(ext, ".toml") == 0 || strcmp(ext, ".TOML") == 0)) {
+                    extern int config_apply_toml_to_context(hyprlax_context_t *ctx, const char *path);
+                    if (config_apply_toml_to_context(ctx, ctx->config.config_path) != HYPRLAX_SUCCESS) {
+                        LOG_ERROR("Failed to load TOML config: %s", optarg);
+                        return -1;
+                    }
+                } else {
+                    if (parse_config_file(ctx, ctx->config.config_path) < 0) {
+                        LOG_ERROR("Failed to load config file: %s", optarg);
+                        return -1;
+                    }
                 }
                 break;
 
@@ -495,6 +646,36 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                     LOG_WARN("Invalid idle poll rate: %.1f, using default 2.0 Hz", ctx->config.idle_poll_rate);
                     ctx->config.idle_poll_rate = 2.0f;
                 }
+                break;
+
+            case 1005:  /* --parallax */
+                ctx->config.parallax_mode = parallax_mode_from_string(optarg);
+                if (ctx->config.parallax_mode == PARALLAX_WORKSPACE) {
+                    ctx->config.parallax_workspace_weight = 1.0f;
+                    ctx->config.parallax_cursor_weight = 0.0f;
+                } else if (ctx->config.parallax_mode == PARALLAX_CURSOR) {
+                    ctx->config.parallax_workspace_weight = 0.0f;
+                    ctx->config.parallax_cursor_weight = 1.0f;
+                } else {
+                    /* Hybrid default if untouched */
+                    if (ctx->config.parallax_workspace_weight == 1.0f &&
+                        ctx->config.parallax_cursor_weight == 0.0f) {
+                        ctx->config.parallax_workspace_weight = 0.7f;
+                        ctx->config.parallax_cursor_weight = 0.3f;
+                    }
+                }
+                break;
+
+            case 1006:  /* --mouse-weight */
+                ctx->config.parallax_cursor_weight = atof(optarg);
+                if (ctx->config.parallax_cursor_weight < 0.0f) ctx->config.parallax_cursor_weight = 0.0f;
+                if (ctx->config.parallax_cursor_weight > 1.0f) ctx->config.parallax_cursor_weight = 1.0f;
+                break;
+
+            case 1007:  /* --workspace-weight */
+                ctx->config.parallax_workspace_weight = atof(optarg);
+                if (ctx->config.parallax_workspace_weight < 0.0f) ctx->config.parallax_workspace_weight = 0.0f;
+                if (ctx->config.parallax_workspace_weight > 1.0f) ctx->config.parallax_workspace_weight = 1.0f;
                 break;
 
             case 1004:  /* --disable-monitor */
@@ -756,6 +937,17 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
     if (ret != HYPRLAX_SUCCESS) {
         LOG_ERROR("[INIT] Compositor initialization failed with code %d", ret);
         return ret;
+    }
+
+    /* 3b. Initialize cursor provider if needed */
+    if (ctx->config.parallax_cursor_weight > 0.0f || ctx->config.parallax_mode != PARALLAX_WORKSPACE) {
+        /* Only enable if compositor can answer commands (Hyprland) */
+        if (ctx->compositor && ctx->compositor->ops && ctx->compositor->ops->send_command) {
+            ctx->cursor_supported = true;
+            ctx->cursor_event_fd = create_timerfd_monotonic();
+            int interval_ms = (int)(1000.0 / (double)(ctx->config.target_fps > 0 ? ctx->config.target_fps : 60));
+            arm_timerfd_ms(ctx->cursor_event_fd, interval_ms, interval_ms);
+        }
     }
 
     /* 4. Create window */
@@ -1133,9 +1325,49 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
             continue;
         }
 
-        /* Use the layer's own animated offset */
-        float offset_x = layer->offset_x;
-        float offset_y = layer->offset_y;
+        /* Base offsets from workspace animation */
+        float workspace_x = layer->offset_x;
+        float workspace_y = layer->offset_y;
+
+        /* Apply optional workspace inversion (global xor layer) */
+        if (ctx->config.invert_workspace_x ^ layer->invert_workspace_x) {
+            workspace_x = -workspace_x;
+        }
+        if (ctx->config.invert_workspace_y ^ layer->invert_workspace_y) {
+            workspace_y = -workspace_y;
+        }
+
+        /* Cursor-driven offsets (normalized -> pixels) */
+        float cursor_x_px = ctx->cursor_eased_x * ctx->config.parallax_max_offset_x * layer->shift_multiplier_x;
+        float cursor_y_px = ctx->cursor_eased_y * ctx->config.parallax_max_offset_y * layer->shift_multiplier_y;
+
+        if (ctx->config.invert_cursor_x ^ layer->invert_cursor_x) {
+            cursor_x_px = -cursor_x_px;
+        }
+        if (ctx->config.invert_cursor_y ^ layer->invert_cursor_y) {
+            cursor_y_px = -cursor_y_px;
+        }
+
+        /* Blend according to selected mode */
+        float offset_x = 0.0f;
+        float offset_y = 0.0f;
+        switch (ctx->config.parallax_mode) {
+            case PARALLAX_WORKSPACE:
+                offset_x = workspace_x;
+                offset_y = workspace_y;
+                break;
+            case PARALLAX_CURSOR:
+                offset_x = cursor_x_px * ctx->config.parallax_cursor_weight;
+                offset_y = cursor_y_px * ctx->config.parallax_cursor_weight;
+                break;
+            case PARALLAX_HYBRID:
+            default:
+                offset_x = workspace_x * ctx->config.parallax_workspace_weight +
+                           cursor_x_px * ctx->config.parallax_cursor_weight;
+                offset_y = workspace_y * ctx->config.parallax_workspace_weight +
+                           cursor_y_px * ctx->config.parallax_cursor_weight;
+                break;
+        }
 
         /* Create texture struct for drawing */
         texture_t tex = {
@@ -1149,7 +1381,24 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
             ctx->renderer->ops->bind_texture(&tex, 0);
         }
 
-        if (ctx->renderer->ops->draw_layer) {
+        if (ctx->renderer->ops->draw_layer_ex) {
+            renderer_layer_params_t p = {
+                .fit_mode = layer->fit_mode,
+                .content_scale = layer->content_scale,
+                .align_x = layer->align_x,
+                .align_y = layer->align_y,
+                .base_uv_x = layer->base_uv_x,
+                .base_uv_y = layer->base_uv_y,
+            };
+            ctx->renderer->ops->draw_layer_ex(
+                &tex,
+                offset_x / monitor->width,
+                offset_y / monitor->height,
+                layer->opacity,
+                layer->blur_amount,
+                &p
+            );
+        } else if (ctx->renderer->ops->draw_layer) {
             /* Draw the layer with offset and effects */
             /* Layer drawing debug - commented out for performance
             LOG_TRACE("Drawing layer %d (tex_id=%u, offset=%.3f,%.3f, opacity=%.2f)",
@@ -1213,6 +1462,22 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
 
     /* Monitor count debug - commented out for performance
     LOG_TRACE("Rendering frame to %d monitor(s)", ctx->monitors->count); */
+
+    /* Update cursor easing state (if enabled) once per frame */
+    double now_time = get_time();
+    if (ctx->config.cursor_anim_duration > 0.0) {
+        if (animation_is_active(&ctx->cursor_anim_x))
+            ctx->cursor_eased_x = animation_evaluate(&ctx->cursor_anim_x, now_time);
+        else
+            ctx->cursor_eased_x = ctx->cursor_norm_x;
+        if (animation_is_active(&ctx->cursor_anim_y))
+            ctx->cursor_eased_y = animation_evaluate(&ctx->cursor_anim_y, now_time);
+        else
+            ctx->cursor_eased_y = ctx->cursor_norm_y;
+    } else {
+        ctx->cursor_eased_x = ctx->cursor_norm_x;
+        ctx->cursor_eased_y = ctx->cursor_norm_y;
+    }
 
     /* Render to each monitor */
     monitor_instance_t *monitor = ctx->monitors->head;
@@ -1482,6 +1747,11 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                         } else if (fd == ctx->frame_timer_fd) {
                             hyprlax_clear_timerfd(fd);
                             needs_render = true; /* Time to render next frame */
+                        } else if (fd == ctx->cursor_event_fd) {
+                            /* Update cursor state; request a frame if changed */
+                            if (process_cursor_event(ctx)) {
+                                needs_render = true;
+                            }
                         } else {
                             /* Wayland/compositor/IPC fds wake main loop; handled next iteration */
                         }
@@ -1565,4 +1835,83 @@ void hyprlax_shutdown(hyprlax_context_t *ctx) {
     if (ctx->config.debug) {
         LOG_INFO("hyprlax shut down");
     }
+}
+
+/* Runtime property control (IPC bridge) */
+static bool parse_bool(const char *v) {
+    if (!v) return false;
+    return (strcmp(v, "1") == 0 || strcasecmp(v, "true") == 0 ||
+            strcasecmp(v, "on") == 0 || strcasecmp(v, "yes") == 0);
+}
+
+int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, const char *value) {
+    if (!ctx || !property || !value) return -1;
+
+    if (strcmp(property, "parallax.mode") == 0) {
+        ctx->config.parallax_mode = parallax_mode_from_string(value);
+        return 0;
+    }
+    if (strcmp(property, "parallax.sources.cursor.weight") == 0) {
+        ctx->config.parallax_cursor_weight = atof(value);
+        if (ctx->config.parallax_cursor_weight < 0.0f) ctx->config.parallax_cursor_weight = 0.0f;
+        if (ctx->config.parallax_cursor_weight > 1.0f) ctx->config.parallax_cursor_weight = 1.0f;
+        return 0;
+    }
+    if (strcmp(property, "parallax.sources.workspace.weight") == 0) {
+        ctx->config.parallax_workspace_weight = atof(value);
+        if (ctx->config.parallax_workspace_weight < 0.0f) ctx->config.parallax_workspace_weight = 0.0f;
+        if (ctx->config.parallax_workspace_weight > 1.0f) ctx->config.parallax_workspace_weight = 1.0f;
+        return 0;
+    }
+    if (strcmp(property, "parallax.invert.cursor.x") == 0) {
+        ctx->config.invert_cursor_x = parse_bool(value); return 0;
+    }
+    if (strcmp(property, "parallax.invert.cursor.y") == 0) {
+        ctx->config.invert_cursor_y = parse_bool(value); return 0;
+    }
+    if (strcmp(property, "parallax.invert.workspace.x") == 0) {
+        ctx->config.invert_workspace_x = parse_bool(value); return 0;
+    }
+    if (strcmp(property, "parallax.invert.workspace.y") == 0) {
+        ctx->config.invert_workspace_y = parse_bool(value); return 0;
+    }
+    if (strcmp(property, "parallax.max_offset_px.x") == 0) {
+        ctx->config.parallax_max_offset_x = atof(value); return 0;
+    }
+    if (strcmp(property, "parallax.max_offset_px.y") == 0) {
+        ctx->config.parallax_max_offset_y = atof(value); return 0;
+    }
+    if (strcmp(property, "input.cursor.sensitivity_x") == 0) {
+        ctx->config.cursor_sensitivity_x = atof(value); return 0;
+    }
+    if (strcmp(property, "input.cursor.sensitivity_y") == 0) {
+        ctx->config.cursor_sensitivity_y = atof(value); return 0;
+    }
+    if (strcmp(property, "input.cursor.ema_alpha") == 0) {
+        ctx->config.cursor_ema_alpha = atof(value); return 0;
+    }
+    if (strcmp(property, "input.cursor.deadzone_px") == 0) {
+        ctx->config.cursor_deadzone_px = atof(value); return 0;
+    }
+    return -1;
+}
+
+int hyprlax_runtime_get_property(hyprlax_context_t *ctx, const char *property, char *out, size_t out_size) {
+    if (!ctx || !property || !out || out_size == 0) return -1;
+    #define W(fmt, ...) do { snprintf(out, out_size, fmt, __VA_ARGS__); } while(0)
+    if (strcmp(property, "parallax.mode") == 0) { W("%s", parallax_mode_to_string(ctx->config.parallax_mode)); return 0; }
+    if (strcmp(property, "parallax.sources.cursor.weight") == 0) { W("%.3f", ctx->config.parallax_cursor_weight); return 0; }
+    if (strcmp(property, "parallax.sources.workspace.weight") == 0) { W("%.3f", ctx->config.parallax_workspace_weight); return 0; }
+    if (strcmp(property, "parallax.invert.cursor.x") == 0) { W("%s", ctx->config.invert_cursor_x?"true":"false"); return 0; }
+    if (strcmp(property, "parallax.invert.cursor.y") == 0) { W("%s", ctx->config.invert_cursor_y?"true":"false"); return 0; }
+    if (strcmp(property, "parallax.invert.workspace.x") == 0) { W("%s", ctx->config.invert_workspace_x?"true":"false"); return 0; }
+    if (strcmp(property, "parallax.invert.workspace.y") == 0) { W("%s", ctx->config.invert_workspace_y?"true":"false"); return 0; }
+    if (strcmp(property, "parallax.max_offset_px.x") == 0) { W("%.1f", ctx->config.parallax_max_offset_x); return 0; }
+    if (strcmp(property, "parallax.max_offset_px.y") == 0) { W("%.1f", ctx->config.parallax_max_offset_y); return 0; }
+    if (strcmp(property, "input.cursor.sensitivity_x") == 0) { W("%.3f", ctx->config.cursor_sensitivity_x); return 0; }
+    if (strcmp(property, "input.cursor.sensitivity_y") == 0) { W("%.3f", ctx->config.cursor_sensitivity_y); return 0; }
+    if (strcmp(property, "input.cursor.ema_alpha") == 0) { W("%.3f", ctx->config.cursor_ema_alpha); return 0; }
+    if (strcmp(property, "input.cursor.deadzone_px") == 0) { W("%.1f", ctx->config.cursor_deadzone_px); return 0; }
+    #undef W
+    return -1;
 }
