@@ -450,6 +450,12 @@ static int wayfire_set_wallpaper_offset(float x, float y) {
     return HYPRLAX_SUCCESS;
 }
 
+/* Expose Wayfire IPC event fd for blocking waits */
+static int wayfire_get_event_fd(void) {
+    if (!g_wayfire_data || g_wayfire_data->ipc_fd < 0) return -1;
+    return g_wayfire_data->ipc_fd;
+}
+
 /* Wayfire compositor operations */
 const compositor_ops_t compositor_wayfire_ops = {
     .init = wayfire_init,
@@ -468,6 +474,7 @@ const compositor_ops_t compositor_wayfire_ops = {
     .disconnect_ipc = wayfire_disconnect_ipc,
     .poll_events = wayfire_poll_events,
     .send_command = wayfire_send_command,
+    .get_event_fd = wayfire_get_event_fd,
     .supports_blur = wayfire_supports_blur,
     .supports_transparency = wayfire_supports_transparency,
     .supports_animations = wayfire_supports_animations,

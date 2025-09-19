@@ -728,6 +728,12 @@ static int river_set_wallpaper_offset(float x, float y) {
     return HYPRLAX_SUCCESS;
 }
 
+/* Expose River status Wayland display FD (if connected) */
+static int river_get_event_fd(void) {
+    if (!g_river_data || !g_river_data->display) return -1;
+    return wl_display_get_fd(g_river_data->display);
+}
+
 /* Get visible tag count for multi-tag handling */
 static int river_get_visible_tag_count(void) {
     if (!g_river_data) return 0;
@@ -891,6 +897,7 @@ const compositor_ops_t compositor_river_ops = {
     .disconnect_ipc = river_disconnect_ipc,
     .poll_events = river_poll_events,
     .send_command = river_send_command,
+    .get_event_fd = river_get_event_fd,
     .supports_blur = river_supports_blur,
     .supports_transparency = river_supports_transparency,
     .supports_animations = river_supports_animations,

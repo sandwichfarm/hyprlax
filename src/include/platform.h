@@ -77,6 +77,9 @@ typedef struct platform_ops {
     int (*wait_events)(platform_event_t *event, int timeout_ms);
     void (*flush_events)(void);
 
+    /* Event FD for blocking waits (e.g., wl_display fd) */
+    int (*get_event_fd)(void);
+
     /* Native handles for renderer */
     void* (*get_native_display)(void);
     void* (*get_native_window)(void);
@@ -119,6 +122,10 @@ platform_type_t platform_detect(void);
     ((p)->ops->get_native_display())
 #define PLATFORM_GET_NATIVE_WINDOW(p) \
     ((p)->ops->get_native_window())
+
+/* Optional helpers */
+#define PLATFORM_GET_EVENT_FD(p) \
+    ((p)->ops->get_event_fd ? (p)->ops->get_event_fd() : -1)
 
 /* Available platform backends */
 extern const platform_ops_t platform_wayland_ops;

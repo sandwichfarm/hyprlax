@@ -199,6 +199,11 @@ static int generic_wayland_set_wallpaper_offset(float x, float y) {
     return HYPRLAX_SUCCESS;
 }
 
+/* No event fd for generic compositor */
+static int generic_wayland_get_event_fd(void) {
+    return -1;
+}
+
 /* Generic Wayland compositor operations */
 const compositor_ops_t compositor_generic_wayland_ops = {
     .init = generic_wayland_init,
@@ -217,6 +222,7 @@ const compositor_ops_t compositor_generic_wayland_ops = {
     .disconnect_ipc = generic_wayland_disconnect_ipc,
     .poll_events = generic_wayland_poll_events,
     .send_command = generic_wayland_send_command,
+    .get_event_fd = generic_wayland_get_event_fd,
     .supports_blur = generic_wayland_supports_blur,
     .supports_transparency = generic_wayland_supports_transparency,
     .supports_animations = generic_wayland_supports_animations,

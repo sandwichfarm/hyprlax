@@ -555,6 +555,12 @@ static int hyprland_set_wallpaper_offset(float x, float y) {
     return HYPRLAX_SUCCESS;
 }
 
+/* Expose Hyprland event socket FD for blocking waits */
+static int hyprland_get_event_fd(void) {
+    if (!g_hyprland_data || !g_hyprland_data->connected) return -1;
+    return g_hyprland_data->event_fd;
+}
+
 /* Hyprland compositor operations */
 const compositor_ops_t compositor_hyprland_ops = {
     .init = hyprland_init,
@@ -573,6 +579,7 @@ const compositor_ops_t compositor_hyprland_ops = {
     .disconnect_ipc = hyprland_disconnect_ipc,
     .poll_events = hyprland_poll_events,
     .send_command = hyprland_send_command,
+    .get_event_fd = hyprland_get_event_fd,
     .supports_blur = hyprland_supports_blur,
     .supports_transparency = hyprland_supports_transparency,
     .supports_animations = hyprland_supports_animations,

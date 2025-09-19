@@ -547,21 +547,18 @@ static int wayland_poll_events(platform_event_t *event) {
         /* Then flush any pending requests */
         wl_display_flush(g_wayland_data->display);
 
-        /* If frame-callback pacing is enabled, non-blocking read of Wayland events */
-        const char *use_fc = getenv("HYPRLAX_FRAME_CALLBACK");
-        if (use_fc && *use_fc) {
-            int fd = wl_display_get_fd(g_wayland_data->display);
-            if (wl_display_prepare_read(g_wayland_data->display) == 0) {
-                struct pollfd pfd = { .fd = fd, .events = POLLIN, .revents = 0 };
-                int pret = poll(&pfd, 1, 0);
-                if (pret > 0) {
-                    wl_display_read_events(g_wayland_data->display);
-                } else {
-                    wl_display_cancel_read(g_wayland_data->display);
-                }
+        /* Opportunistically drain readable Wayland events without blocking */
+        int fd = wl_display_get_fd(g_wayland_data->display);
+        if (wl_display_prepare_read(g_wayland_data->display) == 0) {
+            struct pollfd pfd = { .fd = fd, .events = POLLIN, .revents = 0 };
+            int pret = poll(&pfd, 1, 0);
+            if (pret > 0) {
+                wl_display_read_events(g_wayland_data->display);
             } else {
-                wl_display_dispatch_pending(g_wayland_data->display);
+                wl_display_cancel_read(g_wayland_data->display);
             }
+        } else {
+            wl_display_dispatch_pending(g_wayland_data->display);
         }
     }
 
@@ -603,6 +600,14 @@ static void wayland_flush_events(void) {
         /* Flush display to send all pending requests */
         wl_display_flush(g_wayland_data->display);
     }
+}
+
+/* Return Wayland display FD for blocking waits */
+static int wayland_get_event_fd(void) {
+    if (g_wayland_data && g_wayland_data->display) {
+        return wl_display_get_fd(g_wayland_data->display);
+    }
+    return -1;
 }
 
 /* Get native display handle */
@@ -789,6 +794,7 @@ const platform_ops_t platform_wayland_ops = {
     .poll_events = wayland_poll_events,
     .wait_events = wayland_wait_events,
     .flush_events = wayland_flush_events,
+    .get_event_fd = wayland_get_event_fd,
     .get_native_display = wayland_get_native_display,
     .get_native_window = wayland_get_native_window,
     .supports_transparency = wayland_supports_transparency,

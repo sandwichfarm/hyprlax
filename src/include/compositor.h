@@ -128,6 +128,9 @@ typedef struct compositor_ops {
     int (*poll_events)(compositor_event_t *event);
     int (*send_command)(const char *command, char *response, size_t response_size);
 
+    /* Optional: expose event socket FD for blocking waits */
+    int (*get_event_fd)(void);
+
     /* Compositor-specific features */
     bool (*supports_blur)(void);
     bool (*supports_transparency)(void);

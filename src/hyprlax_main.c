@@ -15,6 +15,8 @@
 #include <errno.h>
 #include <math.h>
 #include <poll.h>
+#include <sys/epoll.h>
+#include <sys/timerfd.h>
 #include "include/hyprlax.h"
 #include "include/hyprlax_internal.h"
 #include "include/log.h"
@@ -30,6 +32,171 @@
 
 /* Forward declarations */
 static int hyprlax_load_layer_textures(hyprlax_context_t *ctx);
+/* Forward declarations for handlers used before definition */
+void hyprlax_handle_workspace_change_2d(hyprlax_context_t *ctx,
+                                       int from_x, int from_y,
+                                       int to_x, int to_y);
+
+/* Linux event/timer helpers */
+static int create_timerfd_monotonic(void) {
+    int fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    return fd;
+}
+
+static void disarm_timerfd(int fd) {
+    if (fd < 0) return;
+    struct itimerspec its = {0};
+    timerfd_settime(fd, 0, &its, NULL);
+}
+
+static void arm_timerfd_ms(int fd, int initial_ms, int interval_ms) {
+    if (fd < 0) return;
+    struct itimerspec its;
+    its.it_value.tv_sec = initial_ms / 1000;
+    its.it_value.tv_nsec = (initial_ms % 1000) * 1000000L;
+    its.it_interval.tv_sec = interval_ms / 1000;
+    its.it_interval.tv_nsec = (interval_ms % 1000) * 1000000L;
+    timerfd_settime(fd, 0, &its, NULL);
+}
+
+static int epoll_add_fd(int epfd, int fd, uint32_t events) {
+    if (epfd < 0 || fd < 0) return -1;
+    struct epoll_event ev = {0};
+    ev.events = events;
+    ev.data.fd = fd;
+    return epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev);
+}
+
+static void hyprlax_setup_epoll(hyprlax_context_t *ctx) {
+    if (!ctx) return;
+    ctx->epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+    if (ctx->epoll_fd < 0) return;
+
+    /* Cache event fds */
+    ctx->platform_event_fd = (ctx->platform && ctx->platform->ops->get_event_fd)
+        ? ctx->platform->ops->get_event_fd() : -1;
+    ctx->compositor_event_fd = (ctx->compositor && ctx->compositor->ops->get_event_fd)
+        ? ctx->compositor->ops->get_event_fd() : -1;
+    ctx->ipc_event_fd = (ctx->ipc_ctx) ? ((ipc_context_t*)ctx->ipc_ctx)->socket_fd : -1;
+
+    /* Create timerfds */
+    ctx->frame_timer_fd = create_timerfd_monotonic();
+    ctx->debounce_timer_fd = create_timerfd_monotonic();
+    ctx->frame_timer_armed = false;
+    ctx->debounce_pending = false;
+    disarm_timerfd(ctx->frame_timer_fd);
+    disarm_timerfd(ctx->debounce_timer_fd);
+
+    /* Register sources */
+    epoll_add_fd(ctx->epoll_fd, ctx->platform_event_fd, EPOLLIN);
+    epoll_add_fd(ctx->epoll_fd, ctx->compositor_event_fd, EPOLLIN);
+    epoll_add_fd(ctx->epoll_fd, ctx->ipc_event_fd, EPOLLIN);
+    epoll_add_fd(ctx->epoll_fd, ctx->frame_timer_fd, EPOLLIN);
+    epoll_add_fd(ctx->epoll_fd, ctx->debounce_timer_fd, EPOLLIN);
+}
+
+static void hyprlax_arm_frame_timer(hyprlax_context_t *ctx, int fps) {
+    if (!ctx) return;
+    if (fps <= 0) fps = 60;
+    int interval_ms = (int)(1000.0 / (double)fps);
+    if (ctx->frame_timer_fd >= 0) {
+        arm_timerfd_ms(ctx->frame_timer_fd, interval_ms, interval_ms);
+        ctx->frame_timer_armed = true;
+    }
+}
+
+static void hyprlax_disarm_frame_timer(hyprlax_context_t *ctx) {
+    if (!ctx) return;
+    if (ctx->frame_timer_fd >= 0) {
+        disarm_timerfd(ctx->frame_timer_fd);
+    }
+    ctx->frame_timer_armed = false;
+}
+
+static void hyprlax_arm_debounce(hyprlax_context_t *ctx, int debounce_ms) {
+    if (!ctx) return;
+    if (ctx->debounce_timer_fd >= 0) {
+        arm_timerfd_ms(ctx->debounce_timer_fd, debounce_ms, 0);
+        ctx->debounce_pending = true;
+    }
+}
+
+static void hyprlax_clear_timerfd(int fd) {
+    if (fd < 0) return;
+    uint64_t expirations;
+    ssize_t r = read(fd, &expirations, sizeof(expirations));
+    (void)r;
+}
+
+/* Apply a compositor workspace event (shared by immediate and debounced paths) */
+static void process_workspace_event(hyprlax_context_t *ctx, const compositor_event_t *comp_event) {
+    if (!ctx || !comp_event) return;
+
+    /* Find target monitor */
+    monitor_instance_t *target_monitor = NULL;
+    if (ctx->monitors && comp_event->data.workspace.monitor_name[0] != '\0') {
+        target_monitor = monitor_list_find_by_name(ctx->monitors,
+                                                  comp_event->data.workspace.monitor_name);
+        if (ctx->config.debug && target_monitor) {
+            LOG_TRACE("Workspace event for monitor: %s",
+                      comp_event->data.workspace.monitor_name);
+        }
+    }
+    if (!target_monitor && ctx->monitors) {
+        target_monitor = monitor_list_get_primary(ctx->monitors);
+        if (!target_monitor) target_monitor = ctx->monitors->head;
+    }
+
+    /* 2D vs linear */
+    if (comp_event->data.workspace.from_x != 0 ||
+        comp_event->data.workspace.from_y != 0 ||
+        comp_event->data.workspace.to_x != 0 ||
+        comp_event->data.workspace.to_y != 0) {
+        if (ctx->config.debug) {
+            LOG_DEBUG("Debounced 2D Workspace: (%d,%d)->(%d,%d)",
+                      comp_event->data.workspace.from_x,
+                      comp_event->data.workspace.from_y,
+                      comp_event->data.workspace.to_x,
+                      comp_event->data.workspace.to_y);
+        }
+
+        if (target_monitor) {
+            workspace_model_t model = workspace_detect_model(
+                ctx->compositor ? ctx->compositor->type : COMPOSITOR_AUTO);
+            workspace_context_t new_context;
+            new_context.model = model;
+            if (model == WS_MODEL_PER_OUTPUT_NUMERIC) {
+                new_context.data.workspace_id = comp_event->data.workspace.to_y * 1000 +
+                                                comp_event->data.workspace.to_x;
+            } else if (model == WS_MODEL_SET_BASED) {
+                new_context.data.wayfire_set.set_id = comp_event->data.workspace.to_y;
+                new_context.data.wayfire_set.workspace_id = comp_event->data.workspace.to_x;
+            } else {
+                new_context.model = WS_MODEL_SET_BASED;
+                new_context.data.wayfire_set.set_id = comp_event->data.workspace.to_y;
+                new_context.data.wayfire_set.workspace_id = comp_event->data.workspace.to_x;
+            }
+            monitor_handle_workspace_context_change(ctx, target_monitor, &new_context);
+        } else {
+            hyprlax_handle_workspace_change_2d(ctx,
+                                               comp_event->data.workspace.from_x,
+                                               comp_event->data.workspace.from_y,
+                                               comp_event->data.workspace.to_x,
+                                               comp_event->data.workspace.to_y);
+        }
+    } else {
+        if (target_monitor) {
+            workspace_context_t new_context = {
+                .model = WS_MODEL_GLOBAL_NUMERIC,
+                .data.workspace_id = comp_event->data.workspace.to_workspace
+            };
+            monitor_handle_workspace_context_change(ctx, target_monitor, &new_context);
+        } else {
+            hyprlax_handle_workspace_change(ctx,
+                                            comp_event->data.workspace.to_workspace);
+        }
+    }
+}
 
 /* Create application context */
 hyprlax_context_t* hyprlax_create(void) {
@@ -53,6 +220,16 @@ hyprlax_context_t* hyprlax_create(void) {
     ctx->backends.renderer_backend = "auto";
     ctx->backends.platform_backend = "auto";
     ctx->backends.compositor_backend = "auto";
+
+    /* Event loop defaults */
+    ctx->epoll_fd = -1;
+    ctx->frame_timer_fd = -1;
+    ctx->debounce_timer_fd = -1;
+    ctx->platform_event_fd = -1;
+    ctx->compositor_event_fd = -1;
+    ctx->ipc_event_fd = -1;
+    ctx->frame_timer_armed = false;
+    ctx->debounce_pending = false;
 
     return ctx;
 }
@@ -636,6 +813,9 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
     /* Layer surface is already created in Step 4 (window creation) for Wayland */
     /* No need to create it again */
 
+    /* 8. Setup epoll/timerfd event loop */
+    hyprlax_setup_epoll(ctx);
+
     ctx->state = APP_STATE_RUNNING;
     ctx->running = true;
 
@@ -1158,126 +1338,10 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             int poll_result = ctx->compositor->ops->poll_events(&comp_event);
             if (poll_result == HYPRLAX_SUCCESS) {
                 if (comp_event.type == COMPOSITOR_EVENT_WORKSPACE_CHANGE) {
-                    needs_render = true;  /* Workspace change requires re-render */
                     diag_comp = true;
-                    /* For multi-monitor support, find the correct monitor */
-                    monitor_instance_t *target_monitor = NULL;
-
-                    if (ctx->monitors && comp_event.data.workspace.monitor_name[0] != '\0') {
-                        /* Use monitor name from event if available */
-                        target_monitor = monitor_list_find_by_name(ctx->monitors,
-                                                                  comp_event.data.workspace.monitor_name);
-                        if (ctx->config.debug && target_monitor) {
-                            LOG_TRACE("Workspace event for monitor: %s",
-                                   comp_event.data.workspace.monitor_name);
-                        }
-                    }
-
-                    /* Fall back to primary/first monitor if not found */
-                    if (!target_monitor && ctx->monitors) {
-                        target_monitor = monitor_list_get_primary(ctx->monitors);
-                        if (!target_monitor) {
-                            target_monitor = ctx->monitors->head;
-                        }
-                    }
-
-                    /* Check if this is a 2D workspace change */
-                    if (comp_event.data.workspace.from_x != 0 ||
-                        comp_event.data.workspace.from_y != 0 ||
-                        comp_event.data.workspace.to_x != 0 ||
-                        comp_event.data.workspace.to_y != 0) {
-                        /* 2D workspace change */
-                        if (ctx->config.debug) {
-                            LOG_DEBUG("Main loop: 2D Workspace event detected");
-                            LOG_DEBUG("  From: workspace %d at (%d,%d)",
-                                   comp_event.data.workspace.from_workspace,
-                                   comp_event.data.workspace.from_x,
-                                   comp_event.data.workspace.from_y);
-                            LOG_DEBUG("  To: workspace %d at (%d,%d)",
-                                   comp_event.data.workspace.to_workspace,
-                                   comp_event.data.workspace.to_x,
-                                   comp_event.data.workspace.to_y);
-                            LOG_DEBUG("  Monitor: %s", target_monitor ? target_monitor->name : "unknown");
-                        }
-
-                        if (target_monitor) {
-                            /* Update monitor's workspace context for 2D compositors */
-                            /* Detect the actual model based on compositor type */
-                            workspace_model_t model = workspace_detect_model(
-                                ctx->compositor ? ctx->compositor->type : COMPOSITOR_AUTO);
-
-                            if (ctx->config.debug) {
-                                LOG_DEBUG("  Detected model: %s", workspace_model_to_string(model));
-                            }
-
-                            workspace_context_t new_context;
-                            new_context.model = model;
-
-                            if (model == WS_MODEL_PER_OUTPUT_NUMERIC) {
-                                /* Niri: encode 2D position as linear workspace ID */
-                                /* workspace_id = y * MAX_COLUMNS + x */
-                                /* MAX_COLUMNS=1000 to prevent overlap between dimensions */
-                                new_context.data.workspace_id = comp_event.data.workspace.to_y * 1000 +
-                                                               comp_event.data.workspace.to_x;
-                                if (ctx->config.debug) {
-                                    LOG_DEBUG("  Niri: Encoded (%d,%d) as workspace ID %d",
-                                           comp_event.data.workspace.to_x,
-                                           comp_event.data.workspace.to_y,
-                                           new_context.data.workspace_id);
-                                }
-                            } else if (model == WS_MODEL_SET_BASED) {
-                                /* Wayfire: use set and workspace within set */
-                                new_context.data.wayfire_set.set_id = comp_event.data.workspace.to_y;
-                                new_context.data.wayfire_set.workspace_id = comp_event.data.workspace.to_x;
-                                if (ctx->config.debug) {
-                                    LOG_DEBUG("  Wayfire: Set %d, workspace %d",
-                                           new_context.data.wayfire_set.set_id,
-                                           new_context.data.wayfire_set.workspace_id);
-                                }
-                            } else {
-                                /* Fallback for unknown 2D models */
-                                new_context.model = WS_MODEL_SET_BASED;
-                                new_context.data.wayfire_set.set_id = comp_event.data.workspace.to_y;
-                                new_context.data.wayfire_set.workspace_id = comp_event.data.workspace.to_x;
-                                if (ctx->config.debug) {
-                                    LOG_DEBUG("  Fallback: Using SET_BASED model");
-                                }
-                            }
-
-                            if (ctx->config.debug) {
-                                LOG_DEBUG("  Calling monitor_handle_workspace_context_change");
-                            }
-                            monitor_handle_workspace_context_change(ctx, target_monitor, &new_context);
-                        } else {
-                            /* Fallback to deprecated global handler if no monitor found */
-                            hyprlax_handle_workspace_change_2d(ctx,
-                                                             comp_event.data.workspace.from_x,
-                                                             comp_event.data.workspace.from_y,
-                                                             comp_event.data.workspace.to_x,
-                                                             comp_event.data.workspace.to_y);
-                        }
-                    } else {
-                        /* Linear workspace change (Hyprland, Sway, etc.) */
-                        if (ctx->config.debug) {
-                            LOG_DEBUG("Workspace changed from %d to %d on %s",
-                                   comp_event.data.workspace.from_workspace,
-                                   comp_event.data.workspace.to_workspace,
-                                   target_monitor ? target_monitor->name : "unknown");
-                        }
-
-                        if (target_monitor) {
-                            /* Update monitor's workspace context */
-                            workspace_context_t new_context = {
-                                .model = WS_MODEL_GLOBAL_NUMERIC,
-                                .data.workspace_id = comp_event.data.workspace.to_workspace
-                            };
-                            monitor_handle_workspace_context_change(ctx, target_monitor, &new_context);
-                        } else {
-                            /* Fallback to global handler */
-                            hyprlax_handle_workspace_change(ctx,
-                                                          comp_event.data.workspace.to_workspace);
-                        }
-                    }
+                    /* Immediate reaction: apply event and request render */
+                    process_workspace_event(ctx, &comp_event);
+                    needs_render = true;
                 }
             }
         }
@@ -1376,42 +1440,63 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                 }
             }
         } else {
-            /* Calculate sleep time */
-            double sleep_time;
-            
-            /* If no animations are active, sleep longer to reduce CPU/GPU usage */
-            if (!animations_active && !needs_render) {
-                /* Use configured idle poll rate (default 2 Hz = 500ms) */
-                sleep_time = 1.0 / ctx->config.idle_poll_rate;
-                if (ctx->config.debug) {
-                    static int idle_count = 0;
-                    if (idle_count++ % 10 == 0) {  /* Log every 5 seconds */
-                        LOG_DEBUG("IDLE: animations=%d, needs_render=%d, sleeping %.3fs", 
-                                  animations_active, needs_render, sleep_time);
+            /* Event-driven wait using epoll/timerfd (fallback to idle sleep) */
+            const char *fc_env = getenv("HYPRLAX_FRAME_CALLBACK");
+            bool use_frame_callback = (fc_env && *fc_env);
+
+            /* Manage frame timer when not using frame callbacks */
+            if (!use_frame_callback) {
+                if (has_active_animations(ctx)) {
+                    if (!ctx->frame_timer_armed) {
+                        hyprlax_arm_frame_timer(ctx, ctx->config.target_fps);
+                    }
+                } else {
+                    /* No animations: disarm periodic timer */
+                    if (ctx->frame_timer_armed) {
+                        hyprlax_disarm_frame_timer(ctx);
+                    }
+                    /* If a frame is needed but time gate not yet reached, arm one-shot to wake */
+                    if (needs_render) {
+                        double target_wake_time = last_render_time + frame_time;
+                        double remain = target_wake_time - current_time;
+                        int remain_ms = (int)(remain * 1000.0);
+                        if (remain_ms < 1) remain_ms = 1;
+                        arm_timerfd_ms(ctx->frame_timer_fd, remain_ms, 0); /* one-shot */
                     }
                 }
-            } else {
-                /* Calculate normal frame timing */
-                if (use_fc && *use_fc) {
-                    /* With frame callbacks, avoid long sleeps and let Wayland pacing drive us */
-                    sleep_time = 0.001; /* minimal */
-                } else {
-                    double target_wake_time = last_render_time + frame_time;
-                    sleep_time = target_wake_time - current_time;
-                    /* Don't sleep if we need to render soon */
-                    if (sleep_time < 0 || sleep_time < 0.001) sleep_time = 0.001; /* Min 1ms */
-                }
             }
-            
-            if (sleep_time > 0) {
+
+            if (ctx->epoll_fd >= 0) {
+                struct epoll_event evlist[6];
+                int n = epoll_wait(ctx->epoll_fd, evlist, 6, -1);
+                if (n > 0) {
+                    for (int i = 0; i < n; i++) {
+                        int fd = evlist[i].data.fd;
+                        if (fd == ctx->debounce_timer_fd) {
+                            hyprlax_clear_timerfd(fd);
+                            if (ctx->debounce_pending) {
+                                ctx->debounce_pending = false;
+                                process_workspace_event(ctx, &ctx->pending_event);
+                                needs_render = true; /* Start animation */
+                            }
+                        } else if (fd == ctx->frame_timer_fd) {
+                            hyprlax_clear_timerfd(fd);
+                            needs_render = true; /* Time to render next frame */
+                        } else {
+                            /* Wayland/compositor/IPC fds wake main loop; handled next iteration */
+                        }
+                    }
+                }
+                /* Loop to process events immediately in next iteration */
+                continue;
+            } else {
+                /* Fallback: gentle idle sleep */
+                double sleep_time = 1.0 / ctx->config.idle_poll_rate;
                 struct timespec ts;
                 ts.tv_sec = (time_t)(sleep_time);
                 ts.tv_nsec = (long)((sleep_time - (time_t)sleep_time) * 1e9);
-                if (ts.tv_nsec > 999999999) {
-                    ts.tv_nsec = 999999999;
-                } else if (ts.tv_nsec < 0) {
-                    ts.tv_nsec = 0;
-                }
+                if (ts.tv_nsec > 999999999) ts.tv_nsec = 999999999;
+                if (ts.tv_nsec < 0) ts.tv_nsec = 0;
                 nanosleep(&ts, NULL);
             }
         }
@@ -1439,6 +1524,11 @@ void hyprlax_shutdown(hyprlax_context_t *ctx) {
 
     ctx->state = APP_STATE_SHUTTING_DOWN;
     ctx->running = false;
+
+    /* Close event loop FDs first */
+    if (ctx->frame_timer_fd >= 0) { close(ctx->frame_timer_fd); ctx->frame_timer_fd = -1; }
+    if (ctx->debounce_timer_fd >= 0) { close(ctx->debounce_timer_fd); ctx->debounce_timer_fd = -1; }
+    if (ctx->epoll_fd >= 0) { close(ctx->epoll_fd); ctx->epoll_fd = -1; }
 
     /* Destroy layers */
     if (ctx->layers) {

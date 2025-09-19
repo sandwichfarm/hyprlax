@@ -70,6 +70,17 @@ typedef struct hyprlax_context {
     /* IPC context (legacy, will be removed) */
     void *ipc_ctx;
 
+    /* Event-driven loop (Linux) */
+    int epoll_fd;              /* epoll instance for unified waits */
+    int frame_timer_fd;        /* timerfd for frame pacing */
+    int debounce_timer_fd;     /* timerfd for coalescing compositor bursts */
+    int platform_event_fd;     /* cached platform event fd */
+    int compositor_event_fd;   /* cached compositor event fd */
+    int ipc_event_fd;          /* IPC server socket fd */
+    bool frame_timer_armed;    /* frame timer currently armed */
+    bool debounce_pending;     /* debounce timer armed */
+    compositor_event_t pending_event; /* last compositor event to apply after debounce */
+
 } hyprlax_context_t;
 
 /* Main application functions */

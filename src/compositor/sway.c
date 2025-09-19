@@ -643,6 +643,12 @@ static int sway_set_wallpaper_offset(float x, float y) {
     return HYPRLAX_SUCCESS;
 }
 
+/* Expose Sway event socket FD for blocking waits */
+static int sway_get_event_fd(void) {
+    if (!g_sway_data || !g_sway_data->connected) return -1;
+    return g_sway_data->event_fd;
+}
+
 /* IPC helper functions */
 static int sway_send_ipc_message(int fd, uint32_t type, const char *payload) {
     size_t payload_len = payload ? strlen(payload) : 0;
@@ -761,6 +767,7 @@ const compositor_ops_t compositor_sway_ops = {
     .disconnect_ipc = sway_disconnect_ipc,
     .poll_events = sway_poll_events,
     .send_command = sway_send_command,
+    .get_event_fd = sway_get_event_fd,
     .supports_blur = sway_supports_blur,
     .supports_transparency = sway_supports_transparency,
     .supports_animations = sway_supports_animations,

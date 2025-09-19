@@ -289,6 +289,13 @@ tests/test_config_validation: tests/test_config_validation.c
 tests/test_hyprland_events: tests/test_hyprland_events.c src/compositor/hyprland.c src/compositor/compositor.c src/core/log.c
 	$(CC) $(TEST_CFLAGS) -DUNIT_TEST -Isrc -Isrc/include $^ $(TEST_LIBS) -o $@
 
+# Ops smoke test: link against compositor adapters to validate get_event_fd presence
+tests/test_compositor_ops: tests/test_compositor_ops.c \
+    src/compositor/hyprland.c src/compositor/sway.c src/compositor/wayfire.c \
+    src/compositor/niri.c src/compositor/river.c src/compositor/generic_wayland.c \
+    src/compositor/compositor.c src/platform/wayland.c src/core/log.c
+	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) $(PKG_LIBS) -o $@
+
 # Run all tests
 test: $(ALL_TEST_TARGETS)
 	@echo "=== Running Full Test Suite ==="

@@ -672,6 +672,12 @@ static int niri_set_wallpaper_offset(float x, float y) {
     return HYPRLAX_SUCCESS;
 }
 
+/* Expose Niri event stream FD for blocking waits */
+static int niri_get_event_fd(void) {
+    if (!g_niri_data || !g_niri_data->connected || !g_niri_data->event_stream) return -1;
+    return fileno(g_niri_data->event_stream);
+}
+
 /* Niri compositor operations */
 const compositor_ops_t compositor_niri_ops = {
     .init = niri_init,
@@ -690,6 +696,7 @@ const compositor_ops_t compositor_niri_ops = {
     .disconnect_ipc = niri_disconnect_ipc,
     .poll_events = niri_poll_events,
     .send_command = niri_send_command,
+    .get_event_fd = niri_get_event_fd,
     .supports_blur = niri_supports_blur,
     .supports_transparency = niri_supports_transparency,
     .supports_animations = niri_supports_animations,
