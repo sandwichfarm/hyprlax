@@ -265,12 +265,12 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
     }
 
     /* Check if this is a 2D workspace model */
-    bool is_2d = (new_context->model == WS_MODEL_SET_BASED || 
+    bool is_2d = (new_context->model == WS_MODEL_SET_BASED ||
                   new_context->model == WS_MODEL_PER_OUTPUT_NUMERIC);
-    
+
     workspace_offset_t offset_2d = {0.0f, 0.0f};
     float offset_1d = 0.0f;
-    
+
     if (is_2d) {
         /* Calculate 2D offset for 2D models */
         offset_2d = workspace_calculate_offset_2d(&monitor->current_context,
@@ -305,21 +305,21 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
     if ((offset_2d.x != 0.0f || offset_2d.y != 0.0f) && ctx) {
         /* Calculate absolute workspace position */
         float absolute_target_x, absolute_target_y;
-        
+
         if (is_2d) {
             /* For 2D models, accumulate the offsets */
             /* If animating, accumulate from the target position, not current */
             float base_x = monitor->animating ? monitor->animation_target_x : monitor->parallax_offset_x;
             float base_y = monitor->animating ? monitor->animation_target_y : monitor->parallax_offset_y;
-            
+
             if (ctx && ctx->config.debug) {
                 fprintf(stderr, "[DEBUG]   Base position: X=%.1f, Y=%.1f (animating=%d)\n",
                         base_x, base_y, monitor->animating);
             }
-            
+
             absolute_target_x = base_x + offset_2d.x;
             absolute_target_y = base_y + offset_2d.y;
-            
+
             /* Update the accumulated position */
             monitor->parallax_offset_x = absolute_target_x;
             monitor->parallax_offset_y = absolute_target_y;
@@ -346,14 +346,14 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
                 fprintf(stderr, "[DEBUG]   Updating layers with target: X=%.1f, Y=%.1f\n",
                         absolute_target_x, absolute_target_y);
             }
-            
+
             parallax_layer_t *layer = ctx->layers;
             int layer_count = 0;
 
             while (layer) {
                 /* Each layer moves at its own speed based on shift_multiplier */
                 float layer_target_x = absolute_target_x * layer->shift_multiplier;
-                
+
                 /* Y shift is proportional to maintain aspect ratio */
                 /* Until TOML config supports separate X/Y values, scale Y by aspect ratio */
                 float aspect_ratio = 1.0f;
@@ -361,10 +361,10 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
                     aspect_ratio = (float)layer->texture_height / (float)layer->texture_width;
                 }
                 float layer_target_y = absolute_target_y * layer->shift_multiplier * aspect_ratio;
-                
+
                 if (ctx && ctx->config.debug) {
                     fprintf(stderr, "[DEBUG]     Layer %d: multiplier=%.2f, aspect=%.2f, target=(%.1f, %.1f)\n",
-                            layer_count++, layer->shift_multiplier, aspect_ratio, 
+                            layer_count++, layer->shift_multiplier, aspect_ratio,
                             layer_target_x, layer_target_y);
                 }
 

@@ -1088,19 +1088,19 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                             /* Detect the actual model based on compositor type */
                             workspace_model_t model = workspace_detect_model(
                                 ctx->compositor ? ctx->compositor->type : COMPOSITOR_AUTO);
-                            
+
                             if (ctx->config.debug) {
                                 LOG_DEBUG("  Detected model: %s", workspace_model_to_string(model));
                             }
-                            
+
                             workspace_context_t new_context;
                             new_context.model = model;
-                            
+
                             if (model == WS_MODEL_PER_OUTPUT_NUMERIC) {
                                 /* Niri: encode 2D position as linear workspace ID */
                                 /* workspace_id = y * MAX_COLUMNS + x */
                                 /* MAX_COLUMNS=1000 to prevent overlap between dimensions */
-                                new_context.data.workspace_id = comp_event.data.workspace.to_y * 1000 + 
+                                new_context.data.workspace_id = comp_event.data.workspace.to_y * 1000 +
                                                                comp_event.data.workspace.to_x;
                                 if (ctx->config.debug) {
                                     LOG_DEBUG("  Niri: Encoded (%d,%d) as workspace ID %d",
@@ -1126,7 +1126,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                                     LOG_DEBUG("  Fallback: Using SET_BASED model");
                                 }
                             }
-                            
+
                             if (ctx->config.debug) {
                                 LOG_DEBUG("  Calling monitor_handle_workspace_context_change");
                             }

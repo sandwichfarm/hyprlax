@@ -38,15 +38,15 @@ typedef struct {
     FILE *event_stream;   /* Event stream from niri msg */
     pid_t event_pid;      /* PID of niri msg process */
     bool connected;
-    
+
     /* Window tracking for column detection */
     niri_window_info_t *windows;
     int window_count;
     int window_capacity;
-    
+
     /* Debug tracking */
     bool debug_enabled;
-    
+
     /* JSON parsing buffer */
     char parse_buffer[8192];
 } niri_data_t;
@@ -61,7 +61,7 @@ static void update_window_info(int id, int column, int row);
 /* Update window info cache */
 static void update_window_info(int id, int column, int row) {
     if (!g_niri_data) return;
-    
+
     /* Find existing window or add new one */
     for (int i = 0; i < g_niri_data->window_count; i++) {
         if (g_niri_data->windows[i].id == id) {
@@ -70,12 +70,12 @@ static void update_window_info(int id, int column, int row) {
             return;
         }
     }
-    
+
     /* Add new window */
     if (g_niri_data->window_count >= g_niri_data->window_capacity) {
         int new_capacity = g_niri_data->window_capacity * 2;
         if (new_capacity < 32) new_capacity = 32;
-        niri_window_info_t *new_windows = realloc(g_niri_data->windows, 
+        niri_window_info_t *new_windows = realloc(g_niri_data->windows,
                                                   new_capacity * sizeof(niri_window_info_t));
         if (new_windows) {
             g_niri_data->windows = new_windows;
@@ -84,7 +84,7 @@ static void update_window_info(int id, int column, int row) {
             return;  /* Failed to grow */
         }
     }
-    
+
     g_niri_data->windows[g_niri_data->window_count].id = id;
     g_niri_data->windows[g_niri_data->window_count].column = column;
     g_niri_data->windows[g_niri_data->window_count].row = row;
@@ -127,12 +127,12 @@ static void niri_destroy(void) {
     if (g_niri_data->event_stream) {
         fclose(g_niri_data->event_stream);
     }
-    
+
     if (g_niri_data->event_pid > 0) {
         kill(g_niri_data->event_pid, SIGTERM);
         waitpid(g_niri_data->event_pid, NULL, 0);
     }
-    
+
     if (g_niri_data->windows) {
         free(g_niri_data->windows);
     }
@@ -165,11 +165,11 @@ static bool niri_detect(void) {
     if (!pipe) {
         return false;
     }
-    
+
     char response[256];
     bool has_output = (fgets(response, sizeof(response), pipe) != NULL);
     int status = pclose(pipe);
-    
+
     return (status == 0 && has_output);
 }
 
@@ -209,17 +209,17 @@ static int niri_get_current_workspace(void) {
     if (niri_send_command("msg --json focused-window", response, sizeof(response)) != 0) {
         return 0;  /* Default if query fails */
     }
-    
+
     int workspace_id = 1;
     int column = 0;
-    
+
     /* Parse workspace ID */
     char *ws_str = strstr(response, "\"workspace_id\":");
     if (ws_str) {
         ws_str += 15;
         workspace_id = atoi(ws_str);
     }
-    
+
     /* Parse column position */
     char *pos_str = strstr(response, "\"pos_in_scrolling_layout\":");
     if (pos_str) {
@@ -231,7 +231,7 @@ static int niri_get_current_workspace(void) {
             }
         }
     }
-    
+
     /* Return encoded position for 2D tracking */
     return workspace_id * 1000 + column;
 }
@@ -263,7 +263,7 @@ static int niri_list_workspaces(workspace_info_t **workspaces, int *count) {
     /* Query current workspace to determine active one */
     int current_encoded = niri_get_current_workspace();
     int current_ws = current_encoded / 1000;
-    
+
     for (int i = 0; i < *count; i++) {
         (*workspaces)[i].id = i;
         snprintf((*workspaces)[i].name, sizeof((*workspaces)[i].name),
@@ -325,39 +325,39 @@ static int niri_connect_ipc(const char *socket_path) {
     if (pipe(pipefd) == -1) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
-    
+
     pid_t pid = fork();
     if (pid == -1) {
         close(pipefd[0]);
         close(pipefd[1]);
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
-    
+
     if (pid == 0) {
         /* Child process */
         close(pipefd[0]); /* Close read end */
         dup2(pipefd[1], STDOUT_FILENO);
         close(pipefd[1]);
-        
+
         /* Redirect stderr to /dev/null to suppress "Started reading events" message */
         int devnull = open("/dev/null", O_WRONLY);
         if (devnull >= 0) {
             dup2(devnull, STDERR_FILENO);
             close(devnull);
         }
-        
+
         execlp("niri", "niri", "msg", "--json", "event-stream", NULL);
         /* If exec fails */
         _exit(1);
     }
-    
+
     /* Parent process */
     close(pipefd[1]); /* Close write end */
-    
+
     /* Make the read end non-blocking */
     int flags = fcntl(pipefd[0], F_GETFL, 0);
     fcntl(pipefd[0], F_SETFL, flags | O_NONBLOCK);
-    
+
     g_niri_data->event_stream = fdopen(pipefd[0], "r");
     if (!g_niri_data->event_stream) {
         close(pipefd[0]);
@@ -365,7 +365,7 @@ static int niri_connect_ipc(const char *socket_path) {
         waitpid(pid, NULL, 0);
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
-    
+
     g_niri_data->event_pid = pid;
     g_niri_data->connected = true;
 
@@ -384,7 +384,7 @@ static void niri_disconnect_ipc(void) {
         fclose(g_niri_data->event_stream);
         g_niri_data->event_stream = NULL;
     }
-    
+
     if (g_niri_data->event_pid > 0) {
         kill(g_niri_data->event_pid, SIGTERM);
         waitpid(g_niri_data->event_pid, NULL, 0);
@@ -404,7 +404,7 @@ static void parse_workspace_position(int workspace_id, int *x, int *y) {
     const int columns = 3;
     *x = workspace_id % columns;
     *y = workspace_id / columns;
-    
+
     if (g_niri_data && g_niri_data->debug_enabled) {
         fprintf(stderr, "[DEBUG] parse_workspace_position: ID %d -> (%d, %d)\n",
                 workspace_id, *x, *y);
@@ -434,7 +434,7 @@ static int niri_poll_events(compositor_event_t *event) {
     }
 
     /* Read a line of JSON */
-    if (!fgets(g_niri_data->parse_buffer, sizeof(g_niri_data->parse_buffer), 
+    if (!fgets(g_niri_data->parse_buffer, sizeof(g_niri_data->parse_buffer),
                g_niri_data->event_stream)) {
         return HYPRLAX_ERROR_NO_DATA;
     }
@@ -448,12 +448,12 @@ static int niri_poll_events(compositor_event_t *event) {
         if (id_str) {
             id_str += 5; /* Skip "id": */
             while (*id_str == ' ') id_str++;
-            
+
             int new_window_id = -1;
             if (strncmp(id_str, "null", 4) != 0) {
                 new_window_id = atoi(id_str);
             }
-            
+
             if (new_window_id >= 0) {
                 /* Get column and row for this window */
                 int column = -1, row = -1;
@@ -464,27 +464,27 @@ static int niri_poll_events(compositor_event_t *event) {
                         break;
                     }
                 }
-                
+
                 if (column >= 0 && row >= 0) {
                     /* Report the position where focus moved to */
                     /* The monitor context will handle "from" state */
                     event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
-                    
+
                     /* Only report the "to" position - let monitor track "from" */
                     event->data.workspace.to_workspace = row * 1000 + column;
                     event->data.workspace.from_workspace = -1; /* Indicate unknown */
-                    
+
                     /* Provide 2D coordinates */
                     event->data.workspace.to_x = column;
                     event->data.workspace.to_y = row;
                     event->data.workspace.from_x = -1;  /* Unknown, let monitor handle */
                     event->data.workspace.from_y = -1;  /* Unknown, let monitor handle */
-                    
+
                     if (g_niri_data->debug_enabled) {
                         fprintf(stderr, "[DEBUG] Niri: Focus moved to window %d at column %d, row %d\n",
                                 new_window_id, column, row);
                     }
-                    
+
                     return HYPRLAX_SUCCESS;
                 }
             }
@@ -494,24 +494,24 @@ static int niri_poll_events(compositor_event_t *event) {
     else if (strstr(g_niri_data->parse_buffer, "\"WindowsChanged\"")) {
         /* Clear window cache */
         g_niri_data->window_count = 0;
-        
+
         /* Parse all windows */
         /* Format: {"WindowsChanged":{"windows":[{...}]}} */
         char *windows_start = strstr(g_niri_data->parse_buffer, "\"windows\":[");
         if (windows_start) {
             windows_start += 11; /* Skip "windows":[ */
-            
+
             /* Parse each window */
             char *window_ptr = windows_start;
             while ((window_ptr = strstr(window_ptr, "\"id\":"))) {
                 window_ptr += 5;
                 int window_id = atoi(window_ptr);
-                
+
                 /* Find pos_in_scrolling_layout for this window */
                 char *layout_str = strstr(window_ptr, "\"pos_in_scrolling_layout\":");
                 if (layout_str && layout_str < strstr(window_ptr, "},")) {
                     layout_str += 26; /* Skip to value */
-                    
+
                     if (strncmp(layout_str, "null", 4) != 0) {
                         /* Parse [column,row] */
                         char *bracket = strchr(layout_str, '[');
@@ -519,9 +519,9 @@ static int niri_poll_events(compositor_event_t *event) {
                             int column = atoi(bracket + 1);
                             char *comma = strchr(bracket, ',');
                             int row = comma ? atoi(comma + 1) : 1;
-                            
+
                             update_window_info(window_id, column, row);
-                            
+
                             if (g_niri_data->debug_enabled) {
                                 fprintf(stderr, "[DEBUG] Niri: Window %d at column %d, row %d\n",
                                         window_id, column, row);
@@ -529,7 +529,7 @@ static int niri_poll_events(compositor_event_t *event) {
                         }
                     }
                 }
-                
+
                 /* Move to next window */
                 window_ptr = strstr(window_ptr, "},{");
                 if (!window_ptr) break;
@@ -543,21 +543,21 @@ static int niri_poll_events(compositor_event_t *event) {
         if (id_str) {
             id_str += 5;
             int window_id = atoi(id_str);
-            
+
             /* Find pos_in_scrolling_layout */
             char *layout_str = strstr(g_niri_data->parse_buffer, "\"pos_in_scrolling_layout\":");
             if (layout_str) {
                 layout_str += 26;
-                
+
                 if (strncmp(layout_str, "null", 4) != 0) {
                     char *bracket = strchr(layout_str, '[');
                     if (bracket) {
                         int column = atoi(bracket + 1);
                         char *comma = strchr(bracket, ',');
                         int row = comma ? atoi(comma + 1) : 1;
-                        
+
                         update_window_info(window_id, column, row);
-                        
+
                         if (g_niri_data->debug_enabled) {
                             fprintf(stderr, "[DEBUG] Niri: Window %d updated at column %d, row %d\n",
                                     window_id, column, row);
@@ -573,33 +573,33 @@ static int niri_poll_events(compositor_event_t *event) {
         if (id_str) {
             id_str += 5;
             int new_workspace_id = atoi(id_str);
-            
+
             /* Report workspace change - let monitor handle "from" state */
             event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
-            
+
             /* We don't know the column, query current state */
             int current_encoded = niri_get_current_workspace();
             int column = current_encoded % 1000;
-            
+
             event->data.workspace.to_workspace = new_workspace_id * 1000 + column;
             event->data.workspace.from_workspace = -1; /* Unknown, let monitor handle */
-            
+
             /* Use Y coordinate for vertical changes */
                 /* Provide 2D coordinates */
                 event->data.workspace.to_x = column;
                 event->data.workspace.to_y = new_workspace_id;
                 event->data.workspace.from_x = -1;  /* Unknown, let monitor handle */
                 event->data.workspace.from_y = -1;  /* Unknown, let monitor handle */
-                
+
                 if (g_niri_data->debug_enabled) {
-                    fprintf(stderr, "[DEBUG] Niri: Workspace activated %d at column %d\n", 
+                    fprintf(stderr, "[DEBUG] Niri: Workspace activated %d at column %d\n",
                             new_workspace_id, column);
                 }
-                
+
                 return HYPRLAX_SUCCESS;
         }
     }
-    
+
     return HYPRLAX_ERROR_NO_DATA;
 }
 /* Send IPC command via niri msg */
