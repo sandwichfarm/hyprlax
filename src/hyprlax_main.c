@@ -1098,8 +1098,9 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                             
                             if (model == WS_MODEL_PER_OUTPUT_NUMERIC) {
                                 /* Niri: encode 2D position as linear workspace ID */
-                                /* workspace_id = y * columns + x */
-                                new_context.data.workspace_id = comp_event.data.workspace.to_y * 3 + 
+                                /* workspace_id = y * MAX_COLUMNS + x */
+                                /* MAX_COLUMNS=1000 to prevent overlap between dimensions */
+                                new_context.data.workspace_id = comp_event.data.workspace.to_y * 1000 + 
                                                                comp_event.data.workspace.to_x;
                                 if (ctx->config.debug) {
                                     LOG_DEBUG("  Niri: Encoded (%d,%d) as workspace ID %d",

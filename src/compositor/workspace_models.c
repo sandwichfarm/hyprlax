@@ -326,14 +326,17 @@ workspace_offset_t workspace_calculate_offset_2d(const workspace_context_t *from
         case WS_MODEL_PER_OUTPUT_NUMERIC:
             /* Niri: 2D scrollable workspaces */
             /* Decode 2D position from workspace_id */
-            /* Using encoding: workspace_id = y * columns + x */
-            int columns = 3; /* Default column count */
+            /* Using encoding: workspace_id = y * MAX_COLUMNS + x */
+            /* MAX_COLUMNS must be larger than any possible column count */
+            int columns = 1000; /* Use large value to prevent overlap */
             int from_x = from->data.workspace_id % columns;
             int from_y = from->data.workspace_id / columns;
             int to_x = to->data.workspace_id % columns;
             int to_y = to->data.workspace_id / columns;
             
             offset.x = (to_x - from_x) * shift_pixels;
+            /* Y shift is proportional to maintain aspect ratio */
+            /* This is temporary until TOML config supports separate X/Y values */
             offset.y = (to_y - from_y) * shift_pixels;
             
             if (getenv("HYPRLAX_DEBUG")) {

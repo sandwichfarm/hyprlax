@@ -342,11 +342,19 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
             while (layer) {
                 /* Each layer moves at its own speed based on shift_multiplier */
                 float layer_target_x = absolute_target_x * layer->shift_multiplier;
-                float layer_target_y = absolute_target_y * layer->shift_multiplier;
+                
+                /* Y shift is proportional to maintain aspect ratio */
+                /* Until TOML config supports separate X/Y values, scale Y by aspect ratio */
+                float aspect_ratio = 1.0f;
+                if (layer->texture_width > 0 && layer->texture_height > 0) {
+                    aspect_ratio = (float)layer->texture_height / (float)layer->texture_width;
+                }
+                float layer_target_y = absolute_target_y * layer->shift_multiplier * aspect_ratio;
                 
                 if (getenv("HYPRLAX_DEBUG")) {
-                    fprintf(stderr, "[DEBUG]     Layer %d: multiplier=%.2f, target=(%.1f, %.1f)\n",
-                            layer_count++, layer->shift_multiplier, layer_target_x, layer_target_y);
+                    fprintf(stderr, "[DEBUG]     Layer %d: multiplier=%.2f, aspect=%.2f, target=(%.1f, %.1f)\n",
+                            layer_count++, layer->shift_multiplier, aspect_ratio, 
+                            layer_target_x, layer_target_y);
                 }
 
                 layer_update_offset(layer, layer_target_x, layer_target_y,
