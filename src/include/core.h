@@ -142,6 +142,8 @@ typedef struct {
     float cursor_sensitivity_y;
     float cursor_deadzone_px;         /* deadzone in screen pixels */
     float cursor_ema_alpha;           /* 0..1 smoothing factor */
+    double cursor_anim_duration;      /* seconds; 0 disables easing */
+    easing_type_t cursor_easing;      /* easing for cursor animation */
 } config_t;
 
 /* Easing functions - pure math, no side effects */

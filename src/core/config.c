@@ -45,6 +45,8 @@ void config_set_defaults(config_t *cfg) {
     cfg->cursor_sensitivity_y = 1.0f;
     cfg->cursor_deadzone_px = 4.0f;
     cfg->cursor_ema_alpha = 0.25f;
+    cfg->cursor_anim_duration = 0.0; /* disabled by default (low-latency) */
+    cfg->cursor_easing = EASE_CUBIC_OUT;
 }
 
 /* Parse command-line arguments */

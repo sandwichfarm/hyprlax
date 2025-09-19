@@ -225,6 +225,24 @@ static bool process_cursor_event(hyprlax_context_t *ctx) {
     float prev_y = ctx->cursor_norm_y;
     cursor_apply_sample(ctx, nx, ny);
 
+    /* Start easing animations toward the new smoothed target, if enabled */
+    if (ctx->config.cursor_anim_duration > 0.0) {
+        float ex = ctx->cursor_eased_x;
+        float ey = ctx->cursor_eased_y;
+        /* When not yet initialized, start from current smoothed value */
+        if (!animation_is_active(&ctx->cursor_anim_x)) ex = ctx->cursor_norm_x;
+        if (!animation_is_active(&ctx->cursor_anim_y)) ey = ctx->cursor_norm_y;
+        /* Only start if change is meaningful */
+        if (fabsf(ctx->cursor_norm_x - ex) > 0.0005f) {
+            animation_start(&ctx->cursor_anim_x, ex, ctx->cursor_norm_x,
+                            ctx->config.cursor_anim_duration, ctx->config.cursor_easing);
+        }
+        if (fabsf(ctx->cursor_norm_y - ey) > 0.0005f) {
+            animation_start(&ctx->cursor_anim_y, ey, ctx->cursor_norm_y,
+                            ctx->config.cursor_anim_duration, ctx->config.cursor_easing);
+        }
+    }
+
     float dxn = fabsf(ctx->cursor_norm_x - prev_x);
     float dyn = fabsf(ctx->cursor_norm_y - prev_y);
     return (dxn > 0.0015f || dyn > 0.0015f);
@@ -234,13 +252,8 @@ static bool process_cursor_event(hyprlax_context_t *ctx) {
 static void process_workspace_event(hyprlax_context_t *ctx, const compositor_event_t *comp_event) {
     if (!ctx || !comp_event) return;
 
-    /* In cursor-only mode, ignore workspace-driven parallax changes */
-    if (ctx->config.parallax_mode == PARALLAX_CURSOR) {
-        if (ctx->config.debug) {
-            LOG_TRACE("Ignoring workspace event in cursor-only parallax mode");
-        }
-        return;
-    }
+    /* In cursor-only mode, we still process workspace events for monitor state,
+       but we won't drive parallax offsets from them later in blending. */
 
     /* Find target monitor */
     monitor_instance_t *target_monitor = NULL;
@@ -1322,8 +1335,8 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
         }
 
         /* Cursor-driven offsets (normalized -> pixels) */
-        float cursor_x_px = ctx->cursor_norm_x * ctx->config.parallax_max_offset_x * layer->shift_multiplier_x;
-        float cursor_y_px = ctx->cursor_norm_y * ctx->config.parallax_max_offset_y * layer->shift_multiplier_y;
+        float cursor_x_px = ctx->cursor_eased_x * ctx->config.parallax_max_offset_x * layer->shift_multiplier_x;
+        float cursor_y_px = ctx->cursor_eased_y * ctx->config.parallax_max_offset_y * layer->shift_multiplier_y;
 
         if (ctx->config.invert_cursor_x ^ layer->invert_cursor_x) {
             cursor_x_px = -cursor_x_px;
@@ -1446,6 +1459,22 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
 
     /* Monitor count debug - commented out for performance
     LOG_TRACE("Rendering frame to %d monitor(s)", ctx->monitors->count); */
+
+    /* Update cursor easing state (if enabled) once per frame */
+    double now_time = get_time();
+    if (ctx->config.cursor_anim_duration > 0.0) {
+        if (animation_is_active(&ctx->cursor_anim_x))
+            ctx->cursor_eased_x = animation_evaluate(&ctx->cursor_anim_x, now_time);
+        else
+            ctx->cursor_eased_x = ctx->cursor_norm_x;
+        if (animation_is_active(&ctx->cursor_anim_y))
+            ctx->cursor_eased_y = animation_evaluate(&ctx->cursor_anim_y, now_time);
+        else
+            ctx->cursor_eased_y = ctx->cursor_norm_y;
+    } else {
+        ctx->cursor_eased_x = ctx->cursor_norm_x;
+        ctx->cursor_eased_y = ctx->cursor_norm_y;
+    }
 
     /* Render to each monitor */
     monitor_instance_t *monitor = ctx->monitors->head;

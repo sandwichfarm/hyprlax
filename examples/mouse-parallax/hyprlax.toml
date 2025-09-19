@@ -23,19 +23,20 @@ y = false
 # Clamp vertical offset to 0 to prevent the flower bottom from rising above the canvas bottom
 [global.parallax.max_offset_px]
 x = 220
-y = 80                   # allow subtle background vertical motion
+y = 80           
 
 [global.input.cursor]
 normalize_to = "monitor"
 sensitivity_x = 1.0
-sensitivity_y = 0.25       # small vertical influence overall
+sensitivity_y = 0.50
 deadzone_px = 3
 ema_alpha = 0.25
+animation_duration = 2.0
+easing = "expo"
 
 # Layers are rendered back -> front
 [[global.layers]]
 path = "bg.jpg"  # blurred background image
-# Far layer: small movement, slight vertical motion for bokeh feel
 shift_multiplier = { x = 0.20, y = 0.10 }
 opacity = 0.3
 blur = 2.0                  # strong bokeh-like blur

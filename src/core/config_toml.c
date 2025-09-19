@@ -144,6 +144,13 @@ static void parse_global_table(toml_table_t *global, config_t *cfg)
             if (d.ok) cfg->cursor_deadzone_px = (float)d.u.d;
             d = toml_double_in(cursor, "ema_alpha");
             if (d.ok) cfg->cursor_ema_alpha = (float)d.u.d;
+            d = toml_double_in(cursor, "animation_duration");
+            if (d.ok) cfg->cursor_anim_duration = d.u.d;
+            d = toml_string_in(cursor, "easing");
+            if (d.ok) {
+                cfg->cursor_easing = easing_from_string(d.u.s);
+                free(d.u.s);
+            }
         }
     }
 }

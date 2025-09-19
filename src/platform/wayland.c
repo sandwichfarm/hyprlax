@@ -86,10 +86,53 @@ static const struct wl_callback_listener frame_listener = {
     .done = frame_done,
 };
 
+/* Forward for monitor surface creation */
+int wayland_create_monitor_surface(monitor_instance_t *monitor);
+
 /* Store context for monitor detection - set by platform init */
 void wayland_set_context(hyprlax_context_t *ctx) {
-    if (g_wayland_data) {
-        g_wayland_data->ctx = ctx;
+    if (!g_wayland_data) return;
+    g_wayland_data->ctx = ctx;
+
+    /* If outputs were discovered before context was set (common when we
+       roundtrip during connect), realize them now so rendering can start. */
+    if (g_wayland_data->ctx && g_wayland_data->ctx->monitors) {
+        output_info_t *info = g_wayland_data->outputs;
+        while (info) {
+            /* Skip if already added */
+            monitor_instance_t *mon = monitor_list_find_by_output(g_wayland_data->ctx->monitors, info->output);
+            if (!mon && info->width > 0 && info->height > 0) {
+                mon = monitor_instance_create(info->name);
+                if (mon) {
+                    mon->wl_output = info->output;
+                    monitor_update_geometry(mon, info->width, info->height,
+                                            info->scale, info->refresh_rate);
+                    monitor_set_global_position(mon, info->global_x, info->global_y);
+
+                    config_t *config = monitor_resolve_config(mon, &g_wayland_data->ctx->config);
+                    monitor_apply_config(mon, config);
+
+                    if (g_wayland_data->ctx->compositor) {
+                        workspace_model_t model = workspace_detect_model(g_wayland_data->ctx->compositor->type);
+                        mon->current_context.model = model;
+                        mon->current_context.data.workspace_id = COMPOSITOR_GET_WORKSPACE(g_wayland_data->ctx->compositor);
+                        mon->previous_context = mon->current_context;
+                    }
+
+                    monitor_list_add(g_wayland_data->ctx->monitors, mon);
+
+                    /* Defer surface creation until size is valid (we're only creating when size>0 here),
+                       but safe to create now as well */
+                    int ret = wayland_create_monitor_surface(mon);
+                    if (ret == HYPRLAX_SUCCESS) {
+                        LOG_DEBUG("Successfully created surface for monitor %s", mon->name);
+                    } else {
+                        LOG_ERROR("Failed to create surface for monitor %s", mon->name);
+                    }
+                }
+            }
+            info = info->next;
+        }
     }
 }
 
@@ -674,6 +717,35 @@ static void output_handle_mode(void *data, struct wl_output *output,
         info->refresh_rate = refresh / 1000;  /* mHz to Hz */
         LOG_TRACE("Output mode: %s %dx%d@%dHz",
                 info->name, width, height, info->refresh_rate);
+
+        /* If context is available and monitor not yet created, realize it now */
+        if (g_wayland_data && g_wayland_data->ctx && g_wayland_data->ctx->monitors) {
+            monitor_instance_t *mon = monitor_list_find_by_output(g_wayland_data->ctx->monitors, output);
+            if (!mon && width > 0 && height > 0) {
+                mon = monitor_instance_create(info->name);
+                if (mon) {
+                    mon->wl_output = output;
+                    monitor_update_geometry(mon, info->width, info->height,
+                                            info->scale, info->refresh_rate);
+                    monitor_set_global_position(mon, info->global_x, info->global_y);
+                    config_t *config = monitor_resolve_config(mon, &g_wayland_data->ctx->config);
+                    monitor_apply_config(mon, config);
+                    if (g_wayland_data->ctx->compositor) {
+                        workspace_model_t model = workspace_detect_model(g_wayland_data->ctx->compositor->type);
+                        mon->current_context.model = model;
+                        mon->current_context.data.workspace_id = COMPOSITOR_GET_WORKSPACE(g_wayland_data->ctx->compositor);
+                        mon->previous_context = mon->current_context;
+                    }
+                    monitor_list_add(g_wayland_data->ctx->monitors, mon);
+                    int ret = wayland_create_monitor_surface(mon);
+                    if (ret == HYPRLAX_SUCCESS) {
+                        LOG_DEBUG("Successfully created surface for monitor %s", mon->name);
+                    } else {
+                        LOG_ERROR("Failed to create surface for monitor %s", mon->name);
+                    }
+                }
+            }
+        }
     }
 }
 

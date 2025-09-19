@@ -71,10 +71,16 @@ typedef struct hyprlax_context {
     int cursor_event_fd;      /* provider event fd, -1 if none */
     float cursor_norm_x;      /* normalized -1..1 after smoothing */
     float cursor_norm_y;      /* normalized -1..1 after smoothing */
+    float cursor_eased_x;     /* normalized after easing animation */
+    float cursor_eased_y;
     float cursor_ema_x;       /* smoothing accumulator */
     float cursor_ema_y;       /* smoothing accumulator */
     double cursor_last_time;  /* last update time */
     bool cursor_supported;    /* provider available */
+
+    /* Cursor easing animation state */
+    animation_state_t cursor_anim_x;
+    animation_state_t cursor_anim_y;
 
     /* IPC context (legacy, will be removed) */
     void *ipc_ctx;

@@ -262,6 +262,18 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
         return;
     }
 
+    /* Cursor-only mode: update context for bookkeeping, but do not drive parallax
+       offsets or layer animations from workspace changes. Cursor input is the
+       sole parallax source in this mode. */
+    if (ctx && ctx->config.parallax_mode == PARALLAX_CURSOR) {
+        monitor->previous_context = monitor->current_context;
+        monitor->current_context = *new_context;
+        if (ctx->config.debug) {
+            fprintf(stderr, "[DEBUG] monitor_handle_workspace_context_change: cursor-only mode; skipping parallax update\n");
+        }
+        return;
+    }
+
     if (ctx && ctx->config.debug) {
         fprintf(stderr, "[DEBUG] monitor_handle_workspace_context_change:\n");
         fprintf(stderr, "[DEBUG]   Monitor: %s\n", monitor->name);
