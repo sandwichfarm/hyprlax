@@ -359,20 +359,28 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
             int layer_count = 0;
 
             while (layer) {
-                /* Each layer moves at its own speed based on shift_multiplier */
-                float layer_target_x = absolute_target_x * layer->shift_multiplier;
+                /* Each layer moves at its own speed based on per-axis multipliers */
+                float mx = layer->shift_multiplier_x;
+                float my = layer->shift_multiplier_y;
 
-                /* Y shift is proportional to maintain aspect ratio */
-                /* Until TOML config supports separate X/Y values, scale Y by aspect ratio */
-                float aspect_ratio = 1.0f;
-                if (layer->texture_width > 0 && layer->texture_height > 0) {
-                    aspect_ratio = (float)layer->texture_height / (float)layer->texture_width;
+                float layer_target_x = absolute_target_x * mx;
+
+                /* Preserve legacy aspect ratio scaling if per-axis not customized */
+                float layer_target_y;
+                float debug_aspect = 1.0f;
+                if (layer->shift_multiplier_x == layer->shift_multiplier &&
+                    layer->shift_multiplier_y == layer->shift_multiplier) {
+                    if (layer->texture_width > 0 && layer->texture_height > 0) {
+                        debug_aspect = (float)layer->texture_height / (float)layer->texture_width;
+                    }
+                    layer_target_y = absolute_target_y * my * debug_aspect;
+                } else {
+                    layer_target_y = absolute_target_y * my;
                 }
-                float layer_target_y = absolute_target_y * layer->shift_multiplier * aspect_ratio;
 
                 if (ctx && ctx->config.debug) {
                     fprintf(stderr, "[DEBUG]     Layer %d: multiplier=%.2f, aspect=%.2f, target=(%.1f, %.1f)\n",
-                            layer_count++, layer->shift_multiplier, aspect_ratio,
+                            layer_count++, layer->shift_multiplier, debug_aspect,
                             layer_target_x, layer_target_y);
                 }
 

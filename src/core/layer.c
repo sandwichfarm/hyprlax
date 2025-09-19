@@ -25,9 +25,16 @@ parallax_layer_t* layer_create(const char *image_path, float shift_multiplier, f
     }
 
     layer->shift_multiplier = shift_multiplier;
+    layer->shift_multiplier_x = shift_multiplier;
+    layer->shift_multiplier_y = shift_multiplier;
     layer->opacity = opacity;
     layer->blur_amount = 0.0f;
     layer->z_index = 0;
+
+    layer->invert_workspace_x = false;
+    layer->invert_workspace_y = false;
+    layer->invert_cursor_x = false;
+    layer->invert_cursor_y = false;
 
     layer->current_x = 0.0f;
     layer->current_y = 0.0f;

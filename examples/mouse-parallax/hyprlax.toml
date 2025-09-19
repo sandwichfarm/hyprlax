@@ -1,0 +1,55 @@
+# Mouse-driven parallax example: foreground flower + blurred background
+
+[global]
+fps = 144
+debug = false
+duration = 0.0            # workspace animation not used in cursor mode
+shift = 200               # legacy shift; unused in cursor-only mode
+vsync = false
+
+[global.parallax]
+mode = "hybrid"           # Mouse-only parallax for focus-follow effect
+
+[global.parallax.sources]
+workspace.weight = 0.0     # disable workspace-driven movement
+cursor.weight = 1.0        # fully cursor-driven
+
+# Invert X so layers shift opposite cursor (stronger depth feeling)
+[global.parallax.invert.cursor]
+x = true
+y = true
+
+# Clamp vertical offset to 0 to prevent the flower bottom from rising above the canvas bottom
+[global.parallax.max_offset_px]
+x = 220
+y = 80                   # allow subtle background vertical motion
+
+[global.input.cursor]
+normalize_to = "monitor"
+sensitivity_x = 1.0
+sensitivity_y = 0.25       # small vertical influence overall
+deadzone_px = 3
+ema_alpha = 0.25
+
+# Layers are rendered back -> front
+[[global.layers]]
+path = "bg.jpg"  # blurred background image
+# Far layer: small movement, slight vertical motion for bokeh feel
+shift_multiplier = { x = 0.20, y = 0.05 }
+opacity = 1.0
+blur = 2.0                  # strong bokeh-like blur
+
+[[global.layers]]
+path = "flower.png"      # foreground flower with transparent bg
+# Near layer: stronger horizontal response, but Y disabled to pin bottom edge
+shift_multiplier = { x = 1.00, y = 0.00 }
+opacity = 1.0
+blur = 0.0                   # keep subject sharp
+
+# Notes:
+# - The flower’s bottom never crosses the screen bottom by disabling per-layer
+#   Y parallax (shift_multiplier.y = 0.0 for the flower), while allowing a small
+#   vertical motion on the blurred background for a natural bokeh feel.
+# - If vertical parallax is desired in the future, the engine should support per-layer
+#   vertical clamps (e.g., layer.clamp.offset_y_min/max) and/or anchor points.
+# - Replace the image paths with your actual assets.

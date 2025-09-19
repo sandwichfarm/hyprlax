@@ -44,10 +44,18 @@ typedef struct parallax_layer {
     char *image_path;
 
     /* Parallax parameters */
-    float shift_multiplier;
+    float shift_multiplier;           /* legacy scalar multiplier */
+    float shift_multiplier_x;         /* per-axis multiplier (defaults to shift_multiplier) */
+    float shift_multiplier_y;
     float opacity;
     float blur_amount;
     int z_index;
+
+    /* Per-layer inversion flags */
+    bool invert_workspace_x;
+    bool invert_workspace_y;
+    bool invert_cursor_x;
+    bool invert_cursor_y;
 
     /* Animation state */
     animation_state_t x_animation;
@@ -67,6 +75,13 @@ typedef struct parallax_layer {
     /* Linked list */
     struct parallax_layer *next;
 } parallax_layer_t;
+
+/* Parallax mode */
+typedef enum {
+    PARALLAX_WORKSPACE = 0,
+    PARALLAX_CURSOR = 1,
+    PARALLAX_HYBRID = 2,
+} parallax_mode_t;
 
 /* Configuration structure */
 typedef struct {
@@ -94,6 +109,23 @@ typedef struct {
     /* Feature flags */
     bool blur_enabled;
     bool ipc_enabled;
+
+    /* Parallax configuration */
+    parallax_mode_t parallax_mode;    /* workspace | cursor | hybrid */
+    float parallax_workspace_weight;  /* 0..1 */
+    float parallax_cursor_weight;     /* 0..1 */
+    bool invert_workspace_x;
+    bool invert_workspace_y;
+    bool invert_cursor_x;
+    bool invert_cursor_y;
+    float parallax_max_offset_x;      /* pixel clamp after blend */
+    float parallax_max_offset_y;
+
+    /* Cursor input configuration */
+    float cursor_sensitivity_x;       /* multiplier on normalized input */
+    float cursor_sensitivity_y;
+    float cursor_deadzone_px;         /* deadzone in screen pixels */
+    float cursor_ema_alpha;           /* 0..1 smoothing factor */
 } config_t;
 
 /* Easing functions - pure math, no side effects */
@@ -118,6 +150,10 @@ easing_type_t easing_from_string(const char *name);
 
 /* Get string name from easing type */
 const char* easing_to_string(easing_type_t type);
+
+/* Parallax helpers */
+parallax_mode_t parallax_mode_from_string(const char *name);
+const char* parallax_mode_to_string(parallax_mode_t mode);
 
 /* Animation functions - no allocations in evaluate path */
 void animation_start(animation_state_t *anim, float from, float to,

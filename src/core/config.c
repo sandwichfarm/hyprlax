@@ -30,6 +30,21 @@ void config_set_defaults(config_t *cfg) {
     cfg->ipc_enabled = true;
     cfg->config_path = NULL;
     cfg->socket_path = NULL;
+
+    /* Parallax defaults */
+    cfg->parallax_mode = PARALLAX_WORKSPACE;
+    cfg->parallax_workspace_weight = 1.0f;
+    cfg->parallax_cursor_weight = 0.0f;
+    cfg->invert_workspace_x = false;
+    cfg->invert_workspace_y = false;
+    cfg->invert_cursor_x = false;
+    cfg->invert_cursor_y = false;
+    cfg->parallax_max_offset_x = 100000.0f; /* effectively no clamp by default */
+    cfg->parallax_max_offset_y = 100000.0f;
+    cfg->cursor_sensitivity_x = 1.0f;
+    cfg->cursor_sensitivity_y = 1.0f;
+    cfg->cursor_deadzone_px = 4.0f;
+    cfg->cursor_ema_alpha = 0.25f;
 }
 
 /* Parse command-line arguments */
