@@ -1044,6 +1044,14 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
         hyprlax_render_monitor(ctx, monitor);
         monitor = monitor->next;
     }
+
+    /* After presenting a frame, record current offsets to detect future changes */
+    parallax_layer_t *ly = ctx->layers;
+    while (ly) {
+        ly->prev_offset_x = ly->offset_x;
+        ly->prev_offset_y = ly->offset_y;
+        ly = ly->next;
+    }
 }
 
 /* Check if any layer has active animations */
@@ -1082,6 +1090,13 @@ int hyprlax_run(hyprlax_context_t *ctx) {
         LOG_DEBUG("Starting main loop (target FPS: %d)", ctx->config.target_fps);
     }
 
+    /* Optional render diagnostics (why are we rendering while idle) */
+    static int s_render_diag = -1;
+    if (s_render_diag == -1) {
+        const char *p = getenv("HYPRLAX_RENDER_DIAG");
+        s_render_diag = (p && *p) ? 1 : 0;
+    }
+
     double last_render_time = get_time();
     double last_frame_time = last_render_time;
     double frame_time = 1.0 / ctx->config.target_fps;
@@ -1095,6 +1110,12 @@ int hyprlax_run(hyprlax_context_t *ctx) {
     }
 
     while (ctx->running) {
+        /* Reset per-iteration diagnostic flags */
+        bool diag_resize = false;
+        bool diag_ipc = false;
+        bool diag_comp = false;
+        bool diag_final = false;
+
         double current_time = get_time();
         ctx->delta_time = current_time - last_frame_time;
         last_frame_time = current_time;
@@ -1121,6 +1142,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                                         platform_event.data.resize.width,
                                         platform_event.data.resize.height);
                     needs_render = true;  /* Window resize requires re-render */
+                    diag_resize = true;
                     break;
                 default:
                     break;
@@ -1131,6 +1153,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
         if (ctx->ipc_ctx && ipc_process_commands((ipc_context_t*)ctx->ipc_ctx)) {
             /* IPC processed - layers may have changed */
             needs_render = true;  /* IPC commands may have changed layers */
+            diag_ipc = true;
             if (ctx->config.debug) {
                 LOG_TRACE("IPC command processed");
             }
@@ -1143,6 +1166,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             if (poll_result == HYPRLAX_SUCCESS) {
                 if (comp_event.type == COMPOSITOR_EVENT_WORKSPACE_CHANGE) {
                     needs_render = true;  /* Workspace change requires re-render */
+                    diag_comp = true;
                     /* For multi-monitor support, find the correct monitor */
                     monitor_instance_t *target_monitor = NULL;
 
@@ -1263,6 +1287,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             /* Ensure one final frame when animations complete */
             if (!still_animating && animations_active) {
                 needs_render = true;  /* Final frame */
+                diag_final = true;
             }
             
             /* Update the animations_active flag for next iteration */
@@ -1284,6 +1309,22 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                               animations_active, time_since_render);
                     last_log_time = current_time;
                 }
+            }
+            if (s_render_diag && !animations_active) {
+                /* Check if any layer offsets actually changed (dirty) */
+                int dirty = 0;
+                const float EPS = 1e-5f;
+                parallax_layer_t *ly = ctx->layers;
+                while (ly) {
+                    if (fabsf(ly->offset_x - ly->prev_offset_x) > EPS ||
+                        fabsf(ly->offset_y - ly->prev_offset_y) > EPS) {
+                        dirty = 1;
+                        break;
+                    }
+                    ly = ly->next;
+                }
+                LOG_DEBUG("[RENDER_DIAG] idle render: resize=%d ipc=%d comp=%d final=%d dirty=%d tsr=%.3f ft=%.3f layers=%d",
+                          diag_resize, diag_ipc, diag_comp, diag_final, dirty, time_since_render, frame_time, ctx->layer_count);
             }
             hyprlax_render_frame(ctx);
             ctx->fps = 1.0 / time_since_render;

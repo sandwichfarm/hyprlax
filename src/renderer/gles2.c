@@ -45,6 +45,9 @@ typedef struct {
     /* Separable blur target */
     GLuint blur_fbo;
     GLuint blur_tex;
+    int blur_downscale; /* 0/1 = full res; >1 = downscale factor */
+    int blur_w;
+    int blur_h;
 } gles2_renderer_data_t;
 
 /* Global instance */
@@ -176,11 +179,15 @@ static int gles2_init(void *native_display, void *native_window,
         fprintf(stderr, "[DEBUG] Compiling blur shader\n");
     }
     const char *use_separable = getenv("HYPRLAX_SEPARABLE_BLUR");
+    const char *down_env = getenv("HYPRLAX_BLUR_DOWNSCALE");
+    if (down_env && *down_env) {
+        int f = atoi(down_env);
+        if (f > 1 && f < 16) data->blur_downscale = f; /* sanity bounds */
+    }
     if (use_separable && *use_separable) {
         data->blur_sep_shader = shader_create_program("blur_separable");
-        if ((use_uniform_offset && *use_uniform_offset) ?
-            (shader_compile_separable_blur_with_vertex(data->blur_sep_shader, shader_vertex_basic_offset) != HYPRLAX_SUCCESS) :
-            (shader_compile_separable_blur(data->blur_sep_shader) != HYPRLAX_SUCCESS)) {
+        /* Always compile separable blur with offset-capable vertex shader so u_offset is available */
+        if (shader_compile_separable_blur_with_vertex(data->blur_sep_shader, shader_vertex_basic_offset) != HYPRLAX_SUCCESS) {
             fprintf(stderr, "Warning: Failed to compile separable blur shader\n");
             shader_destroy_program(data->blur_sep_shader);
             data->blur_sep_shader = NULL;
@@ -405,7 +412,11 @@ static void gles2_draw_layer(const texture_t *texture, float x, float y,
 
     /* Adjust coordinates based on mode */
     const char *use_uniform_offset = getenv("HYPRLAX_UNIFORM_OFFSET");
-    if (!(use_uniform_offset && *use_uniform_offset)) {
+    /* Don't mutate texcoords when using separable blur; offsets will be applied via uniforms */
+    /* no-op placeholder removed */
+    if (0) {}
+
+    if (!(use_uniform_offset && *use_uniform_offset) /* legacy single-pass path, updated below after sep check */) {
         /* Legacy path: encode offset into texcoords */
         vertices[2] = x;          /* Bottom-left U */
         vertices[3] = 1.0f - y;   /* Bottom-left V (inverted) */
@@ -424,6 +435,14 @@ static void gles2_draw_layer(const texture_t *texture, float x, float y,
         if (g_gles2_data->blur_sep_shader && g_gles2_data->blur_fbo && getenv("HYPRLAX_SEPARABLE_BLUR")) {
             shader = g_gles2_data->blur_sep_shader;
             use_sep_blur = 1;
+            /* Re-initialize vertices to default texcoords for separable path */
+            GLfloat full_vertices[] = {
+                -1.0f, -1.0f,  0.0f, 1.0f,
+                 1.0f, -1.0f,  1.0f, 1.0f,
+                -1.0f,  1.0f,  0.0f, 0.0f,
+                 1.0f,  1.0f,  1.0f, 0.0f,
+            };
+            memcpy(vertices, full_vertices, sizeof(full_vertices));
         } else if (g_gles2_data->blur_shader) {
             shader = g_gles2_data->blur_shader;
         }
@@ -464,19 +483,24 @@ static void gles2_draw_layer(const texture_t *texture, float x, float y,
         GLint loc_amt = shader_get_uniform_location(shader, "u_blur_amount");
         if (loc_amt != -1) glUniform1f(loc_amt, blur_amount);
         GLint loc_res = shader_get_uniform_location(shader, "u_resolution");
-        /* First pass uses source texture resolution */
+        /* First pass samples the source layer texture: use texture resolution */
         if (loc_res != -1) glUniform2f(loc_res, (float)texture->width, (float)texture->height);
         GLint loc_dir = shader_get_uniform_location(shader, "u_direction");
+        /* Always apply layer offset via u_offset for separable blur pass 1 */
+        {
+            GLint u_off = shader_get_uniform_location(shader, "u_offset");
+            if (u_off != -1) glUniform2f(u_off, x, -y);
+        }
         /* Save viewport and blend state */
         GLint prev_viewport[4];
         glGetIntegerv(GL_VIEWPORT, prev_viewport);
         GLboolean blend_was_enabled = glIsEnabled(GL_BLEND);
         if (blend_was_enabled) glDisable(GL_BLEND);
 
-        /* First pass: horizontal to FBO */
+        /* First pass: horizontal to downscaled FBO (always use default texcoords + u_offset) */
         if (loc_dir != -1) glUniform2f(loc_dir, 1.0f, 0.0f);
         glBindFramebuffer(GL_FRAMEBUFFER, g_gles2_data->blur_fbo);
-        glViewport(0, 0, g_gles2_data->width, g_gles2_data->height);
+        glViewport(0, 0, g_gles2_data->blur_w, g_gles2_data->blur_h);
         gles2_bind_texture(texture, 0);
 
         /* Setup vertex data */
@@ -484,9 +508,8 @@ static void gles2_draw_layer(const texture_t *texture, float x, float y,
         GLuint vbo = 0;
         if (persist_vbo && *persist_vbo && g_gles2_data->vbo) {
             glBindBuffer(GL_ARRAY_BUFFER, g_gles2_data->vbo);
-            if (!(use_uniform_offset && *use_uniform_offset)) {
-                glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
-            }
+            /* For separable path, keep default texcoords; offsets via u_offset */
+            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
         } else {
             glGenBuffers(1, &vbo);
             glBindBuffer(GL_ARRAY_BUFFER, vbo);
@@ -505,18 +528,57 @@ static void gles2_draw_layer(const texture_t *texture, float x, float y,
         }
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-        /* Second pass: vertical to default framebuffer */
+        /* Second pass: vertical to default framebuffer (upsampling) */
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        /* Vertical sampling uses FBO texture resolution */
-        if (loc_res != -1) glUniform2f(loc_res, (float)g_gles2_data->width, (float)g_gles2_data->height);
-        if (loc_dir != -1) glUniform2f(loc_dir, 0.0f, 1.0f);
-        texture_t tmp = { .id = g_gles2_data->blur_tex };
-        gles2_bind_texture(&tmp, 0);
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-
-        /* Restore viewport and blend state */
+        /* Restore full-screen viewport & blend before drawing to default framebuffer */
         glViewport(prev_viewport[0], prev_viewport[1], prev_viewport[2], prev_viewport[3]);
         if (blend_was_enabled) glEnable(GL_BLEND);
+        /* Vertical sampling resolution: use downscaled if enabled, else screen */
+        if (loc_res != -1) {
+            if (g_gles2_data->blur_downscale > 1)
+                glUniform2f(loc_res, (float)g_gles2_data->blur_w, (float)g_gles2_data->blur_h);
+            else
+                glUniform2f(loc_res, (float)g_gles2_data->width, (float)g_gles2_data->height);
+        }
+        if (loc_dir != -1) glUniform2f(loc_dir, 0.0f, 1.0f);
+        /* Ensure we don't apply layer offset again on the second pass */
+        {
+            GLint u_off = shader_get_uniform_location(shader, "u_offset");
+            if (u_off != -1) glUniform2f(u_off, 0.0f, 0.0f);
+        }
+        texture_t tmp = { .id = g_gles2_data->blur_tex };
+        gles2_bind_texture(&tmp, 0);
+        /* Rebind vertex data and attrib pointers to be explicit for second pass */
+        if (persist_vbo && *persist_vbo && g_gles2_data->vbo) {
+            glBindBuffer(GL_ARRAY_BUFFER, g_gles2_data->vbo);
+            /* For separable path, sample the FBO texture; if orientation is inverted on your stack,
+               flip V here to compensate. We'll flip V to 1.0 - V for the second pass. */
+            GLfloat full_vertices_flip_v[] = {
+                -1.0f, -1.0f,  0.0f, 0.0f,  /* Bottom-left maps to V=0 */
+                 1.0f, -1.0f,  1.0f, 0.0f,
+                -1.0f,  1.0f,  0.0f, 1.0f,  /* Top-left maps to V=1 */
+                 1.0f,  1.0f,  1.0f, 1.0f,
+            };
+            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(full_vertices_flip_v), full_vertices_flip_v);
+        } else {
+            glBindBuffer(GL_ARRAY_BUFFER, vbo);
+            GLfloat full_vertices_flip_v[] = {
+                -1.0f, -1.0f,  0.0f, 0.0f,
+                 1.0f, -1.0f,  1.0f, 0.0f,
+                -1.0f,  1.0f,  0.0f, 1.0f,
+                 1.0f,  1.0f,  1.0f, 1.0f,
+            };
+            glBufferData(GL_ARRAY_BUFFER, sizeof(full_vertices_flip_v), full_vertices_flip_v, GL_STATIC_DRAW);
+        }
+        if (pos_attrib >= 0) {
+            glEnableVertexAttribArray(pos_attrib);
+            glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (void*)0);
+        }
+        if (tex_attrib >= 0) {
+            glEnableVertexAttribArray(tex_attrib);
+            glVertexAttribPointer(tex_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (void*)(2 * sizeof(GLfloat)));
+        }
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
         if (pos_attrib >= 0) glDisableVertexAttribArray(pos_attrib);
         if (tex_attrib >= 0) glDisableVertexAttribArray(tex_attrib);
@@ -543,8 +605,8 @@ static void gles2_draw_layer(const texture_t *texture, float x, float y,
     GLuint vbo = 0;
     if (persist_vbo && *persist_vbo && g_gles2_data->vbo) {
         glBindBuffer(GL_ARRAY_BUFFER, g_gles2_data->vbo);
-        /* If using uniform-offset, the static VBO data is sufficient; otherwise update texcoords */
-        if (!(use_uniform_offset && *use_uniform_offset)) {
+        /* If using uniform-offset or separable blur, keep default texcoords; otherwise update texcoords */
+        if (!(use_uniform_offset && *use_uniform_offset) && !use_sep_blur) {
             glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
         }
     } else {
@@ -694,7 +756,12 @@ static void gles2_create_blur_target(int width, int height) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    int factor = g_gles2_data->blur_downscale > 1 ? g_gles2_data->blur_downscale : 1;
+    g_gles2_data->blur_w = width / factor;
+    g_gles2_data->blur_h = height / factor;
+    if (g_gles2_data->blur_w < 1) g_gles2_data->blur_w = 1;
+    if (g_gles2_data->blur_h < 1) g_gles2_data->blur_h = 1;
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, g_gles2_data->blur_w, g_gles2_data->blur_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
     glBindFramebuffer(GL_FRAMEBUFFER, g_gles2_data->blur_fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_gles2_data->blur_tex, 0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
