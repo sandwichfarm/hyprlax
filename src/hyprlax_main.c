@@ -234,6 +234,14 @@ static bool process_cursor_event(hyprlax_context_t *ctx) {
 static void process_workspace_event(hyprlax_context_t *ctx, const compositor_event_t *comp_event) {
     if (!ctx || !comp_event) return;
 
+    /* In cursor-only mode, ignore workspace-driven parallax changes */
+    if (ctx->config.parallax_mode == PARALLAX_CURSOR) {
+        if (ctx->config.debug) {
+            LOG_TRACE("Ignoring workspace event in cursor-only parallax mode");
+        }
+        return;
+    }
+
     /* Find target monitor */
     monitor_instance_t *target_monitor = NULL;
     if (ctx->monitors && comp_event->data.workspace.monitor_name[0] != '\0') {
@@ -1357,7 +1365,24 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
             ctx->renderer->ops->bind_texture(&tex, 0);
         }
 
-        if (ctx->renderer->ops->draw_layer) {
+        if (ctx->renderer->ops->draw_layer_ex) {
+            renderer_layer_params_t p = {
+                .fit_mode = layer->fit_mode,
+                .content_scale = layer->content_scale,
+                .align_x = layer->align_x,
+                .align_y = layer->align_y,
+                .base_uv_x = layer->base_uv_x,
+                .base_uv_y = layer->base_uv_y,
+            };
+            ctx->renderer->ops->draw_layer_ex(
+                &tex,
+                offset_x / monitor->width,
+                offset_y / monitor->height,
+                layer->opacity,
+                layer->blur_amount,
+                &p
+            );
+        } else if (ctx->renderer->ops->draw_layer) {
             /* Draw the layer with offset and effects */
             /* Layer drawing debug - commented out for performance
             LOG_TRACE("Drawing layer %d (tex_id=%u, offset=%.3f,%.3f, opacity=%.2f)",

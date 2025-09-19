@@ -258,6 +258,53 @@ int config_apply_toml_to_context(hyprlax_context_t *ctx, const char *path)
                                     if (d.ok) last->invert_cursor_y = d.u.b;
                                 }
                             }
+                            /* Content fit mode */
+                            d = toml_string_in(lt, "fit");
+                            if (d.ok && d.u.s) {
+                                if (strcmp(d.u.s, "stretch") == 0) last->fit_mode = LAYER_FIT_STRETCH;
+                                else if (strcmp(d.u.s, "cover") == 0) last->fit_mode = LAYER_FIT_COVER;
+                                else if (strcmp(d.u.s, "contain") == 0) last->fit_mode = LAYER_FIT_CONTAIN;
+                                else if (strcmp(d.u.s, "fit_width") == 0 || strcmp(d.u.s, "fit_x") == 0) last->fit_mode = LAYER_FIT_WIDTH;
+                                else if (strcmp(d.u.s, "fit_height") == 0 || strcmp(d.u.s, "fit_y") == 0) last->fit_mode = LAYER_FIT_HEIGHT;
+                                free(d.u.s);
+                            }
+                            /* Additional scale */
+                            d = toml_double_in(lt, "scale");
+                            if (d.ok) last->content_scale = (float)d.u.d;
+                            /* Alignment for cover/crop */
+                            toml_table_t *align = toml_table_in(lt, "align");
+                            if (align) {
+                                toml_datum_t ax = toml_double_in(align, "x");
+                                if (ax.ok) last->align_x = (float)ax.u.d;
+                                else {
+                                    toml_datum_t axs = toml_string_in(align, "x");
+                                    if (axs.ok) {
+                                        if (strcmp(axs.u.s, "left") == 0) last->align_x = 0.0f;
+                                        else if (strcmp(axs.u.s, "center") == 0) last->align_x = 0.5f;
+                                        else if (strcmp(axs.u.s, "right") == 0) last->align_x = 1.0f;
+                                        free(axs.u.s);
+                                    }
+                                }
+                                toml_datum_t ay = toml_double_in(align, "y");
+                                if (ay.ok) last->align_y = (float)ay.u.d;
+                                else {
+                                    toml_datum_t ays = toml_string_in(align, "y");
+                                    if (ays.ok) {
+                                        if (strcmp(ays.u.s, "top") == 0) last->align_y = 0.0f;
+                                        else if (strcmp(ays.u.s, "center") == 0) last->align_y = 0.5f;
+                                        else if (strcmp(ays.u.s, "bottom") == 0) last->align_y = 1.0f;
+                                        free(ays.u.s);
+                                    }
+                                }
+                            }
+                            /* Initial UV offset */
+                            toml_table_t *uvo = toml_table_in(lt, "uv_offset");
+                            if (uvo) {
+                                d = toml_double_in(uvo, "x");
+                                if (d.ok) last->base_uv_x = (float)d.u.d;
+                                d = toml_double_in(uvo, "y");
+                                if (d.ok) last->base_uv_y = (float)d.u.d;
+                            }
                         }
                         free(resolved);
                     }

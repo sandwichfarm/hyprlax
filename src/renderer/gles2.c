@@ -300,6 +300,70 @@ static void gles2_present(void) {
     eglSwapBuffers(g_gles2_data->egl_display, surface);
 }
 
+/* Helpers for extended draw */
+static void compute_fit_params(int vw, int vh, int tw, int th, int fit_mode,
+                               float content_scale, float align_x, float align_y,
+                               float *pos_w, float *pos_h,
+                               float *u0, float *v0, float *u1, float *v1) {
+    /* Defaults: STRETCH */
+    *pos_w = 2.0f; /* NDC width span */
+    *pos_h = 2.0f; /* NDC height span */
+    *u0 = 0.0f; *v0 = 0.0f; *u1 = 1.0f; *v1 = 1.0f;
+
+    float vw_f = (float)vw, vh_f = (float)vh;
+    float tw_f = (float)tw, th_f = (float)th;
+    if (vw <= 0 || vh <= 0 || tw <= 0 || th <= 0) return;
+
+    float scale = content_scale;
+    if (scale <= 0.0f) scale = 1.0f;
+
+    if (fit_mode == 0) {
+        /* STRETCH: defaults suffice */
+        return;
+    }
+
+    if (fit_mode == 1 /* COVER */ || fit_mode == 3 /* FIT_WIDTH */ || fit_mode == 4 /* FIT_HEIGHT */) {
+        float sx = vw_f / tw_f;
+        float sy = vh_f / th_f;
+        float s = sx;
+        if (fit_mode == 1) s = (sx > sy ? sx : sy); /* cover */
+        else if (fit_mode == 4) s = sy; /* fit height */
+        else s = sx; /* fit width */
+        s *= scale;
+        /* uv window to sample */
+        float uvw = vw_f / (s * tw_f);
+        float uvh = vh_f / (s * th_f);
+        if (uvw > 1.0f) uvw = 1.0f;
+        if (uvh > 1.0f) uvh = 1.0f;
+        *u0 = (1.0f - uvw) * (align_x < 0.0f ? 0.0f : (align_x > 1.0f ? 1.0f : align_x));
+        *v0 = (1.0f - uvh) * (align_y < 0.0f ? 0.0f : (align_y > 1.0f ? 1.0f : align_y));
+        *u1 = *u0 + uvw;
+        *v1 = *v0 + uvh;
+        /* positions cover full screen */
+        *pos_w = 2.0f;
+        *pos_h = 2.0f;
+        return;
+    }
+
+    if (fit_mode == 2 /* CONTAIN */) {
+        float sx = vw_f / tw_f;
+        float sy = vh_f / th_f;
+        float s = (sx < sy ? sx : sy);
+        s *= scale;
+        /* pos size in NDC to letterbox */
+        float screen_w_px = s * tw_f;
+        float screen_h_px = s * th_f;
+        float nx = (screen_w_px / vw_f) * 2.0f; /* full screen = 2.0 */
+        float ny = (screen_h_px / vh_f) * 2.0f;
+        if (nx > 2.0f) nx = 2.0f;
+        if (ny > 2.0f) ny = 2.0f;
+        *pos_w = nx;
+        *pos_h = ny;
+        *u0 = 0.0f; *v0 = 0.0f; *u1 = 1.0f; *v1 = 1.0f;
+        return;
+    }
+}
+
 /* Clear screen */
 static void gles2_clear(float r, float g, float b, float a) {
     glClearColor(r, g, b, a);
@@ -385,8 +449,9 @@ static void gles2_bind_texture(const texture_t *texture, int unit) {
 }
 
 /* Draw layer */
-static void gles2_draw_layer(const texture_t *texture, float x, float y,
-                            float opacity, float blur_amount) {
+static void gles2_draw_layer_internal(const texture_t *texture, float x, float y,
+                            float opacity, float blur_amount,
+                            const renderer_layer_params_t *params) {
     static int draw_count = 0;
     if (draw_count < 5 && getenv("HYPRLAX_DEBUG")) {
         fprintf(stderr, "[DEBUG] gles2_draw_layer %d: tex=%u, x=%.3f, opacity=%.3f, blur=%.3f\n",
@@ -402,30 +467,60 @@ static void gles2_draw_layer(const texture_t *texture, float x, float y,
         return;
     }
 
-    /* Setup vertices for a fullscreen quad */
+    /* Setup vertices for quad; will adjust according to fit params */
     GLfloat vertices[] = {
-        -1.0f, -1.0f,  0.0f, 1.0f,  /* Bottom-left */
-         1.0f, -1.0f,  1.0f, 1.0f,  /* Bottom-right */
-        -1.0f,  1.0f,  0.0f, 0.0f,  /* Top-left */
-         1.0f,  1.0f,  1.0f, 0.0f   /* Top-right */
+        -1.0f, -1.0f,  0.0f, 1.0f,
+         1.0f, -1.0f,  1.0f, 1.0f,
+        -1.0f,  1.0f,  0.0f, 0.0f,
+         1.0f,  1.0f,  1.0f, 0.0f
     };
+
+    float u0=0.0f, v0=0.0f, u1=1.0f, v1=1.0f;
+    float pos_w = 2.0f, pos_h = 2.0f;
+    if (params && g_gles2_data) {
+        compute_fit_params(g_gles2_data->width, g_gles2_data->height,
+                           texture->width, texture->height,
+                           params->fit_mode, params->content_scale,
+                           params->align_x, params->align_y,
+                           &pos_w, &pos_h, &u0, &v0, &u1, &v1);
+        /* Apply base UV offset and parallax offset */
+        float du = (params->base_uv_x + x);
+        float dv = (params->base_uv_y - y); /* invert y */
+        u0 += du; u1 += du; v0 += dv; v1 += dv;
+        /* Adjust positions to letterbox if needed */
+        float hx = pos_w * 0.5f; if (hx > 1.0f) hx = 1.0f;
+        float hy = pos_h * 0.5f; if (hy > 1.0f) hy = 1.0f;
+        float tx_ndc = 0.0f, ty_ndc = 0.0f;
+        /* Translate within remaining space according to align (0..1) */
+        float remx = 2.0f - (hx * 2.0f);
+        float remy = 2.0f - (hy * 2.0f);
+        /* Allow align outside [0,1] to push content beyond edges intentionally */
+        tx_ndc = (params->align_x - 0.5f) * remx;
+        ty_ndc = (params->align_y - 0.5f) * remy;
+        vertices[0] = -hx + tx_ndc; vertices[1] = -hy + ty_ndc;
+        vertices[4] =  hx + tx_ndc; vertices[5] = -hy + ty_ndc;
+        vertices[8] = -hx + tx_ndc; vertices[9] =  hy + ty_ndc;
+        vertices[12]=  hx + tx_ndc; vertices[13]=  hy + ty_ndc;
+        /* Set texcoords */
+        vertices[2] = u0; vertices[3] = v1;   /* bottom-left */
+        vertices[6] = u1; vertices[7] = v1;   /* bottom-right */
+        vertices[10]= u0; vertices[11]= v0;   /* top-left */
+        vertices[14]= u1; vertices[15]= v0;   /* top-right */
+    }
 
     /* Adjust coordinates based on mode */
     const char *use_uniform_offset = getenv("HYPRLAX_UNIFORM_OFFSET");
-    /* Don't mutate texcoords when using separable blur; offsets will be applied via uniforms */
-    /* no-op placeholder removed */
-    if (0) {}
-
-    if (!(use_uniform_offset && *use_uniform_offset) /* legacy single-pass path, updated below after sep check */) {
-        /* Legacy path: encode offset into texcoords */
-        vertices[2] = x;          /* Bottom-left U */
-        vertices[3] = 1.0f - y;   /* Bottom-left V (inverted) */
-        vertices[6] = 1.0f + x;   /* Bottom-right U */
-        vertices[7] = 1.0f - y;   /* Bottom-right V (inverted) */
-        vertices[10] = x;         /* Top-left U */
-        vertices[11] = 0.0f - y;  /* Top-left V (inverted) */
-        vertices[14] = 1.0f + x;  /* Top-right U */
-        vertices[15] = 0.0f - y;  /* Top-right V (inverted) */
+    bool using_params = (params != NULL);
+    if (!using_params) {
+        /* Legacy path: encode offset into texcoords over full screen */
+        vertices[2] = x;
+        vertices[3] = 1.0f - y;
+        vertices[6] = 1.0f + x;
+        vertices[7] = 1.0f - y;
+        vertices[10] = x;
+        vertices[11] = 0.0f - y;
+        vertices[14] = 1.0f + x;
+        vertices[15] = 0.0f - y;
     }
 
     /* Choose shader based on blur amount */
@@ -508,7 +603,7 @@ static void gles2_draw_layer(const texture_t *texture, float x, float y,
         GLuint vbo = 0;
         if (persist_vbo && *persist_vbo && g_gles2_data->vbo) {
             glBindBuffer(GL_ARRAY_BUFFER, g_gles2_data->vbo);
-            /* For separable path, keep default texcoords; offsets via u_offset */
+            /* Use precomputed vertices (pos+texcoords) */
             glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
         } else {
             glGenBuffers(1, &vbo);
@@ -551,24 +646,23 @@ static void gles2_draw_layer(const texture_t *texture, float x, float y,
         /* Rebind vertex data and attrib pointers to be explicit for second pass */
         if (persist_vbo && *persist_vbo && g_gles2_data->vbo) {
             glBindBuffer(GL_ARRAY_BUFFER, g_gles2_data->vbo);
-            /* For separable path, sample the FBO texture; if orientation is inverted on your stack,
-               flip V here to compensate. We'll flip V to 1.0 - V for the second pass. */
-            GLfloat full_vertices_flip_v[] = {
-                -1.0f, -1.0f,  0.0f, 0.0f,  /* Bottom-left maps to V=0 */
-                 1.0f, -1.0f,  1.0f, 0.0f,
-                -1.0f,  1.0f,  0.0f, 1.0f,  /* Top-left maps to V=1 */
-                 1.0f,  1.0f,  1.0f, 1.0f,
+            /* For separable path, sample the FBO texture; flip V for FBO sampling */
+            GLfloat v2[] = {
+                vertices[0], vertices[1], vertices[2], 1.0f - vertices[3],
+                vertices[4], vertices[5], vertices[6], 1.0f - vertices[7],
+                vertices[8], vertices[9], vertices[10],1.0f - vertices[11],
+                vertices[12],vertices[13],vertices[14],1.0f - vertices[15]
             };
-            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(full_vertices_flip_v), full_vertices_flip_v);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(v2), v2);
         } else {
             glBindBuffer(GL_ARRAY_BUFFER, vbo);
-            GLfloat full_vertices_flip_v[] = {
-                -1.0f, -1.0f,  0.0f, 0.0f,
-                 1.0f, -1.0f,  1.0f, 0.0f,
-                -1.0f,  1.0f,  0.0f, 1.0f,
-                 1.0f,  1.0f,  1.0f, 1.0f,
+            GLfloat v2[] = {
+                vertices[0], vertices[1], vertices[2], 1.0f - vertices[3],
+                vertices[4], vertices[5], vertices[6], 1.0f - vertices[7],
+                vertices[8], vertices[9], vertices[10],1.0f - vertices[11],
+                vertices[12],vertices[13],vertices[14],1.0f - vertices[15]
             };
-            glBufferData(GL_ARRAY_BUFFER, sizeof(full_vertices_flip_v), full_vertices_flip_v, GL_STATIC_DRAW);
+            glBufferData(GL_ARRAY_BUFFER, sizeof(v2), v2, GL_STATIC_DRAW);
         }
         if (pos_attrib >= 0) {
             glEnableVertexAttribArray(pos_attrib);
@@ -595,9 +689,7 @@ static void gles2_draw_layer(const texture_t *texture, float x, float y,
     /* If uniform-offset mode, set u_offset */
     if (use_uniform_offset && *use_uniform_offset) {
         GLint u_off = shader_get_uniform_location(shader, "u_offset");
-        if (u_off != -1) {
-            glUniform2f(u_off, x, -y);
-        }
+        if (u_off != -1) glUniform2f(u_off, using_params ? 0.0f : x, using_params ? 0.0f : -y);
     }
 
     /* Setup vertex data */
@@ -655,6 +747,17 @@ static void gles2_draw_layer(const texture_t *texture, float x, float y,
     }
 done:
     draw_count++;
+}
+
+static void gles2_draw_layer(const texture_t *texture, float x, float y,
+                            float opacity, float blur_amount) {
+    gles2_draw_layer_internal(texture, x, y, opacity, blur_amount, NULL);
+}
+
+static void gles2_draw_layer_ex(const texture_t *texture, float x, float y,
+                               float opacity, float blur_amount,
+                               const renderer_layer_params_t *params) {
+    gles2_draw_layer_internal(texture, x, y, opacity, blur_amount, params);
 }
 
 /* Resize viewport */
@@ -734,6 +837,7 @@ const renderer_ops_t renderer_gles2_ops = {
     .bind_texture = gles2_bind_texture,
     .clear = gles2_clear,
     .draw_layer = gles2_draw_layer,
+    .draw_layer_ex = gles2_draw_layer_ex,
     .resize = gles2_resize,
     .set_vsync = gles2_set_vsync,
     .get_capabilities = gles2_get_capabilities,

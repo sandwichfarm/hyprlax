@@ -6,9 +6,10 @@ debug = false
 duration = 0.0            # workspace animation not used in cursor mode
 shift = 200               # legacy shift; unused in cursor-only mode
 vsync = false
+easing = expo
 
 [global.parallax]
-mode = "hybrid"           # Mouse-only parallax for focus-follow effect
+mode = "cursor"           # Mouse-driven parallax for focus-follow effect
 
 [global.parallax.sources]
 workspace.weight = 0.0     # disable workspace-driven movement
@@ -16,8 +17,8 @@ cursor.weight = 1.0        # fully cursor-driven
 
 # Invert X so layers shift opposite cursor (stronger depth feeling)
 [global.parallax.invert.cursor]
-x = true
-y = true
+x = false
+y = false
 
 # Clamp vertical offset to 0 to prevent the flower bottom from rising above the canvas bottom
 [global.parallax.max_offset_px]
@@ -35,21 +36,17 @@ ema_alpha = 0.25
 [[global.layers]]
 path = "bg.jpg"  # blurred background image
 # Far layer: small movement, slight vertical motion for bokeh feel
-shift_multiplier = { x = 0.20, y = 0.05 }
-opacity = 1.0
+shift_multiplier = { x = 0.20, y = 0.10 }
+opacity = 0.3
 blur = 2.0                  # strong bokeh-like blur
+fit = "cover"
+align = { x = 0.5, y = 0.8 }
 
 [[global.layers]]
-path = "flower.png"      # foreground flower with transparent bg
-# Near layer: stronger horizontal response, but Y disabled to pin bottom edge
-shift_multiplier = { x = 1.00, y = 0.00 }
+path = "flower.png"
+fit = "contain"              # no stretching
+scale = 0.70                 # smaller → sits
+align = { x = 0.5, y = -0.2 } 
+shift_multiplier = { x = 2.0, y = 1.1 }
 opacity = 1.0
-blur = 0.0                   # keep subject sharp
-
-# Notes:
-# - The flower’s bottom never crosses the screen bottom by disabling per-layer
-#   Y parallax (shift_multiplier.y = 0.0 for the flower), while allowing a small
-#   vertical motion on the blurred background for a natural bokeh feel.
-# - If vertical parallax is desired in the future, the engine should support per-layer
-#   vertical clamps (e.g., layer.clamp.offset_y_min/max) and/or anchor points.
-# - Replace the image paths with your actual assets.
+blur = 0.0

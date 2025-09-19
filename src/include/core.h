@@ -38,6 +38,15 @@ typedef struct animation_state {
     bool completed;
 } animation_state_t;
 
+/* Content scaling modes for layers */
+typedef enum {
+    LAYER_FIT_STRETCH = 0,   /* Default: stretch to fill viewport */
+    LAYER_FIT_COVER,         /* Scale to cover viewport; crop excess */
+    LAYER_FIT_CONTAIN,       /* Scale to contain; letterbox if needed */
+    LAYER_FIT_WIDTH,         /* Fit width exactly; crop or letterbox vertically */
+    LAYER_FIT_HEIGHT         /* Fit height exactly; crop or letterbox horizontally */
+} layer_fit_mode_t;
+
 /* Layer definition - temporarily named differently to avoid conflict with ipc.h */
 typedef struct parallax_layer {
     uint32_t id;
@@ -71,6 +80,13 @@ typedef struct parallax_layer {
     int height;      /* Texture height */
     int texture_width;
     int texture_height;
+
+    layer_fit_mode_t fit_mode;
+    float content_scale;          /* Additional scale multiplier (1.0 = no change) */
+    float align_x;                /* 0.0 left, 0.5 center, 1.0 right (for cover/crop alignment) */
+    float align_y;                /* 0.0 top, 0.5 center, 1.0 bottom */
+    float base_uv_x;              /* Initial UV pan offset (adds to parallax) */
+    float base_uv_y;
 
     /* Linked list */
     struct parallax_layer *next;
