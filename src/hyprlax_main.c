@@ -1023,9 +1023,7 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
         return;
     }
     
-    /* Track if this frame is actually different from last frame */
-    static float last_rendered_offset_x = -999999.0f;
-    static float last_rendered_offset_y = -999999.0f;
+    /* Track if this frame is actually different from last frame (unused placeholder removed) */
 
     /* Always use monitor list - single monitor is just count=1 */
     if (!ctx->monitors || ctx->monitors->count == 0) {
@@ -1045,13 +1043,8 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
         monitor = monitor->next;
     }
 
-    /* After presenting a frame, record current offsets to detect future changes */
-    parallax_layer_t *ly = ctx->layers;
-    while (ly) {
-        ly->prev_offset_x = ly->offset_x;
-        ly->prev_offset_y = ly->offset_y;
-        ly = ly->next;
-    }
+    /* After presenting a frame, diagnostics no longer snapshot prev offsets
+       to avoid touching core layer structs. */
 }
 
 /* Check if any layer has active animations */
@@ -1311,20 +1304,16 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                 }
             }
             if (s_render_diag && !animations_active) {
-                /* Check if any layer offsets actually changed (dirty) */
-                int dirty = 0;
-                const float EPS = 1e-5f;
-                parallax_layer_t *ly = ctx->layers;
-                while (ly) {
-                    if (fabsf(ly->offset_x - ly->prev_offset_x) > EPS ||
-                        fabsf(ly->offset_y - ly->prev_offset_y) > EPS) {
-                        dirty = 1;
-                        break;
-                    }
-                    ly = ly->next;
+                /* Log first layer offsets to aid diagnosis without prev snapshot */
+                float first_x = 0.0f, first_y = 0.0f;
+                if (ctx->layers) {
+                    first_x = ctx->layers->offset_x;
+                    first_y = ctx->layers->offset_y;
                 }
-                LOG_DEBUG("[RENDER_DIAG] idle render: resize=%d ipc=%d comp=%d final=%d dirty=%d tsr=%.3f ft=%.3f layers=%d",
-                          diag_resize, diag_ipc, diag_comp, diag_final, dirty, time_since_render, frame_time, ctx->layer_count);
+                LOG_DEBUG("[RENDER_DIAG] idle render: resize=%d ipc=%d comp=%d final=%d tsr=%.3f ft=%.3f layers=%d first_offset=%.4f,%.4f",
+                          diag_resize, diag_ipc, diag_comp, diag_final,
+                          time_since_render, frame_time, ctx->layer_count,
+                          first_x, first_y);
             }
             hyprlax_render_frame(ctx);
             ctx->fps = 1.0 / time_since_render;

@@ -143,12 +143,23 @@ Current toggles implemented
 - HYPRLAX_PERSISTENT_VBO=1 — reuse a single VBO (no per-draw create/delete).
 - HYPRLAX_UNIFORM_OFFSET=1 — compute texcoord offset in the vertex shader via u_offset.
 - HYPRLAX_NO_GLFINISH=1 — skip glFinish() before eglSwapBuffers.
+- HYPRLAX_SEPARABLE_BLUR=1 — enable two-pass FBO blur with a small fixed kernel.
+- HYPRLAX_BLUR_DOWNSCALE=N — downscale factor for separable blur FBO (e.g., 2, 3, 4).
+- HYPRLAX_FRAME_CALLBACK=1 — use wl_surface_frame pacing to avoid busy rendering.
+- HYPRLAX_PROFILE=1 — per-frame [PROFILE] logs with draw/present timings.
+- HYPRLAX_RENDER_DIAG=1 — logs [RENDER_DIAG] when rendering during idle/steady state.
 
 Examples
 - Baseline: make bench
 - Persistent VBO: HYPRLAX_PERSISTENT_VBO=1 make bench
 - Uniform offset: HYPRLAX_UNIFORM_OFFSET=1 make bench
 - Max perf: HYPRLAX_PERSISTENT_VBO=1 HYPRLAX_UNIFORM_OFFSET=1 HYPRLAX_NO_GLFINISH=1 make bench
+
+Makefile helpers
+- make bench — run optimization checks via scripts/bench/bench-optimizations.sh
+- make bench-perf — broader performance runs via scripts/bench/bench-performance.sh
+- make bench-30fps — fixed 30 FPS pacing run for power checks
+- make bench-clean — remove hyprlax-test-*.log artifacts
 
 Summary
 - Immediate changes (remove glFinish, reuse VBO, pass u_offset, cache locations) are straightforward and should yield measurable gains in both animation throughput and idle power.
