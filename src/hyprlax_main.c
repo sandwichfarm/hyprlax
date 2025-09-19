@@ -1039,6 +1039,11 @@ int hyprlax_run(hyprlax_context_t *ctx) {
     int frame_count = 0;
     double debug_timer = 0.0;
     bool needs_render = true;  /* Render first frame */
+    
+    if (ctx->config.debug) {
+        LOG_DEBUG("Frame time calculated: %.6f seconds (target FPS: %d)", 
+                  frame_time, ctx->config.target_fps);
+    }
 
     while (ctx->running) {
         double current_time = get_time();
@@ -1172,6 +1177,11 @@ int hyprlax_run(hyprlax_context_t *ctx) {
         /* Check if animations are active */
         bool animations_active = has_active_animations(ctx);
         
+        /* While animating, always need to render */
+        if (animations_active) {
+            needs_render = true;
+        }
+        
         /* Only update animations if they're active */
         if (animations_active) {
             /* Update layer animations */
@@ -1189,9 +1199,9 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             /* Re-check if animations are still active after update */
             bool still_animating = has_active_animations(ctx);
             
-            /* Render if animations are active, or one final frame when they complete */
-            if (still_animating || (animations_active && !still_animating)) {
-                needs_render = true;
+            /* Ensure one final frame when animations complete */
+            if (!still_animating && animations_active) {
+                needs_render = true;  /* Final frame */
             }
             
             /* Update the animations_active flag for next iteration */
@@ -1250,7 +1260,8 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                 /* Calculate normal frame timing */
                 double target_wake_time = last_render_time + frame_time;
                 sleep_time = target_wake_time - current_time;
-                if (sleep_time < 0) sleep_time = 0;
+                /* Don't sleep if we need to render soon */
+                if (sleep_time < 0 || sleep_time < 0.001) sleep_time = 0.001; /* Min 1ms */
             }
             
             if (sleep_time > 0) {
