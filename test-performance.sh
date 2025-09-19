@@ -68,8 +68,8 @@ sleep 5  # Extra time for GPU to settle
 echo ""
 
 # Test 1: Initial idle state
-echo "=== Test 1: Initial Idle State (5s) ==="
-IDLE_SAMPLES=5
+echo "=== Test 1: Initial Idle State (3s) ==="
+IDLE_SAMPLES=3
 IDLE_POWER_SUM=0
 IDLE_UTIL_SUM=0
 
@@ -89,14 +89,16 @@ echo ""
 
 # Test 2: Simulate workspace changes
 echo "=== Test 2: Workspace Changes (10s) ==="
+
+# Save original workspace
+ORIGINAL_WS=$(hyprctl monitors -j | jq -r '.[0].activeWorkspace.id' 2>/dev/null || echo 1)
+echo "Original workspace: $ORIGINAL_WS"
 echo "Simulating workspace changes..."
-CURRENT_WS=1
-for i in $(seq 1 5); do
-    # Change workspace using hyprctl
-    NEXT_WS=$((CURRENT_WS % 4 + 1))
+
+# Test workspace changes
+for NEXT_WS in 2 3 4 2; do
     echo "  Switching to workspace $NEXT_WS"
     hyprctl dispatch workspace $NEXT_WS 2>/dev/null
-    CURRENT_WS=$NEXT_WS
     
     sleep 0.5
     POWER=$(get_gpu_power)
@@ -105,14 +107,20 @@ for i in $(seq 1 5); do
     echo "  During animation: Power=${POWER}W, Util=${UTIL}%, State=${STATE}"
     sleep 1.5
 done
+
+# Return to original workspace
+echo "  Returning to original workspace $ORIGINAL_WS"
+hyprctl dispatch workspace $ORIGINAL_WS 2>/dev/null
+sleep 2
+
 echo ""
 
 # Test 3: Post-animation idle
-echo "=== Test 3: Post-Animation Idle (10s) ==="
+echo "=== Test 3: Post-Animation Idle (5s) ==="
 echo "Waiting for animations to complete..."
-sleep 5
+sleep 3
 
-POST_SAMPLES=5
+POST_SAMPLES=3
 POST_POWER_SUM=0
 POST_UTIL_SUM=0
 
@@ -174,5 +182,11 @@ echo ""
 echo "Stopping hyprlax..."
 kill $HYPRLAX_PID 2>/dev/null
 wait $HYPRLAX_PID 2>/dev/null
+
+# Make sure we're back on original workspace
+if [ -n "$ORIGINAL_WS" ]; then
+    echo "Ensuring return to original workspace $ORIGINAL_WS..."
+    hyprctl dispatch workspace $ORIGINAL_WS 2>/dev/null
+fi
 
 echo "Test complete."
