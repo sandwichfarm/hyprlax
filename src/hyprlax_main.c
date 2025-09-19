@@ -912,10 +912,17 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
     RENDERER_BEGIN_FRAME(ctx->renderer);
     RENDERER_CLEAR(ctx->renderer, 0.0f, 0.0f, 0.0f, 1.0f);
 
-    /* Enable blending for multi-layer compositing */
-    if (ctx->layer_count > 1) {
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    /* Enable/disable blending only when needed to avoid redundant state changes */
+    static bool s_blend_enabled = false;
+    bool need_blend = (ctx->layer_count > 1);
+    if (need_blend != s_blend_enabled) {
+        if (need_blend) {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        } else {
+            glDisable(GL_BLEND);
+        }
+        s_blend_enabled = need_blend;
     }
 
     /* Calculate scale factor for this monitor */

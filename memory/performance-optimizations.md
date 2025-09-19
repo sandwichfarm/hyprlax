@@ -19,26 +19,27 @@ Hotspots Identified
   - Commits every frame per monitor; no damage region or frame callback scheduling yet.
 
 Quick Wins (Low Risk, High Impact)
-- Remove glFinish from present()
+- Optional: skip glFinish in present()
   - File: src/renderer/gles2.c, gles2_present()
-  - Rationale: glFinish stalls CPU until GPU completes; eglSwapBuffers already synchronizes. Keep glFlush in end_frame() if desired.
-  - Expected: Lower frame latency and higher throughput during animations; reduced CPU usage.
+  - Rationale: glFinish stalls CPU; eglSwapBuffers is enough on most stacks.
+  - Implementation: Add env toggle HYPRLAX_NO_GLFINISH=1. Default keeps glFinish.
+  - Expected: Lower frame latency and higher throughput during animations.
 
-- Reuse a persistent VBO (and optionally EBO)
+- Optional: persistent VBO (and optionally EBO)
   - File: src/renderer/gles2.c, gles2_draw_layer()
   - Current: Creates and deletes a VBO every draw; uploads full vertex array each time.
-  - Change: Create one VBO in gles2_init() (already present: g_gles2_data->vbo). Bind once per frame or per program; update only what’s needed with glBufferSubData, or avoid uploads entirely (see next item).
+  - Change: With HYPRLAX_PERSISTENT_VBO=1 reuses the pre-created VBO and updates with glBufferSubData; no per-draw glGen/glDelete. When combined with uniform-offset (below), avoids buffer updates entirely.
   - Expected: Fewer driver calls, less CPU-GPU sync; noticeable CPU savings at 5+ layers.
 
-- Pass offsets via uniform instead of re-uploading vertices
+- Optional: pass offsets via uniform instead of re-uploading vertices
   - Files: src/renderer/shader.c/.h and src/renderer/gles2.c
-  - Change: Add uniform vec2 u_offset to the basic and blur vertex/fragment path and compute v_texcoord = a_texcoord + u_offset in the vertex shader. Then set u_offset per layer in draw_layer().
+  - Change: With HYPRLAX_UNIFORM_OFFSET=1, compile a vertex shader variant with uniform vec2 u_offset and compute v_texcoord = a_texcoord + u_offset; set u_offset per layer in draw_layer().
   - Benefit: Eliminates glBufferData per draw and reduces bandwidth; attribute setup remains static.
 
 - Cache uniform and attribute locations
   - Files: src/renderer/shader.c/.h
   - Current: glGetUniformLocation and glGetAttribLocation called every draw.
-  - Change: Extend shader_program_t to include a small struct of cached locations (position, texcoord, u_texture, u_opacity, u_blur_amount, u_resolution, u_offset). Populate on compile/link; reuse in draw calls.
+  - Change: Cache locations in shader_program_t after link; access via shader_get_* helpers. No behavior change; enabled by default.
   - Expected: Minor but consistent CPU reduction, fewer GL queries in hot path.
 
 - Avoid redundant state changes
@@ -87,8 +88,11 @@ Benchmarking & Validation
   1) Establish baseline
      - Run: ./test-performance.sh examples/pixel-city/parallax.conf 30
      - Save results (baseline-performance.txt exists with a recent run).
-  2) Apply quick wins
-     - Remove glFinish, reuse VBO, add u_offset uniform, cache locations.
+  2) Apply quick wins (incrementally)
+     - Enable caching (already on by default).
+     - Test HYPRLAX_PERSISTENT_VBO=1 (no behavior change, lower CPU overhead).
+     - Test HYPRLAX_UNIFORM_OFFSET=1 (reduces buffer traffic further). Combine with persistent VBO for best effect.
+     - Test HYPRLAX_NO_GLFINISH=1 (present faster; verify visuals on your compositor).
      - Rebuild: make
      - Run: ./test-optimizations.sh
      - Expect lower animation power and equal or better FPS; faster return to baseline in post-animation idle.
@@ -135,8 +139,18 @@ Notes
 - The binary may already accept a --quality flag (scripts reference it). If adding tiered quality in source, keep CLI backward compatible and document in docs/.
 - Debug: keep debug-only GL error checks and verbose logs behind config.debug or HYPRLAX_DEBUG.
 
+Current toggles implemented
+- HYPRLAX_PERSISTENT_VBO=1 — reuse a single VBO (no per-draw create/delete).
+- HYPRLAX_UNIFORM_OFFSET=1 — compute texcoord offset in the vertex shader via u_offset.
+- HYPRLAX_NO_GLFINISH=1 — skip glFinish() before eglSwapBuffers.
+
+Examples
+- Baseline: ./hyprlax -c examples/pixel-city/parallax.conf
+- Persistent VBO: HYPRLAX_PERSISTENT_VBO=1 ./hyprlax -c examples/pixel-city/parallax.conf
+- Uniform offset: HYPRLAX_UNIFORM_OFFSET=1 ./hyprlax -c examples/pixel-city/parallax.conf
+- Max perf: HYPRLAX_PERSISTENT_VBO=1 HYPRLAX_UNIFORM_OFFSET=1 HYPRLAX_NO_GLFINISH=1 ./hyprlax -c examples/pixel-city/parallax.conf
+
 Summary
 - Immediate changes (remove glFinish, reuse VBO, pass u_offset, cache locations) are straightforward and should yield measurable gains in both animation throughput and idle power.
 - Medium changes (separable blur, frame callbacks) address the biggest remaining CPU/GPU costs and idle wakeups.
 - Use the provided scripts to quantify improvements at each step and ensure behavior remains stable across monitors and compositors.
-

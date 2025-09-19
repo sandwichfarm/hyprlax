@@ -327,8 +327,21 @@ static void gles2_destroy_texture(texture_t *texture) {
 static void gles2_bind_texture(const texture_t *texture, int unit) {
     if (!texture) return;
 
-    glActiveTexture(GL_TEXTURE0 + unit);
-    glBindTexture(GL_TEXTURE_2D, texture->id);
+    /* Track last active unit and bound texture to avoid redundant state changes */
+    enum { MAX_TRACKED_UNITS = 8 };
+    static int s_active_unit = -1;
+    static GLuint s_bound_tex[MAX_TRACKED_UNITS] = {0};
+
+    if (unit < 0 || unit >= MAX_TRACKED_UNITS) unit = 0;
+
+    if (s_active_unit != unit) {
+        glActiveTexture(GL_TEXTURE0 + unit);
+        s_active_unit = unit;
+    }
+    if (s_bound_tex[unit] != texture->id) {
+        glBindTexture(GL_TEXTURE_2D, texture->id);
+        s_bound_tex[unit] = texture->id;
+    }
 }
 
 /* Draw layer */
@@ -383,6 +396,18 @@ static void gles2_draw_layer(const texture_t *texture, float x, float y,
     /* Use selected shader */
     shader_use(shader);
 
+    /* Set sampler uniform only when program changes */
+    {
+        static uint32_t s_sampler_prog = 0;
+        if (shader && shader->id != s_sampler_prog) {
+            GLint loc = shader_get_uniform_location(shader, "u_texture");
+            if (loc != -1) {
+                glUniform1i(loc, 0);
+            }
+            s_sampler_prog = shader ? shader->id : 0;
+        }
+    }
+
     /* Set uniforms */
     shader_set_uniform_float(shader, "u_opacity", opacity);
 
@@ -393,9 +418,8 @@ static void gles2_draw_layer(const texture_t *texture, float x, float y,
                                (float)g_gles2_data->width, (float)g_gles2_data->height);
     }
 
-    /* Bind texture */
+    /* Bind texture (sampler already set to unit 0 if needed) */
     gles2_bind_texture(texture, 0);
-    shader_set_uniform_int(shader, "u_texture", 0);
 
     /* If uniform-offset mode, set u_offset */
     if (use_uniform_offset && *use_uniform_offset) {

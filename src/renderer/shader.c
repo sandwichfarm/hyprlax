@@ -232,9 +232,13 @@ int shader_compile_blur(shader_program_t *program) {
 
 /* Use shader program */
 void shader_use(const shader_program_t *program) {
-    if (program && program->id) {
-        glUseProgram(program->id);
+    static uint32_t s_last_program = 0;
+    uint32_t id = (program && program->id) ? program->id : 0;
+    if (id == s_last_program) {
+        return; /* avoid redundant glUseProgram */
     }
+    glUseProgram(id);
+    s_last_program = id;
 }
 
 /* Set uniform float */

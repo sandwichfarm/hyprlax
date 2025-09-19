@@ -60,6 +60,10 @@ typedef struct monitor_instance {
     double last_frame_time;
     double target_frame_time;         /* Based on refresh rate */
 
+    /* Cached GL state per monitor */
+    int viewport_width;
+    int viewport_height;
+
     /* Workspace tracking (flexible model support) */
     workspace_context_t current_context;  /* Current workspace/tag/set state */
     workspace_context_t previous_context; /* Previous state for comparison */
