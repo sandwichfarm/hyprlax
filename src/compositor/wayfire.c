@@ -16,8 +16,6 @@
 #include <poll.h>
 #include "../include/compositor.h"
 #include "../include/hyprlax_internal.h"
-#include "../include/shared_buffer.h"
-#include "../include/log.h"
 
 /* Wayfire IPC commands */
 #define WAYFIRE_IPC_GET_WORKSPACES "list-workspaces"
@@ -34,33 +32,13 @@ typedef struct {
     int current_y;
     int grid_width;      /* Number of workspaces horizontally */
     int grid_height;     /* Number of workspaces vertically */
-    /* Headless mode support */
-    int headless_socket;    /* Socket to hyprlax-wayfire plugin */
-    bool headless_available;
-    bool headless_mode;     /* True if using plugin instead of layer-shell */
 } wayfire_data_t;
 
 /* Global instance */
 static wayfire_data_t *g_wayfire_data = NULL;
 
-/* IPC protocol definitions for plugin communication */
-#define HYPRLAX_IPC_MAGIC 0x48595052
-#define HYPRLAX_CMD_FRAME 0x01
-
-/* Frame header for plugin communication */
-typedef struct {
-    uint32_t magic;
-    uint32_t command;
-    uint32_t width;
-    uint32_t height;
-    uint32_t format;
-    uint32_t size;
-    int32_t fd;
-} hyprlax_frame_header_t;
-
 /* Forward declarations */
 static int wayfire_send_command(const char *command, char *response, size_t response_size);
-static int wayfire_send_frame_to_headless(shared_buffer_t *buffer);
 
 /* Get Wayfire socket path */
 static bool get_wayfire_socket_path(char *path, size_t size) {
@@ -86,67 +64,6 @@ static bool get_wayfire_socket_path(char *path, size_t size) {
     return true;
 }
 
-/* Check if external renderer is available */
-static bool wayfire_check_headless(void) {
-    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
-    if (!runtime_dir) {
-        return false;
-    }
-    
-    char socket_path[256];
-    snprintf(socket_path, sizeof(socket_path), 
-            "%s/hyprlax-wayfire.sock", runtime_dir);
-    
-    /* Check if socket exists */
-    return access(socket_path, F_OK) == 0;
-}
-
-/* Connect to external renderer */
-static bool wayfire_connect_headless(void) {
-    if (!g_wayfire_data) {
-        return false;
-    }
-    
-    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
-    if (!runtime_dir) {
-        return false;
-    }
-    
-    char socket_path[256];
-    snprintf(socket_path, sizeof(socket_path), 
-            "%s/hyprlax-wayfire.sock", runtime_dir);
-    
-    LOG_DEBUG("Attempting to connect to plugin socket: %s", socket_path);
-    
-    /* Create socket */
-    g_wayfire_data->headless_socket = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (g_wayfire_data->headless_socket < 0) {
-        LOG_ERROR("Failed to create socket: %s", strerror(errno));
-        return false;
-    }
-    
-    /* Connect to plugin */
-    struct sockaddr_un addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
-    
-    LOG_DEBUG("Connecting to %s on fd %d", socket_path, g_wayfire_data->headless_socket);
-    
-    if (connect(g_wayfire_data->headless_socket, 
-               (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        LOG_ERROR("Failed to connect to %s: %s", socket_path, strerror(errno));
-        close(g_wayfire_data->headless_socket);
-        g_wayfire_data->headless_socket = -1;
-        return false;
-    }
-    
-    LOG_INFO("Successfully connected to plugin at %s on fd %d", socket_path, g_wayfire_data->headless_socket);
-    
-    g_wayfire_data->headless_mode = true;
-    return true;
-}
-
 /* Initialize Wayfire adapter */
 static int wayfire_init(void *platform_data) {
     (void)platform_data;
@@ -161,26 +78,11 @@ static int wayfire_init(void *platform_data) {
     }
 
     g_wayfire_data->ipc_fd = -1;
-    g_wayfire_data->headless_socket = -1;
     g_wayfire_data->connected = false;
-    g_wayfire_data->headless_available = false;
-    g_wayfire_data->headless_mode = false;
     g_wayfire_data->current_x = 0;
     g_wayfire_data->current_y = 0;
     g_wayfire_data->grid_width = 3;   /* Default 3x3 grid */
     g_wayfire_data->grid_height = 3;
-    
-    /* Check if external renderer is available */
-    g_wayfire_data->headless_available = wayfire_check_headless();
-    LOG_DEBUG("external renderer available: %s", g_wayfire_data->headless_available ? "yes" : "no");
-    if (g_wayfire_data->headless_available) {
-        /* Try to connect to plugin */
-        if (wayfire_connect_headless()) {
-            LOG_INFO("Connected to external renderer - using headless mode");
-            /* Plugin mode: skip layer-shell surface creation */
-            return HYPRLAX_SUCCESS;
-        }
-    }
 
     return HYPRLAX_SUCCESS;
 }
@@ -192,10 +94,6 @@ static void wayfire_destroy(void) {
     if (g_wayfire_data->ipc_fd >= 0) {
         close(g_wayfire_data->ipc_fd);
     }
-    
-    if (g_wayfire_data->headless_socket >= 0) {
-        close(g_wayfire_data->headless_socket);
-    }
 
     free(g_wayfire_data);
     g_wayfire_data = NULL;
@@ -206,8 +104,7 @@ static bool wayfire_detect(void) {
     const char *desktop = getenv("XDG_CURRENT_DESKTOP");
     const char *session = getenv("XDG_SESSION_DESKTOP");
 
-    if (desktop && (strcasecmp(desktop, "wayfire") == 0 || 
-                     strncasecmp(desktop, "wayfire:", 8) == 0)) {
+    if (desktop && strcasecmp(desktop, "wayfire") == 0) {
         return true;
     }
 
@@ -333,6 +230,29 @@ static int wayfire_list_monitors(monitor_info_t **monitors, int *count) {
     return HYPRLAX_SUCCESS;
 }
 
+/* Connect socket helper */
+static int connect_wayfire_socket(const char *path) {
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) {
+        return -1;
+    }
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
+
+    if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        close(fd);
+        return -1;
+    }
+
+    /* Make socket non-blocking for event polling */
+    int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
+    return fd;
+}
 
 /* Connect to Wayfire IPC */
 static int wayfire_connect_ipc(const char *socket_path) {
@@ -530,70 +450,6 @@ static int wayfire_set_wallpaper_offset(float x, float y) {
     return HYPRLAX_SUCCESS;
 }
 
-/* Send frame to external renderer with persistent connection */
-static int wayfire_send_frame_to_headless(shared_buffer_t *buffer) {
-    if (!g_wayfire_data || !g_wayfire_data->headless_mode || !buffer) {
-        return HYPRLAX_ERROR_INVALID_ARGS;
-    }
-    
-    /* Ensure we have a connection */
-    LOG_TRACE("send_frame: headless_socket=%d", g_wayfire_data->headless_socket);
-    if (g_wayfire_data->headless_socket < 0) {
-        LOG_DEBUG("Socket not connected, reconnecting...");
-        if (!wayfire_connect_headless()) {
-            return HYPRLAX_ERROR_NO_DISPLAY;
-        }
-    }
-    
-    /* Prepare frame header */
-    hyprlax_frame_header_t header = {
-        .magic = HYPRLAX_IPC_MAGIC,
-        .command = HYPRLAX_CMD_FRAME,
-        .width = buffer->header->width,
-        .height = buffer->header->height,
-        .format = buffer->header->format,
-        .size = buffer->size,
-        .fd = buffer->fd
-    };
-    
-    /* Prepare message with file descriptor */
-    struct msghdr msg = {0};
-    struct iovec iov = {&header, sizeof(header)};
-    msg.msg_iov = &iov;
-    msg.msg_iovlen = 1;
-    
-    /* Attach file descriptor */
-    char control[CMSG_SPACE(sizeof(int))];
-    msg.msg_control = control;
-    msg.msg_controllen = sizeof(control);
-    
-    struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
-    cmsg->cmsg_level = SOL_SOCKET;
-    cmsg->cmsg_type = SCM_RIGHTS;
-    cmsg->cmsg_len = CMSG_LEN(sizeof(int));
-    *((int *)CMSG_DATA(cmsg)) = buffer->fd;
-    
-    /* Send frame header with fd using persistent connection */
-    ssize_t ret = sendmsg(g_wayfire_data->headless_socket, &msg, 0);
-    
-    if (ret < 0) {
-        LOG_ERROR("sendmsg failed: %s (errno=%d)", strerror(errno), errno);
-        /* Connection lost, try to reconnect on next frame */
-        close(g_wayfire_data->headless_socket);
-        g_wayfire_data->headless_socket = -1;
-        return HYPRLAX_ERROR_NO_DISPLAY;
-    } else if (ret != sizeof(header)) {
-        LOG_WARN("sendmsg sent %zd bytes, expected %zu", ret, sizeof(header));
-    } else {
-        LOG_TRACE("Frame sent successfully, %zd bytes", ret);
-    }
-    
-    return HYPRLAX_SUCCESS;
-}/* Check if using headless mode */
-bool wayfire_is_headless_mode(void) {
-    return g_wayfire_data && g_wayfire_data->headless_mode;
-}
-
 /* Wayfire compositor operations */
 const compositor_ops_t compositor_wayfire_ops = {
     .init = wayfire_init,
@@ -617,6 +473,6 @@ const compositor_ops_t compositor_wayfire_ops = {
     .supports_animations = wayfire_supports_animations,
     .set_blur = wayfire_set_blur,
     .set_wallpaper_offset = wayfire_set_wallpaper_offset,
-    .is_headless_mode = wayfire_is_headless_mode,
-    .send_frame = (int (*)(void *))wayfire_send_frame_to_headless,
+    .is_headless_mode = NULL,
+    .send_frame = NULL,
 };

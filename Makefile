@@ -333,19 +333,4 @@ lint-fix:
 clean-tests:
 	rm -f $(ALL_TEST_TARGETS) tests/*.valgrind.log tests/*.valgrind.log.* tests/*.valgrind.log.core.*
 
-# Wayfire plugin build target
-wayfire-plugin:
-	@echo "Building Wayfire plugin..."
-	@mkdir -p plugins/wayfire/build
-	@g++ -shared -fPIC \
-		-o plugins/wayfire/build/libhyprlax.so \
-		plugins/wayfire/libhyprlax.cpp \
-		`pkg-config --cflags --libs wayfire` \
-		`pkg-config --cflags --libs glesv2` \
-		-std=c++17 -pthread
-
-wayfire-plugin-install: wayfire-plugin
-	@echo "Installing Wayfire plugin..."
-	@sudo cp plugins/wayfire/build/libhyprlax.so /usr/lib/wayfire/
-
-.PHONY: all clean install install-user uninstall uninstall-user test memcheck clean-tests lint lint-fix wayfire-plugin wayfire-plugin-install
+.PHONY: all clean install install-user uninstall uninstall-user test memcheck clean-tests lint lint-fix
