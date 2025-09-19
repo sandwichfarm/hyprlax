@@ -22,6 +22,14 @@ typedef struct shader_program {
     uint32_t id;
     char *name;
     bool compiled;
+    /* Cached locations for hot path (filled after link) */
+    int loc_pos_attrib;
+    int loc_tex_attrib;
+    int loc_u_texture;
+    int loc_u_opacity;
+    int loc_u_blur_amount;
+    int loc_u_resolution;
+    bool cache_ready;
 } shader_program_t;
 
 /* Uniform location cache */
@@ -52,6 +60,10 @@ void shader_set_uniform_vec2(const shader_program_t *program,
                            const char *name, float x, float y);
 void shader_set_uniform_int(const shader_program_t *program,
                           const char *name, int value);
+
+/* Fast accessors for cached locations (returns -1 if not present) */
+int shader_get_attrib_location(const shader_program_t *program, const char *name);
+int shader_get_uniform_location(const shader_program_t *program, const char *name);
 
 /* Get cached uniform locations */
 shader_uniforms_t* shader_get_uniforms(shader_program_t *program);
