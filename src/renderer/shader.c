@@ -81,6 +81,31 @@ static const char *shader_fragment_blur_template =
     "    gl_FragColor = vec4(result.rgb * final_alpha, final_alpha);\n"
     "}\n";
 
+/* Separable blur fragment shader (directional) */
+static const char *shader_fragment_blur_separable =
+    "precision highp float;\n"
+    "varying vec2 v_texcoord;\n"
+    "uniform sampler2D u_texture;\n"
+    "uniform float u_opacity;\n"
+    "uniform vec2 u_resolution;\n"
+    "uniform float u_blur_amount;\n"
+    "uniform vec2 u_direction;\n"
+    "\n"
+    "void main() {\n"
+    "    vec2 texel = 1.0 / u_resolution;\n"
+    "    float radius = u_blur_amount * 5.0;\n"
+    "    vec4 sum = vec4(0.0);\n"
+    "    float total = 0.0;\n"
+    "    for (float i = -radius; i <= radius; i += 1.0) {\n"
+    "        float w = exp(-(i*i) / (2.0 * 0.15 * 0.15));\n"
+    "        sum += texture2D(u_texture, v_texcoord + u_direction * texel * i) * w;\n"
+    "        total += w;\n"
+    "    }\n"
+    "    vec4 result = sum / total;\n"
+    "    float final_alpha = result.a * u_opacity;\n"
+    "    gl_FragColor = vec4(result.rgb * final_alpha, final_alpha);\n"
+    "}\n";
+
 /* Create a new shader program */
 shader_program_t* shader_create_program(const char *name) {
     shader_program_t *program = calloc(1, sizeof(shader_program_t));
@@ -228,6 +253,17 @@ int shader_compile_blur(shader_program_t *program) {
 
     free(blur_fragment_src);
     return result;
+}
+
+/* Compile separable blur shader */
+int shader_compile_separable_blur(shader_program_t *program) {
+    if (!program) return HYPRLAX_ERROR_INVALID_ARGS;
+    return shader_compile(program, shader_vertex_basic, shader_fragment_blur_separable);
+}
+
+int shader_compile_separable_blur_with_vertex(shader_program_t *program, const char *vertex_src) {
+    if (!program || !vertex_src) return HYPRLAX_ERROR_INVALID_ARGS;
+    return shader_compile(program, vertex_src, shader_fragment_blur_separable);
 }
 
 /* Use shader program */

@@ -53,6 +53,8 @@ int shader_compile(shader_program_t *program,
                   const char *fragment_src);
 
 int shader_compile_blur(shader_program_t *program);
+int shader_compile_separable_blur(shader_program_t *program);
+int shader_compile_separable_blur_with_vertex(shader_program_t *program, const char *vertex_src);
 
 void shader_use(const shader_program_t *program);
 void shader_set_uniform_float(const shader_program_t *program,

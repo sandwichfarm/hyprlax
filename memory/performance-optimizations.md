@@ -79,14 +79,14 @@ Advanced (Optional/Future)
   - Enable vsync during active animations for smoother pacing; disable when idle to avoid blocking. Requires careful toggling via eglSwapInterval to prevent stutter.
 
 Benchmarking & Validation
-- Scripts provided in repo:
-  - ./test-optimizations.sh — runs multiple settings (FPS and quality). Produces hyprlax-test-*.log with idle/animation/post metrics.
-  - ./test-performance.sh — end-to-end power/FPS/idle behavior (expects NVIDIA nvidia-smi; adapt to radeontop for AMD).
-  - ./test-quality.sh — compares quality tiers (if supported by the binary).
+- Scripts/targets to run benches:
+  - make bench — runs scripts/bench/bench-optimizations.sh (produces hyprlax-test-*.log)
+  - make bench-perf — runs scripts/bench/bench-performance.sh (end-to-end power/FPS/idle)
+  - make bench-30fps — convenience 30 FPS test wrapper
 
 - Recommended workflow
   1) Establish baseline
-     - Run: ./test-performance.sh examples/pixel-city/parallax.conf 30
+     - Run: make bench-perf (or scripts/bench/bench-performance.sh examples/pixel-city/parallax.conf 30)
      - Save results (baseline-performance.txt exists with a recent run).
   2) Apply quick wins (incrementally)
      - Enable caching (already on by default).
@@ -94,11 +94,11 @@ Benchmarking & Validation
      - Test HYPRLAX_UNIFORM_OFFSET=1 (reduces buffer traffic further). Combine with persistent VBO for best effect.
      - Test HYPRLAX_NO_GLFINISH=1 (present faster; verify visuals on your compositor).
      - Rebuild: make
-     - Run: ./test-optimizations.sh
+     - Run: make bench
      - Expect lower animation power and equal or better FPS; faster return to baseline in post-animation idle.
   3) Implement separable blur (optional)
      - Gate by a quality flag; verify blur-on performance.
-     - Compare ./test-optimizations.sh results for Low/Medium/High tiers.
+     - Compare make bench results across presets when available.
   4) Event-driven idle
      - Add frame callbacks; verify post-animation power approaches baseline within seconds.
 
@@ -131,8 +131,8 @@ Risks and Mitigations
 
 Test Checklist (post-change)
 - make && make test — no warnings; tests pass.
-- ./test-optimizations.sh — improved idle/post power; stable FPS.
-- ./test-performance.sh — post-animation power near baseline; IPC and resizing still work.
+- make bench — improved idle/post power; stable FPS.
+- make bench-perf — post-animation power near baseline; IPC and resizing still work.
 - Visual parity across quality levels where blur is off.
 
 Notes
@@ -145,10 +145,10 @@ Current toggles implemented
 - HYPRLAX_NO_GLFINISH=1 — skip glFinish() before eglSwapBuffers.
 
 Examples
-- Baseline: ./hyprlax -c examples/pixel-city/parallax.conf
-- Persistent VBO: HYPRLAX_PERSISTENT_VBO=1 ./hyprlax -c examples/pixel-city/parallax.conf
-- Uniform offset: HYPRLAX_UNIFORM_OFFSET=1 ./hyprlax -c examples/pixel-city/parallax.conf
-- Max perf: HYPRLAX_PERSISTENT_VBO=1 HYPRLAX_UNIFORM_OFFSET=1 HYPRLAX_NO_GLFINISH=1 ./hyprlax -c examples/pixel-city/parallax.conf
+- Baseline: make bench
+- Persistent VBO: HYPRLAX_PERSISTENT_VBO=1 make bench
+- Uniform offset: HYPRLAX_UNIFORM_OFFSET=1 make bench
+- Max perf: HYPRLAX_PERSISTENT_VBO=1 HYPRLAX_UNIFORM_OFFSET=1 HYPRLAX_NO_GLFINISH=1 make bench
 
 Summary
 - Immediate changes (remove glFinish, reuse VBO, pass u_offset, cache locations) are straightforward and should yield measurable gains in both animation throughput and idle power.

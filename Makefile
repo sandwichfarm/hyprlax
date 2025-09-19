@@ -362,4 +362,16 @@ lint-fix:
 clean-tests:
 	rm -f $(ALL_TEST_TARGETS) tests/*.valgrind.log tests/*.valgrind.log.* tests/*.valgrind.log.core.*
 
-.PHONY: all clean install install-user uninstall uninstall-user test memcheck clean-tests lint lint-fix
+.PHONY: all clean install install-user uninstall uninstall-user test memcheck clean-tests lint lint-fix bench bench-perf bench-30fps bench-clean
+# Benchmark helpers
+bench:
+	@./scripts/bench/bench-optimizations.sh
+
+bench-perf:
+	@./scripts/bench/bench-performance.sh
+
+bench-30fps:
+	@./scripts/bench/bench-30fps.sh
+
+bench-clean:
+	@rm -f hyprlax-test-*.log || true

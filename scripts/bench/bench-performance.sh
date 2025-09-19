@@ -3,6 +3,11 @@
 # Performance testing script for hyprlax
 # Tests GPU usage, FPS, and idle behavior
 
+# Always run from repo root
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$ROOT_DIR" || exit 1
+
 CONFIG=${1:-"/home/sandwich/Develop/hyprlax/examples/pixel-city/parallax.conf"}
 DURATION=${2:-30}  # Test duration in seconds
 
