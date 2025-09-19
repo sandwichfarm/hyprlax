@@ -658,6 +658,14 @@ static void output_handle_done(void *data, struct wl_output *output) {
                 config_t *config = monitor_resolve_config(mon, &g_wayland_data->ctx->config);
                 monitor_apply_config(mon, config);
 
+                /* Set initial workspace context from compositor */
+                if (g_wayland_data->ctx->compositor) {
+                    workspace_model_t model = workspace_detect_model(g_wayland_data->ctx->compositor->type);
+                    mon->current_context.model = model;
+                    mon->current_context.data.workspace_id = COMPOSITOR_GET_WORKSPACE(g_wayland_data->ctx->compositor);
+                    mon->previous_context = mon->current_context;
+                }
+
                 /* Add to monitor list */
                 monitor_list_add(g_wayland_data->ctx->monitors, mon);
 

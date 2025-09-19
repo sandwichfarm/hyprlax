@@ -160,11 +160,56 @@ static int niri_init(void *platform_data) {
     g_niri_data->event_stream = NULL;
     g_niri_data->event_pid = 0;
     g_niri_data->connected = false;
-    g_niri_data->current_workspace_id = 1;
-    g_niri_data->focused_window_id = -1;
-    g_niri_data->current_column = 0;
-    g_niri_data->current_row = 0;
+    /* Query initial state from Niri */
+    FILE *query = popen("niri msg --json focused-window 2>/dev/null", "r");
+    if (query) {
+        char buffer[4096];
+        if (fgets(buffer, sizeof(buffer), query)) {
+            /* Parse workspace ID */
+            char *ws_str = strstr(buffer, "\"workspace_id\":");
+            if (ws_str) {
+                ws_str += 15;
+                g_niri_data->current_workspace_id = atoi(ws_str);
+            }
+            
+            /* Parse column position */
+            char *pos_str = strstr(buffer, "\"pos_in_scrolling_layout\":");
+            if (pos_str) {
+                pos_str += 26;
+                if (strncmp(pos_str, "null", 4) != 0) {
+                    char *bracket = strchr(pos_str, '[');
+                    if (bracket) {
+                        g_niri_data->current_column = atoi(bracket + 1);
+                        char *comma = strchr(bracket, ',');
+                        if (comma) {
+                            g_niri_data->current_row = atoi(comma + 1);
+                        }
+                    }
+                }
+            }
+            
+            /* Parse window ID */
+            char *id_str = strstr(buffer, "\"id\":");
+            if (id_str) {
+                id_str += 5;
+                g_niri_data->focused_window_id = atoi(id_str);
+            }
+        }
+        pclose(query);
+    } else {
+        /* Fallback to defaults if query fails */
+        g_niri_data->current_workspace_id = 1;
+        g_niri_data->focused_window_id = -1;
+        g_niri_data->current_column = 0;
+        g_niri_data->current_row = 0;
+    }
     g_niri_data->debug_enabled = getenv("HYPRLAX_DEBUG") != NULL;
+    
+    if (g_niri_data->debug_enabled) {
+        fprintf(stderr, "[DEBUG] Niri: Initial state - workspace %d, column %d, row %d, window %d\n",
+                g_niri_data->current_workspace_id, g_niri_data->current_column, 
+                g_niri_data->current_row, g_niri_data->focused_window_id);
+    }
     g_niri_data->windows = NULL;
     g_niri_data->window_count = 0;
     g_niri_data->window_capacity = 0;
@@ -257,7 +302,8 @@ static void niri_destroy_layer_surface(void *layer_surface) {
 /* Get current workspace */
 static int niri_get_current_workspace(void) {
     if (!g_niri_data) return 0;
-    return g_niri_data->current_workspace_id;
+    /* Return encoded position for 2D tracking */
+    return g_niri_data->current_workspace_id * 1000 + g_niri_data->current_column;
 }
 
 /* Get workspace count */
@@ -515,15 +561,16 @@ static int niri_poll_events(compositor_event_t *event) {
                     /* Column changed - generate workspace change event */
                     event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
                     
-                    /* Use column positions as workspace IDs for parallax */
-                    event->data.workspace.from_workspace = old_column;
-                    event->data.workspace.to_workspace = new_column;
+                    /* For backwards compatibility, encode both workspace and column */
+                    event->data.workspace.from_workspace = g_niri_data->current_workspace_id * 1000 + old_column;
+                    event->data.workspace.to_workspace = g_niri_data->current_workspace_id * 1000 + new_column;
                     
                     /* Provide X coordinate change for 2D handling */
+                    /* Keep current workspace ID for Y coordinate */
                     event->data.workspace.from_x = old_column;
-                    event->data.workspace.from_y = 0;
+                    event->data.workspace.from_y = g_niri_data->current_workspace_id;
                     event->data.workspace.to_x = new_column;
-                    event->data.workspace.to_y = 0;
+                    event->data.workspace.to_y = g_niri_data->current_workspace_id;
                     
                     g_niri_data->current_column = new_column;
                     
@@ -624,13 +671,14 @@ static int niri_poll_events(compositor_event_t *event) {
             if (new_workspace_id != g_niri_data->current_workspace_id) {
                 /* Vertical workspace change */
                 event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
-                event->data.workspace.from_workspace = g_niri_data->current_workspace_id;
-                event->data.workspace.to_workspace = new_workspace_id;
+                event->data.workspace.from_workspace = g_niri_data->current_workspace_id * 1000 + g_niri_data->current_column;
+                event->data.workspace.to_workspace = new_workspace_id * 1000 + g_niri_data->current_column;
                 
                 /* Use Y coordinate for vertical changes */
-                event->data.workspace.from_x = 0;
+                /* Keep current column for X coordinate */
+                event->data.workspace.from_x = g_niri_data->current_column;
                 event->data.workspace.from_y = g_niri_data->current_workspace_id;
-                event->data.workspace.to_x = 0;
+                event->data.workspace.to_x = g_niri_data->current_column;
                 event->data.workspace.to_y = new_workspace_id;
                 
                 g_niri_data->current_workspace_id = new_workspace_id;

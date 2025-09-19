@@ -339,7 +339,7 @@ workspace_offset_t workspace_calculate_offset_2d(const workspace_context_t *from
             /* This is temporary until TOML config supports separate X/Y values */
             offset.y = (to_y - from_y) * shift_pixels;
             
-            if (getenv("HYPRLAX_DEBUG")) {
+            if (1) { /* Always debug for now */
                 fprintf(stderr, "[DEBUG]   Niri workspace ID %d->%d decoded as:\n",
                         from->data.workspace_id, to->data.workspace_id);
                 fprintf(stderr, "[DEBUG]     Position: (%d,%d) -> (%d,%d)\n",

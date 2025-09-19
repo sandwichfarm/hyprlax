@@ -248,13 +248,13 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
 
     /* Check if context actually changed */
     if (workspace_context_equal(&monitor->current_context, new_context)) {
-        if (getenv("HYPRLAX_DEBUG")) {
+        if (ctx && ctx->config.debug) {
             fprintf(stderr, "[DEBUG] monitor_handle_workspace_context_change: No change detected\n");
         }
         return;
     }
 
-    if (getenv("HYPRLAX_DEBUG")) {
+    if (ctx && ctx->config.debug) {
         fprintf(stderr, "[DEBUG] monitor_handle_workspace_context_change:\n");
         fprintf(stderr, "[DEBUG]   Monitor: %s\n", monitor->name);
         fprintf(stderr, "[DEBUG]   Model: %s\n", workspace_model_to_string(new_context->model));
@@ -277,7 +277,7 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
                                                  new_context,
                                                  monitor->config ? monitor->config->shift_pixels : 200.0f,
                                                  NULL);
-        if (getenv("HYPRLAX_DEBUG")) {
+        if (ctx && ctx->config.debug) {
             fprintf(stderr, "[DEBUG]   Using 2D offset calculation\n");
         }
     } else {
@@ -288,12 +288,12 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
                                               NULL);
         offset_2d.x = offset_1d;
         offset_2d.y = 0.0f;
-        if (getenv("HYPRLAX_DEBUG")) {
+        if (ctx && ctx->config.debug) {
             fprintf(stderr, "[DEBUG]   Using 1D offset calculation\n");
         }
     }
 
-    if (getenv("HYPRLAX_DEBUG")) {
+    if (ctx && ctx->config.debug) {
         fprintf(stderr, "[DEBUG]   Offset: X=%.1f, Y=%.1f\n", offset_2d.x, offset_2d.y);
     }
 
@@ -312,7 +312,7 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
             monitor->parallax_offset_y += offset_2d.y;
             absolute_target_x = monitor->parallax_offset_x;
             absolute_target_y = monitor->parallax_offset_y;
-            if (getenv("HYPRLAX_DEBUG")) {
+            if (ctx && ctx->config.debug) {
                 fprintf(stderr, "[DEBUG]   2D accumulative offset: X=%.1f, Y=%.1f\n",
                         monitor->parallax_offset_x, monitor->parallax_offset_y);
             }
@@ -323,7 +323,7 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
             absolute_target_x = (target_workspace - base_workspace) *
                               (monitor->config ? monitor->config->shift_pixels : 200.0f);
             absolute_target_y = 0.0f;
-            if (getenv("HYPRLAX_DEBUG")) {
+            if (ctx && ctx->config.debug) {
                 fprintf(stderr, "[DEBUG]   1D absolute position: X=%.1f (workspace %d)\n",
                         absolute_target_x, target_workspace);
             }
@@ -331,7 +331,7 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
 
         /* Update all layers with their absolute target positions */
         if (ctx->layers) {
-            if (getenv("HYPRLAX_DEBUG")) {
+            if (ctx && ctx->config.debug) {
                 fprintf(stderr, "[DEBUG]   Updating layers with target: X=%.1f, Y=%.1f\n",
                         absolute_target_x, absolute_target_y);
             }
@@ -351,7 +351,7 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
                 }
                 float layer_target_y = absolute_target_y * layer->shift_multiplier * aspect_ratio;
                 
-                if (getenv("HYPRLAX_DEBUG")) {
+                if (ctx && ctx->config.debug) {
                     fprintf(stderr, "[DEBUG]     Layer %d: multiplier=%.2f, aspect=%.2f, target=(%.1f, %.1f)\n",
                             layer_count++, layer->shift_multiplier, aspect_ratio, 
                             layer_target_x, layer_target_y);
@@ -364,7 +364,7 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
                 layer = layer->next;
             }
         } else {
-            if (getenv("HYPRLAX_DEBUG")) {
+            if (ctx && ctx->config.debug) {
                 fprintf(stderr, "[DEBUG]   WARNING: No layers to update!\n");
             }
         }
