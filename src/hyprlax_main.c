@@ -1207,9 +1207,21 @@ int hyprlax_run(hyprlax_context_t *ctx) {
         /* Check if animations are active */
         bool animations_active = has_active_animations(ctx);
         
-        /* While animating, always need to render */
+        /* While animating, always need to render; with frame callbacks, wait for compositor pacing */
+        const char *use_fc = getenv("HYPRLAX_FRAME_CALLBACK");
         if (animations_active) {
-            needs_render = true;
+            if (use_fc && *use_fc && ctx->monitors) {
+                /* Render when at least one monitor's frame callback has fired */
+                bool can_render = false;
+                monitor_instance_t *m = ctx->monitors->head;
+                while (m) {
+                    if (!m->frame_pending) { can_render = true; break; }
+                    m = m->next;
+                }
+                needs_render = needs_render || can_render;
+            } else {
+                needs_render = true;
+            }
         }
         
         /* Only update animations if they're active */
@@ -1245,7 +1257,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
          * 1. We need to render (animation active, workspace changed, etc.)
          * 2. Enough time has passed since last frame (respecting target FPS)
          */
-        if (needs_render && time_since_render >= frame_time) {
+        if (needs_render && ((use_fc && *use_fc) ? true : (time_since_render >= frame_time))) {
             if (ctx->config.debug) {
                 static double last_log_time = 0;
                 if (current_time - last_log_time > 1.0) {
@@ -1289,10 +1301,15 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                 }
             } else {
                 /* Calculate normal frame timing */
-                double target_wake_time = last_render_time + frame_time;
-                sleep_time = target_wake_time - current_time;
-                /* Don't sleep if we need to render soon */
-                if (sleep_time < 0 || sleep_time < 0.001) sleep_time = 0.001; /* Min 1ms */
+                if (use_fc && *use_fc) {
+                    /* With frame callbacks, avoid long sleeps and let Wayland pacing drive us */
+                    sleep_time = 0.001; /* minimal */
+                } else {
+                    double target_wake_time = last_render_time + frame_time;
+                    sleep_time = target_wake_time - current_time;
+                    /* Don't sleep if we need to render soon */
+                    if (sleep_time < 0 || sleep_time < 0.001) sleep_time = 0.001; /* Min 1ms */
+                }
             }
             
             if (sleep_time > 0) {

@@ -10,6 +10,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <time.h>
+#include <poll.h>
 #include <wayland-client.h>
 #include <wayland-egl.h>
 #include <GLES2/gl2.h>
@@ -67,6 +68,23 @@ typedef struct {
 
 /* Global instance (simplified for now) */
 static wayland_data_t *g_wayland_data = NULL;
+
+/* Frame callback handling for pacing */
+static void frame_done(void *data, struct wl_callback *cb, uint32_t time) {
+    monitor_instance_t *monitor = (monitor_instance_t *)data;
+    if (monitor) {
+        monitor_frame_done(monitor);
+        /* time is in ms; store seconds for consistency if needed elsewhere */
+        monitor->last_frame_time = time / 1000.0;
+    }
+    if (cb) {
+        wl_callback_destroy(cb);
+    }
+}
+
+static const struct wl_callback_listener frame_listener = {
+    .done = frame_done,
+};
 
 /* Store context for monitor detection - set by platform init */
 void wayland_set_context(hyprlax_context_t *ctx) {
@@ -528,6 +546,23 @@ static int wayland_poll_events(platform_event_t *event) {
         wl_display_dispatch_pending(g_wayland_data->display);
         /* Then flush any pending requests */
         wl_display_flush(g_wayland_data->display);
+
+        /* If frame-callback pacing is enabled, non-blocking read of Wayland events */
+        const char *use_fc = getenv("HYPRLAX_FRAME_CALLBACK");
+        if (use_fc && *use_fc) {
+            int fd = wl_display_get_fd(g_wayland_data->display);
+            if (wl_display_prepare_read(g_wayland_data->display) == 0) {
+                struct pollfd pfd = { .fd = fd, .events = POLLIN, .revents = 0 };
+                int pret = poll(&pfd, 1, 0);
+                if (pret > 0) {
+                    wl_display_read_events(g_wayland_data->display);
+                } else {
+                    wl_display_cancel_read(g_wayland_data->display);
+                }
+            } else {
+                wl_display_dispatch_pending(g_wayland_data->display);
+            }
+        }
     }
 
     /* Check for pending resize event */
@@ -715,7 +750,20 @@ static const char* wayland_get_backend_name(void) {
 /* Commit a monitor's Wayland surface */
 void wayland_commit_monitor_surface(monitor_instance_t *monitor) {
     if (monitor && monitor->wl_surface) {
+        /* Request a frame callback to pace the next frame if not already pending */
+        const char *use_fc = getenv("HYPRLAX_FRAME_CALLBACK");
+        if (use_fc && *use_fc && !monitor->frame_pending) {
+            struct wl_callback *cb = wl_surface_frame(monitor->wl_surface);
+            if (cb) {
+                monitor->frame_callback = cb;
+                wl_callback_add_listener(cb, &frame_listener, monitor);
+                monitor_mark_frame_pending(monitor);
+            }
+        }
         wl_surface_commit(monitor->wl_surface);
+        if (g_wayland_data && g_wayland_data->display) {
+            wl_display_flush(g_wayland_data->display);
+        }
     }
 }
 
