@@ -30,6 +30,7 @@ typedef struct {
     /* Shaders */
     shader_program_t *basic_shader;
     shader_program_t *blur_shader;
+    shader_program_t *blur_sep_shader;
 
     /* Vertex buffer for quad rendering */
     GLuint vbo;
@@ -41,10 +42,17 @@ typedef struct {
     int width;
     int height;
     bool vsync_enabled;
+    /* Separable blur target */
+    GLuint blur_fbo;
+    GLuint blur_tex;
+    int blur_downscale; /* 0/1 = full res; >1 = downscale factor */
+    int blur_w;
+    int blur_h;
 } gles2_renderer_data_t;
 
 /* Global instance */
 static gles2_renderer_data_t *g_gles2_data = NULL;
+static void gles2_create_blur_target(int width, int height);
 
 /* Quad vertices for layer rendering */
 static const GLfloat quad_vertices[] = {
@@ -155,7 +163,10 @@ static int gles2_init(void *native_display, void *native_window,
         fprintf(stderr, "[DEBUG] Compiling basic shader\n");
     }
     data->basic_shader = shader_create_program("basic");
-    if (shader_compile(data->basic_shader, shader_vertex_basic,
+    const char *use_uniform_offset = getenv("HYPRLAX_UNIFORM_OFFSET");
+    const char *vertex_src = (use_uniform_offset && *use_uniform_offset) ?
+                              shader_vertex_basic_offset : shader_vertex_basic;
+    if (shader_compile(data->basic_shader, vertex_src,
                       shader_fragment_basic) != HYPRLAX_SUCCESS) {
         fprintf(stderr, "Failed to compile basic shader\n");
         /* Continue anyway - we need at least basic rendering */
@@ -167,9 +178,33 @@ static int gles2_init(void *native_display, void *native_window,
     if (getenv("HYPRLAX_DEBUG")) {
         fprintf(stderr, "[DEBUG] Compiling blur shader\n");
     }
+    const char *use_separable = getenv("HYPRLAX_SEPARABLE_BLUR");
+    const char *down_env = getenv("HYPRLAX_BLUR_DOWNSCALE");
+    if (down_env && *down_env) {
+        int f = atoi(down_env);
+        if (f > 1 && f < 16) data->blur_downscale = f; /* sanity bounds */
+    }
+    if (use_separable && *use_separable) {
+        data->blur_sep_shader = shader_create_program("blur_separable");
+        /* Always compile separable blur with offset-capable vertex shader so u_offset is available */
+        if (shader_compile_separable_blur_with_vertex(data->blur_sep_shader, shader_vertex_basic_offset) != HYPRLAX_SUCCESS) {
+            fprintf(stderr, "Warning: Failed to compile separable blur shader\n");
+            shader_destroy_program(data->blur_sep_shader);
+            data->blur_sep_shader = NULL;
+        } else if (getenv("HYPRLAX_DEBUG")) {
+            fprintf(stderr, "[DEBUG] Separable blur shader compiled successfully, id=%u\n",
+                    data->blur_sep_shader->id);
+        }
+        if (data->blur_sep_shader) {
+            gles2_create_blur_target(config->width, config->height);
+        }
+    }
+
+    /* Legacy single-pass blur as fallback */
     data->blur_shader = shader_create_program("blur");
-    if (shader_compile_blur(data->blur_shader) != HYPRLAX_SUCCESS) {
-        fprintf(stderr, "Warning: Failed to compile blur shader - blur effects disabled\n");
+    if ((use_uniform_offset && *use_uniform_offset) ?
+        (shader_compile_blur_with_vertex(data->blur_shader, shader_vertex_basic_offset) != HYPRLAX_SUCCESS) :
+        (shader_compile_blur(data->blur_shader) != HYPRLAX_SUCCESS)) {
         shader_destroy_program(data->blur_shader);
         data->blur_shader = NULL;
     } else if (getenv("HYPRLAX_DEBUG")) {
@@ -182,7 +217,7 @@ static int gles2_init(void *native_display, void *native_window,
     data->height = config->height;
     data->vsync_enabled = config->vsync;
 
-    /* Set vsync if requested */
+    /* Set vsync if requested (default off to prevent GPU blocking when idle) */
     eglSwapInterval(data->egl_display, config->vsync ? 1 : 0);
 
     /* Store private data globally */
@@ -201,6 +236,9 @@ static void gles2_destroy(void) {
 
     if (g_gles2_data->blur_shader) {
         shader_destroy_program(g_gles2_data->blur_shader);
+    }
+    if (g_gles2_data->blur_sep_shader) {
+        shader_destroy_program(g_gles2_data->blur_sep_shader);
     }
 
     if (g_gles2_data->vbo) {
@@ -221,6 +259,13 @@ static void gles2_destroy(void) {
 
     if (g_gles2_data->egl_display != EGL_NO_DISPLAY) {
         eglTerminate(g_gles2_data->egl_display);
+    }
+
+    if (g_gles2_data->blur_tex) {
+        glDeleteTextures(1, &g_gles2_data->blur_tex);
+    }
+    if (g_gles2_data->blur_fbo) {
+        glDeleteFramebuffers(1, &g_gles2_data->blur_fbo);
     }
 
     free(g_gles2_data);
@@ -247,6 +292,11 @@ static void gles2_present(void) {
                         g_gles2_data->current_surface :
                         g_gles2_data->egl_surface;
 
+    /* Allow skipping glFinish via env for performance testing */
+    const char *no_finish = getenv("HYPRLAX_NO_GLFINISH");
+    if (!no_finish || strcmp(no_finish, "0") == 0) {
+        glFinish();
+    }
     eglSwapBuffers(g_gles2_data->egl_display, surface);
 }
 
@@ -317,8 +367,21 @@ static void gles2_destroy_texture(texture_t *texture) {
 static void gles2_bind_texture(const texture_t *texture, int unit) {
     if (!texture) return;
 
-    glActiveTexture(GL_TEXTURE0 + unit);
-    glBindTexture(GL_TEXTURE_2D, texture->id);
+    /* Track last active unit and bound texture to avoid redundant state changes */
+    enum { MAX_TRACKED_UNITS = 8 };
+    static int s_active_unit = -1;
+    static GLuint s_bound_tex[MAX_TRACKED_UNITS] = {0};
+
+    if (unit < 0 || unit >= MAX_TRACKED_UNITS) unit = 0;
+
+    if (s_active_unit != unit) {
+        glActiveTexture(GL_TEXTURE0 + unit);
+        s_active_unit = unit;
+    }
+    if (s_bound_tex[unit] != texture->id) {
+        glBindTexture(GL_TEXTURE_2D, texture->id);
+        s_bound_tex[unit] = texture->id;
+    }
 }
 
 /* Draw layer */
@@ -347,50 +410,213 @@ static void gles2_draw_layer(const texture_t *texture, float x, float y,
          1.0f,  1.0f,  1.0f, 0.0f   /* Top-right */
     };
 
-    /* Adjust texture coordinates based on x and y offset */
-    vertices[2] = x;          /* Bottom-left U */
-    vertices[3] = 1.0f - y;   /* Bottom-left V (inverted) */
-    vertices[6] = 1.0f + x;   /* Bottom-right U */
-    vertices[7] = 1.0f - y;   /* Bottom-right V (inverted) */
-    vertices[10] = x;         /* Top-left U */
-    vertices[11] = 0.0f - y;  /* Top-left V (inverted) */
-    vertices[14] = 1.0f + x;  /* Top-right U */
-    vertices[15] = 0.0f - y;  /* Top-right V (inverted) */
+    /* Adjust coordinates based on mode */
+    const char *use_uniform_offset = getenv("HYPRLAX_UNIFORM_OFFSET");
+    /* Don't mutate texcoords when using separable blur; offsets will be applied via uniforms */
+    /* no-op placeholder removed */
+    if (0) {}
+
+    if (!(use_uniform_offset && *use_uniform_offset) /* legacy single-pass path, updated below after sep check */) {
+        /* Legacy path: encode offset into texcoords */
+        vertices[2] = x;          /* Bottom-left U */
+        vertices[3] = 1.0f - y;   /* Bottom-left V (inverted) */
+        vertices[6] = 1.0f + x;   /* Bottom-right U */
+        vertices[7] = 1.0f - y;   /* Bottom-right V (inverted) */
+        vertices[10] = x;         /* Top-left U */
+        vertices[11] = 0.0f - y;  /* Top-left V (inverted) */
+        vertices[14] = 1.0f + x;  /* Top-right U */
+        vertices[15] = 0.0f - y;  /* Top-right V (inverted) */
+    }
 
     /* Choose shader based on blur amount */
     shader_program_t *shader = g_gles2_data->basic_shader;
-    if (blur_amount > 0.01f && g_gles2_data->blur_shader) {
-        shader = g_gles2_data->blur_shader;
+    int use_sep_blur = 0;
+    if (blur_amount > 0.01f) {
+        if (g_gles2_data->blur_sep_shader && g_gles2_data->blur_fbo && getenv("HYPRLAX_SEPARABLE_BLUR")) {
+            shader = g_gles2_data->blur_sep_shader;
+            use_sep_blur = 1;
+            /* Re-initialize vertices to default texcoords for separable path */
+            GLfloat full_vertices[] = {
+                -1.0f, -1.0f,  0.0f, 1.0f,
+                 1.0f, -1.0f,  1.0f, 1.0f,
+                -1.0f,  1.0f,  0.0f, 0.0f,
+                 1.0f,  1.0f,  1.0f, 0.0f,
+            };
+            memcpy(vertices, full_vertices, sizeof(full_vertices));
+        } else if (g_gles2_data->blur_shader) {
+            shader = g_gles2_data->blur_shader;
+        }
         if (draw_count < 5 && getenv("HYPRLAX_DEBUG")) {
-            fprintf(stderr, "[DEBUG] Using blur shader for layer with blur=%.3f\n", blur_amount);
+            fprintf(stderr, "[DEBUG] Using %s blur (amount=%.3f)\n",
+                    use_sep_blur ? "separable" : (shader == g_gles2_data->blur_shader ? "single-pass" : "none"),
+                    blur_amount);
         }
     }
 
     /* Use selected shader */
     shader_use(shader);
 
+    /* Set sampler uniform only when program changes */
+    {
+        static uint32_t s_sampler_prog = 0;
+        if (shader && shader->id != s_sampler_prog) {
+            GLint loc = shader_get_uniform_location(shader, "u_texture");
+            if (loc != -1) {
+                glUniform1i(loc, 0);
+            }
+            s_sampler_prog = shader ? shader->id : 0;
+        }
+    }
+
     /* Set uniforms */
     shader_set_uniform_float(shader, "u_opacity", opacity);
 
-    /* Set blur-specific uniforms if using blur shader */
+    /* Legacy blur uniforms */
     if (shader == g_gles2_data->blur_shader) {
         shader_set_uniform_float(shader, "u_blur_amount", blur_amount);
         shader_set_uniform_vec2(shader, "u_resolution",
                                (float)g_gles2_data->width, (float)g_gles2_data->height);
     }
 
-    /* Bind texture */
+    /* Separable blur path: two passes (horizontal to FBO, vertical to default) */
+    if (use_sep_blur) {
+        GLint loc_amt = shader_get_uniform_location(shader, "u_blur_amount");
+        if (loc_amt != -1) glUniform1f(loc_amt, blur_amount);
+        GLint loc_res = shader_get_uniform_location(shader, "u_resolution");
+        /* First pass samples the source layer texture: use texture resolution */
+        if (loc_res != -1) glUniform2f(loc_res, (float)texture->width, (float)texture->height);
+        GLint loc_dir = shader_get_uniform_location(shader, "u_direction");
+        /* Always apply layer offset via u_offset for separable blur pass 1 */
+        {
+            GLint u_off = shader_get_uniform_location(shader, "u_offset");
+            if (u_off != -1) glUniform2f(u_off, x, -y);
+        }
+        /* Save viewport and blend state */
+        GLint prev_viewport[4];
+        glGetIntegerv(GL_VIEWPORT, prev_viewport);
+        GLboolean blend_was_enabled = glIsEnabled(GL_BLEND);
+        if (blend_was_enabled) glDisable(GL_BLEND);
+
+        /* First pass: horizontal to downscaled FBO (always use default texcoords + u_offset) */
+        if (loc_dir != -1) glUniform2f(loc_dir, 1.0f, 0.0f);
+        glBindFramebuffer(GL_FRAMEBUFFER, g_gles2_data->blur_fbo);
+        glViewport(0, 0, g_gles2_data->blur_w, g_gles2_data->blur_h);
+        gles2_bind_texture(texture, 0);
+
+        /* Setup vertex data */
+        const char *persist_vbo = getenv("HYPRLAX_PERSISTENT_VBO");
+        GLuint vbo = 0;
+        if (persist_vbo && *persist_vbo && g_gles2_data->vbo) {
+            glBindBuffer(GL_ARRAY_BUFFER, g_gles2_data->vbo);
+            /* For separable path, keep default texcoords; offsets via u_offset */
+            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+        } else {
+            glGenBuffers(1, &vbo);
+            glBindBuffer(GL_ARRAY_BUFFER, vbo);
+            glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+        }
+
+        GLint pos_attrib = shader_get_attrib_location(shader, "a_position");
+        GLint tex_attrib = shader_get_attrib_location(shader, "a_texcoord");
+        if (pos_attrib >= 0) {
+            glEnableVertexAttribArray(pos_attrib);
+            glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (void*)0);
+        }
+        if (tex_attrib >= 0) {
+            glEnableVertexAttribArray(tex_attrib);
+            glVertexAttribPointer(tex_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (void*)(2 * sizeof(GLfloat)));
+        }
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+        /* Second pass: vertical to default framebuffer (upsampling) */
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        /* Restore full-screen viewport & blend before drawing to default framebuffer */
+        glViewport(prev_viewport[0], prev_viewport[1], prev_viewport[2], prev_viewport[3]);
+        if (blend_was_enabled) glEnable(GL_BLEND);
+        /* Vertical sampling resolution: use downscaled if enabled, else screen */
+        if (loc_res != -1) {
+            if (g_gles2_data->blur_downscale > 1)
+                glUniform2f(loc_res, (float)g_gles2_data->blur_w, (float)g_gles2_data->blur_h);
+            else
+                glUniform2f(loc_res, (float)g_gles2_data->width, (float)g_gles2_data->height);
+        }
+        if (loc_dir != -1) glUniform2f(loc_dir, 0.0f, 1.0f);
+        /* Ensure we don't apply layer offset again on the second pass */
+        {
+            GLint u_off = shader_get_uniform_location(shader, "u_offset");
+            if (u_off != -1) glUniform2f(u_off, 0.0f, 0.0f);
+        }
+        texture_t tmp = { .id = g_gles2_data->blur_tex };
+        gles2_bind_texture(&tmp, 0);
+        /* Rebind vertex data and attrib pointers to be explicit for second pass */
+        if (persist_vbo && *persist_vbo && g_gles2_data->vbo) {
+            glBindBuffer(GL_ARRAY_BUFFER, g_gles2_data->vbo);
+            /* For separable path, sample the FBO texture; if orientation is inverted on your stack,
+               flip V here to compensate. We'll flip V to 1.0 - V for the second pass. */
+            GLfloat full_vertices_flip_v[] = {
+                -1.0f, -1.0f,  0.0f, 0.0f,  /* Bottom-left maps to V=0 */
+                 1.0f, -1.0f,  1.0f, 0.0f,
+                -1.0f,  1.0f,  0.0f, 1.0f,  /* Top-left maps to V=1 */
+                 1.0f,  1.0f,  1.0f, 1.0f,
+            };
+            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(full_vertices_flip_v), full_vertices_flip_v);
+        } else {
+            glBindBuffer(GL_ARRAY_BUFFER, vbo);
+            GLfloat full_vertices_flip_v[] = {
+                -1.0f, -1.0f,  0.0f, 0.0f,
+                 1.0f, -1.0f,  1.0f, 0.0f,
+                -1.0f,  1.0f,  0.0f, 1.0f,
+                 1.0f,  1.0f,  1.0f, 1.0f,
+            };
+            glBufferData(GL_ARRAY_BUFFER, sizeof(full_vertices_flip_v), full_vertices_flip_v, GL_STATIC_DRAW);
+        }
+        if (pos_attrib >= 0) {
+            glEnableVertexAttribArray(pos_attrib);
+            glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (void*)0);
+        }
+        if (tex_attrib >= 0) {
+            glEnableVertexAttribArray(tex_attrib);
+            glVertexAttribPointer(tex_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (void*)(2 * sizeof(GLfloat)));
+        }
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+        if (pos_attrib >= 0) glDisableVertexAttribArray(pos_attrib);
+        if (tex_attrib >= 0) glDisableVertexAttribArray(tex_attrib);
+        if (!(persist_vbo && *persist_vbo)) {
+            glDeleteBuffers(1, &vbo);
+        }
+
+        goto done;
+    }
+
+    /* Bind texture (sampler already set to unit 0 if needed) */
     gles2_bind_texture(texture, 0);
-    shader_set_uniform_int(shader, "u_texture", 0);
 
-    /* Setup vertex attributes */
-    GLuint vbo;
-    glGenBuffers(1, &vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    /* If uniform-offset mode, set u_offset */
+    if (use_uniform_offset && *use_uniform_offset) {
+        GLint u_off = shader_get_uniform_location(shader, "u_offset");
+        if (u_off != -1) {
+            glUniform2f(u_off, x, -y);
+        }
+    }
 
-    GLint pos_attrib = glGetAttribLocation(shader->id, "a_position");
-    GLint tex_attrib = glGetAttribLocation(shader->id, "a_texcoord");
+    /* Setup vertex data */
+    const char *persist_vbo = getenv("HYPRLAX_PERSISTENT_VBO");
+    GLuint vbo = 0;
+    if (persist_vbo && *persist_vbo && g_gles2_data->vbo) {
+        glBindBuffer(GL_ARRAY_BUFFER, g_gles2_data->vbo);
+        /* If using uniform-offset or separable blur, keep default texcoords; otherwise update texcoords */
+        if (!(use_uniform_offset && *use_uniform_offset) && !use_sep_blur) {
+            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+        }
+    } else {
+        glGenBuffers(1, &vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    }
+
+    GLint pos_attrib = shader_get_attrib_location(shader, "a_position");
+    GLint tex_attrib = shader_get_attrib_location(shader, "a_texcoord");
 
     if (draw_count < 5 && getenv("HYPRLAX_DEBUG")) {
         fprintf(stderr, "[DEBUG] Attrib locations: pos=%d, tex=%d\n", pos_attrib, tex_attrib);
@@ -420,11 +646,14 @@ static void gles2_draw_layer(const texture_t *texture, float x, float y,
     /* Cleanup */
     if (pos_attrib >= 0) glDisableVertexAttribArray(pos_attrib);
     if (tex_attrib >= 0) glDisableVertexAttribArray(tex_attrib);
-    glDeleteBuffers(1, &vbo);
+    if (!(persist_vbo && *persist_vbo)) {
+        glDeleteBuffers(1, &vbo);
+    }
 
     if (draw_count < 5 && getenv("HYPRLAX_DEBUG")) {
         fprintf(stderr, "[DEBUG] gles2_draw_layer %d: Complete\n", draw_count);
     }
+done:
     draw_count++;
 }
 
@@ -435,12 +664,14 @@ static void gles2_resize(int width, int height) {
     if (g_gles2_data) {
         g_gles2_data->width = width;
         g_gles2_data->height = height;
+        if (g_gles2_data->blur_sep_shader) {
+            gles2_create_blur_target(width, height);
+        }
     }
 }
 
 /* Set vsync */
 static void gles2_set_vsync(bool enabled) {
-    /* TODO: Implement vsync setting (requires access to EGL display) */
     if (g_gles2_data && g_gles2_data->egl_display != EGL_NO_DISPLAY) {
         eglSwapInterval(g_gles2_data->egl_display, enabled ? 1 : 0);
         g_gles2_data->vsync_enabled = enabled;
@@ -509,3 +740,29 @@ const renderer_ops_t renderer_gles2_ops = {
     .get_name = gles2_get_name,
     .get_version = gles2_get_version,
 };
+/* Create or recreate separable blur render target */
+static void gles2_create_blur_target(int width, int height) {
+    if (!g_gles2_data) return;
+    if (!g_gles2_data->blur_fbo) {
+        glGenFramebuffers(1, &g_gles2_data->blur_fbo);
+    }
+    if (g_gles2_data->blur_tex) {
+        glDeleteTextures(1, &g_gles2_data->blur_tex);
+        g_gles2_data->blur_tex = 0;
+    }
+    glGenTextures(1, &g_gles2_data->blur_tex);
+    glBindTexture(GL_TEXTURE_2D, g_gles2_data->blur_tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    int factor = g_gles2_data->blur_downscale > 1 ? g_gles2_data->blur_downscale : 1;
+    g_gles2_data->blur_w = width / factor;
+    g_gles2_data->blur_h = height / factor;
+    if (g_gles2_data->blur_w < 1) g_gles2_data->blur_w = 1;
+    if (g_gles2_data->blur_h < 1) g_gles2_data->blur_h = 1;
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, g_gles2_data->blur_w, g_gles2_data->blur_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_gles2_data->blur_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_gles2_data->blur_tex, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}

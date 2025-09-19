@@ -173,6 +173,19 @@ static int parse_config_file(hyprlax_context_t *ctx, const char *filename) {
             if (val) {
                 ctx->config.default_easing = easing_from_string(val);
             }
+        } else if (strcmp(cmd, "vsync") == 0) {
+            char *val = strtok(NULL, " \t");
+            if (val) {
+                ctx->config.vsync = (atoi(val) != 0);
+            }
+        } else if (strcmp(cmd, "idle_poll_rate") == 0) {
+            char *val = strtok(NULL, " \t");
+            if (val) {
+                ctx->config.idle_poll_rate = atof(val);
+                if (ctx->config.idle_poll_rate < 0.1f || ctx->config.idle_poll_rate > 10.0f) {
+                    ctx->config.idle_poll_rate = 2.0f;
+                }
+            }
         }
     }
 
@@ -195,13 +208,15 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
         {"renderer", required_argument, 0, 'r'},
         {"platform", required_argument, 0, 'p'},
         {"compositor", required_argument, 0, 'C'},
+        {"vsync", no_argument, 0, 'V'},
+        {"idle-poll-rate", required_argument, 0, 1003},
         {0, 0, 0, 0}
     };
 
     int opt;
     int option_index = 0;
 
-    while ((opt = getopt_long(argc, argv, "hvf:s:d:e:c:DL::r:p:C:",
+    while ((opt = getopt_long(argc, argv, "hvf:s:d:e:c:DL::r:p:C:V",
                               long_options, &option_index)) != -1) {
         switch (opt) {
             case 'h':
@@ -219,6 +234,8 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 printf("  -r, --renderer <backend>  Renderer backend (gles2, auto)\n");
                 printf("  -p, --platform <backend>  Platform backend (wayland, auto)\n");
                 printf("  -C, --compositor <backend> Compositor (hyprland, sway, generic, auto)\n");
+                printf("  -V, --vsync               Enable VSync (default: off)\n");
+                printf("  --idle-poll-rate <hz>     Polling rate when idle (default: 2.0 Hz)\n");
                 printf("\nEasing types:\n");
                 printf("  linear, quad, cubic, quart, quint, sine, expo, circ,\n");
                 printf("  back, elastic, bounce, snap\n");
@@ -281,6 +298,10 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 ctx->backends.compositor_backend = optarg;
                 break;
 
+            case 'V':
+                ctx->config.vsync = true;
+                break;
+
             case 1001:  /* --primary-only */
                 ctx->monitor_mode = MULTI_MON_PRIMARY;
                 break;
@@ -290,8 +311,16 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 ctx->monitor_mode = MULTI_MON_SPECIFIC;
                 LOG_DEBUG("Monitor selection: %s", optarg);
                 break;
+                
+            case 1003:  /* --idle-poll-rate */
+                ctx->config.idle_poll_rate = atof(optarg);
+                if (ctx->config.idle_poll_rate < 0.1f || ctx->config.idle_poll_rate > 10.0f) {
+                    LOG_WARN("Invalid idle poll rate: %.1f, using default 2.0 Hz", ctx->config.idle_poll_rate);
+                    ctx->config.idle_poll_rate = 2.0f;
+                }
+                break;
 
-            case 1003:  /* --disable-monitor */
+            case 1004:  /* --disable-monitor */
                 /* TODO: Add monitor to exclusion list */
                 LOG_DEBUG("Excluding monitor: %s", optarg);
                 break;
@@ -456,7 +485,7 @@ int hyprlax_init_renderer(hyprlax_context_t *ctx) {
     renderer_config_t render_config = {
         .width = actual_width,
         .height = actual_height,
-        .vsync = true,
+        .vsync = ctx->config.vsync,  /* Use config setting (default: off) */
         .target_fps = ctx->config.target_fps,
         .capabilities = 0,
     };
@@ -615,6 +644,8 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
     LOG_DEBUG("  Shift amount: %.1f pixels", ctx->config.shift_pixels);
     LOG_DEBUG("  Animation duration: %.1f seconds", ctx->config.animation_duration);
     LOG_DEBUG("  Easing: %s", easing_to_string(ctx->config.default_easing));
+    LOG_DEBUG("  VSync: %s", ctx->config.vsync ? "enabled" : "disabled");
+    LOG_DEBUG("  Idle poll rate: %.1f Hz (%.0fms)", ctx->config.idle_poll_rate, 1000.0 / ctx->config.idle_poll_rate);
 
     return HYPRLAX_SUCCESS;
 }
@@ -877,14 +908,30 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
     LOG_TRACE("Set viewport: %dx%d (scale=%d)",
               monitor->width * monitor->scale, monitor->height * monitor->scale, monitor->scale); */
 
+    /* Optional profiling */
+    static int s_profile = -1;
+    if (s_profile == -1) {
+        const char *p = getenv("HYPRLAX_PROFILE");
+        s_profile = (p && *p) ? 1 : 0;
+    }
+    double t_draw_start = 0.0;
+    double t_present_start = 0.0;
+
     /* Clear and prepare for rendering */
     RENDERER_BEGIN_FRAME(ctx->renderer);
     RENDERER_CLEAR(ctx->renderer, 0.0f, 0.0f, 0.0f, 1.0f);
 
-    /* Enable blending for multi-layer compositing */
-    if (ctx->layer_count > 1) {
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    /* Enable/disable blending only when needed to avoid redundant state changes */
+    static bool s_blend_enabled = false;
+    bool need_blend = (ctx->layer_count > 1);
+    if (need_blend != s_blend_enabled) {
+        if (need_blend) {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        } else {
+            glDisable(GL_BLEND);
+        }
+        s_blend_enabled = need_blend;
     }
 
     /* Calculate scale factor for this monitor */
@@ -895,6 +942,7 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
     }
 
     /* Render each layer with this monitor's offset */
+    if (s_profile) t_draw_start = get_time();
     parallax_layer_t *layer = ctx->layers;
     int layer_num = 0;
     /* Layer count debug - commented out for performance
@@ -944,7 +992,16 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
     /* Present debug - commented out for performance
     LOG_TRACE("Ending frame and presenting for monitor %s", monitor->name); */
     RENDERER_END_FRAME(ctx->renderer);
+    double t_draw_end = s_profile ? get_time() : 0.0;
+    if (s_profile) t_present_start = t_draw_end;
     RENDERER_PRESENT(ctx->renderer);
+    double t_present_end = s_profile ? get_time() : 0.0;
+
+    if (s_profile && ctx->config.debug) {
+        double draw_ms = (t_draw_end - t_draw_start) * 1000.0;
+        double present_ms = (t_present_end - t_present_start) * 1000.0;
+        LOG_DEBUG("[PROFILE] monitor=%s draw=%.2f ms present=%.2f ms", monitor->name, draw_ms, present_ms);
+    }
 
     /* Commit the Wayland surface to make the frame visible */
     if (monitor->wl_surface) {
@@ -965,6 +1022,8 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
         LOG_ERROR("render_frame: No renderer available");
         return;
     }
+    
+    /* Track if this frame is actually different from last frame (unused placeholder removed) */
 
     /* Always use monitor list - single monitor is just count=1 */
     if (!ctx->monitors || ctx->monitors->count == 0) {
@@ -983,6 +1042,37 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
         hyprlax_render_monitor(ctx, monitor);
         monitor = monitor->next;
     }
+
+    /* After presenting a frame, diagnostics no longer snapshot prev offsets
+       to avoid touching core layer structs. */
+}
+
+/* Check if any layer has active animations */
+static bool has_active_animations(hyprlax_context_t *ctx) {
+    if (!ctx) return false;
+    
+    /* Check layer animations */
+    parallax_layer_t *layer = ctx->layers;
+    while (layer) {
+        if (animation_is_active(&layer->x_animation) || 
+            animation_is_active(&layer->y_animation)) {
+            return true;
+        }
+        layer = layer->next;
+    }
+    
+    /* Check monitor animations */
+    if (ctx->monitors) {
+        monitor_instance_t *monitor = ctx->monitors->head;
+        while (monitor) {
+            if (monitor->animating) {
+                return true;
+            }
+            monitor = monitor->next;
+        }
+    }
+    
+    return false;
 }
 
 /* Main run loop */
@@ -993,14 +1083,35 @@ int hyprlax_run(hyprlax_context_t *ctx) {
         LOG_DEBUG("Starting main loop (target FPS: %d)", ctx->config.target_fps);
     }
 
-    double last_time = get_time();
+    /* Optional render diagnostics (why are we rendering while idle) */
+    static int s_render_diag = -1;
+    if (s_render_diag == -1) {
+        const char *p = getenv("HYPRLAX_RENDER_DIAG");
+        s_render_diag = (p && *p) ? 1 : 0;
+    }
+
+    double last_render_time = get_time();
+    double last_frame_time = last_render_time;
     double frame_time = 1.0 / ctx->config.target_fps;
     int frame_count = 0;
     double debug_timer = 0.0;
+    bool needs_render = true;  /* Render first frame */
+    
+    if (ctx->config.debug) {
+        LOG_DEBUG("Frame time calculated: %.6f seconds (target FPS: %d)", 
+                  frame_time, ctx->config.target_fps);
+    }
 
     while (ctx->running) {
+        /* Reset per-iteration diagnostic flags */
+        bool diag_resize = false;
+        bool diag_ipc = false;
+        bool diag_comp = false;
+        bool diag_final = false;
+
         double current_time = get_time();
-        ctx->delta_time = current_time - last_time;
+        ctx->delta_time = current_time - last_frame_time;
+        last_frame_time = current_time;
 
         /* Frame timing debug - disabled for performance
         if (ctx->config.debug && frame_count < 5) {
@@ -1023,6 +1134,8 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                     hyprlax_handle_resize(ctx,
                                         platform_event.data.resize.width,
                                         platform_event.data.resize.height);
+                    needs_render = true;  /* Window resize requires re-render */
+                    diag_resize = true;
                     break;
                 default:
                     break;
@@ -1032,6 +1145,8 @@ int hyprlax_run(hyprlax_context_t *ctx) {
         /* Poll IPC commands */
         if (ctx->ipc_ctx && ipc_process_commands((ipc_context_t*)ctx->ipc_ctx)) {
             /* IPC processed - layers may have changed */
+            needs_render = true;  /* IPC commands may have changed layers */
+            diag_ipc = true;
             if (ctx->config.debug) {
                 LOG_TRACE("IPC command processed");
             }
@@ -1043,6 +1158,8 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             int poll_result = ctx->compositor->ops->poll_events(&comp_event);
             if (poll_result == HYPRLAX_SUCCESS) {
                 if (comp_event.type == COMPOSITOR_EVENT_WORKSPACE_CHANGE) {
+                    needs_render = true;  /* Workspace change requires re-render */
+                    diag_comp = true;
                     /* For multi-monitor support, find the correct monitor */
                     monitor_instance_t *target_monitor = NULL;
 
@@ -1165,52 +1282,131 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             }
         }
 
-        /* Update animations */
-        /* Animation debug - disabled for performance
-        if (ctx->config.debug && frame_count < 5) {
-            LOG_TRACE("Updating layer animations");
-        } */
-        hyprlax_update_layers(ctx, current_time);
-
-        /* Update monitor animations for parallax */
-        if (ctx->monitors) {
-            monitor_instance_t *monitor = ctx->monitors->head;
-            while (monitor) {
-                monitor_update_animation(monitor, current_time);
-                monitor = monitor->next;
+        /* Check if animations are active */
+        bool animations_active = has_active_animations(ctx);
+        
+        /* While animating, always need to render; with frame callbacks, wait for compositor pacing */
+        const char *use_fc = getenv("HYPRLAX_FRAME_CALLBACK");
+        if (animations_active) {
+            if (use_fc && *use_fc && ctx->monitors) {
+                /* Render when at least one monitor's frame callback has fired */
+                bool can_render = false;
+                monitor_instance_t *m = ctx->monitors->head;
+                while (m) {
+                    if (!m->frame_pending) { can_render = true; break; }
+                    m = m->next;
+                }
+                needs_render = needs_render || can_render;
+            } else {
+                needs_render = true;
             }
         }
+        
+        /* Only update animations if they're active */
+        if (animations_active) {
+            /* Update layer animations */
+            hyprlax_update_layers(ctx, current_time);
 
-        /* Render frame if enough time has passed */
-        if (ctx->delta_time >= frame_time) {
-            /* Render debug - disabled for performance
-            if (ctx->config.debug && frame_count < 5) {
-                LOG_TRACE("Rendering frame %d", frame_count);
-            } */
+            /* Update monitor animations for parallax */
+            if (ctx->monitors) {
+                monitor_instance_t *monitor = ctx->monitors->head;
+                while (monitor) {
+                    monitor_update_animation(monitor, current_time);
+                    monitor = monitor->next;
+                }
+            }
+            
+            /* Re-check if animations are still active after update */
+            bool still_animating = has_active_animations(ctx);
+            
+            /* Ensure one final frame when animations complete */
+            if (!still_animating && animations_active) {
+                needs_render = true;  /* Final frame */
+                diag_final = true;
+            }
+            
+            /* Update the animations_active flag for next iteration */
+            animations_active = still_animating;
+        }
+
+        /* Calculate time since last render */
+        double time_since_render = current_time - last_render_time;
+        
+        /* Render frame if:
+         * 1. We need to render (animation active, workspace changed, etc.)
+         * 2. Enough time has passed since last frame (respecting target FPS)
+         */
+        if (needs_render && ((use_fc && *use_fc) ? true : (time_since_render >= frame_time))) {
+            if (ctx->config.debug) {
+                static double last_log_time = 0;
+                if (current_time - last_log_time > 1.0) {
+                    LOG_DEBUG("RENDERING: animations=%d, time_since_render=%.3f", 
+                              animations_active, time_since_render);
+                    last_log_time = current_time;
+                }
+            }
+            if (s_render_diag && !animations_active) {
+                /* Log first layer offsets to aid diagnosis without prev snapshot */
+                float first_x = 0.0f, first_y = 0.0f;
+                if (ctx->layers) {
+                    first_x = ctx->layers->offset_x;
+                    first_y = ctx->layers->offset_y;
+                }
+                LOG_DEBUG("[RENDER_DIAG] idle render: resize=%d ipc=%d comp=%d final=%d tsr=%.3f ft=%.3f layers=%d first_offset=%.4f,%.4f",
+                          diag_resize, diag_ipc, diag_comp, diag_final,
+                          time_since_render, frame_time, ctx->layer_count,
+                          first_x, first_y);
+            }
             hyprlax_render_frame(ctx);
-            ctx->fps = 1.0 / ctx->delta_time;
-            last_time = current_time;
+            ctx->fps = 1.0 / time_since_render;
+            last_render_time = current_time;
             frame_count++;
+            
+            /* Clear needs_render flag - it will be set again if needed */
+            needs_render = false;
 
             /* Print FPS every second in debug mode */
             if (ctx->config.debug) {
-                debug_timer += ctx->delta_time;
+                debug_timer += time_since_render;
                 if (debug_timer >= 1.0) {
-                    LOG_DEBUG("FPS: %.1f, Layers: %d", ctx->fps, ctx->layer_count);
+                    LOG_DEBUG("FPS: %.1f, Layers: %d, Animations: %s", 
+                             ctx->fps, ctx->layer_count,
+                             animations_active ? "active" : "idle");
                     debug_timer = 0.0;
                 }
             }
         } else {
-            /* Sleep to maintain target FPS using nanosleep for better precision */
-            double sleep_time = frame_time - ctx->delta_time;
-            /* Sleep debug - disabled for performance
-            if (ctx->config.debug && frame_count < 5) {
-                LOG_TRACE("Sleeping for %.4f seconds", sleep_time);
-            } */
+            /* Calculate sleep time */
+            double sleep_time;
+            
+            /* If no animations are active, sleep longer to reduce CPU/GPU usage */
+            if (!animations_active && !needs_render) {
+                /* Use configured idle poll rate (default 2 Hz = 500ms) */
+                sleep_time = 1.0 / ctx->config.idle_poll_rate;
+                if (ctx->config.debug) {
+                    static int idle_count = 0;
+                    if (idle_count++ % 10 == 0) {  /* Log every 5 seconds */
+                        LOG_DEBUG("IDLE: animations=%d, needs_render=%d, sleeping %.3fs", 
+                                  animations_active, needs_render, sleep_time);
+                    }
+                }
+            } else {
+                /* Calculate normal frame timing */
+                if (use_fc && *use_fc) {
+                    /* With frame callbacks, avoid long sleeps and let Wayland pacing drive us */
+                    sleep_time = 0.001; /* minimal */
+                } else {
+                    double target_wake_time = last_render_time + frame_time;
+                    sleep_time = target_wake_time - current_time;
+                    /* Don't sleep if we need to render soon */
+                    if (sleep_time < 0 || sleep_time < 0.001) sleep_time = 0.001; /* Min 1ms */
+                }
+            }
+            
             if (sleep_time > 0) {
                 struct timespec ts;
-                ts.tv_sec = (time_t)(sleep_time);  /* Integer seconds (usually 0) */
-                ts.tv_nsec = (long)((sleep_time - (time_t)sleep_time) * 1e9);  /* Fractional part in nanoseconds */
+                ts.tv_sec = (time_t)(sleep_time);
+                ts.tv_nsec = (long)((sleep_time - (time_t)sleep_time) * 1e9);
                 if (ts.tv_nsec > 999999999) {
                     ts.tv_nsec = 999999999;
                 } else if (ts.tv_nsec < 0) {

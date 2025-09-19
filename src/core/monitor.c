@@ -10,6 +10,14 @@
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#include <time.h>
+
+/* Get current time in seconds */
+static double get_time(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec / 1e9;
+}
 
 /* Create a new monitor list */
 monitor_list_t* monitor_list_create(void) {
@@ -405,8 +413,9 @@ void monitor_start_parallax_animation_offset(hyprlax_context_t *ctx,
     /* If already animating, use current animated position as start point */
     if (monitor->animating && ctx) {
         /* Calculate current position in the ongoing animation */
-        double elapsed = ctx->last_frame_time - monitor->animation_start_time;
-        double duration = monitor->config ? monitor->config->animation_duration * 1000.0 : 1000.0;
+        double current_time = get_time();
+        double elapsed = current_time - monitor->animation_start_time;
+        double duration = monitor->config ? monitor->config->animation_duration : 1.0;
         double progress = (elapsed >= duration) ? 1.0 : (elapsed / duration);
 
         /* Apply easing to progress */
@@ -431,7 +440,7 @@ void monitor_start_parallax_animation_offset(hyprlax_context_t *ctx,
     monitor->animation_target_y = monitor->animation_start_y;  /* No vertical shift for now */
 
     /* Start animation */
-    monitor->animation_start_time = ctx ? ctx->last_frame_time : 0.0;
+    monitor->animation_start_time = get_time();
     monitor->animating = true;
 
     /* Debug output - only with --debug flag */
@@ -446,7 +455,7 @@ void monitor_update_animation(monitor_instance_t *monitor, double current_time) 
     if (!monitor || !monitor->animating || !monitor->config) return;
 
     double elapsed = current_time - monitor->animation_start_time;
-    double duration = monitor->config->animation_duration * 1000.0;  /* Convert to ms */
+    double duration = monitor->config->animation_duration;  /* Duration is in seconds */
 
     if (elapsed >= duration) {
         /* Animation complete */
