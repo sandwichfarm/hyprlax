@@ -1186,7 +1186,16 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                 }
             }
             
-            needs_render = true;  /* Animation updates require re-render */
+            /* Re-check if animations are still active after update */
+            bool still_animating = has_active_animations(ctx);
+            
+            /* Render if animations are active, or one final frame when they complete */
+            if (still_animating || (animations_active && !still_animating)) {
+                needs_render = true;
+            }
+            
+            /* Update the animations_active flag for next iteration */
+            animations_active = still_animating;
         }
 
         /* Calculate time since last render */
@@ -1201,7 +1210,9 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             ctx->fps = 1.0 / time_since_render;
             last_render_time = current_time;
             frame_count++;
-            needs_render = animations_active;  /* Only keep rendering if animations are active */
+            
+            /* Clear needs_render flag - it will be set again if needed */
+            needs_render = false;
 
             /* Print FPS every second in debug mode */
             if (ctx->config.debug) {
