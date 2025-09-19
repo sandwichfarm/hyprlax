@@ -6,10 +6,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROOT_DIR" || exit 1
 
-CONFIG="/home/sandwich/Develop/hyprlax/examples/pixel-city/parallax.conf"
+# Config path: allow env override, else default to example in repo
+CONFIG_DEFAULT="examples/pixel-city/parallax.conf"
+CONFIG="${HYPRLAX_BENCH_CONFIG:-$CONFIG_DEFAULT}"
 
 echo "=== Hyprlax Optimization Tests ==="
 echo "Using config: $CONFIG"
+echo "Override config via: HYPRLAX_BENCH_CONFIG=/path/to/parallax.conf make bench"
 echo ""
 
 # Clean old test logs to avoid stale summaries

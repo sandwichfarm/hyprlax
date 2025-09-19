@@ -8,12 +8,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROOT_DIR" || exit 1
 
-CONFIG=${1:-"/home/sandwich/Develop/hyprlax/examples/pixel-city/parallax.conf"}
+# Config path: env override takes precedence, else first arg, else default example
+CONFIG_DEFAULT="examples/pixel-city/parallax.conf"
+CONFIG=${HYPRLAX_BENCH_CONFIG:-${1:-$CONFIG_DEFAULT}}
 DURATION=${2:-30}  # Test duration in seconds
 
 echo "=== Hyprlax Performance Test ==="
 echo "Config: $CONFIG"
 echo "Duration: ${DURATION}s"
+echo "Override config via: HYPRLAX_BENCH_CONFIG=/path/to/parallax.conf or pass as first argument"
 echo ""
 
 # Kill any existing hyprlax

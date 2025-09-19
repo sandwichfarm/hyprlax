@@ -7,9 +7,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROOT_DIR" || exit 1
 
-CONFIG="/home/sandwich/Develop/hyprlax/examples/pixel-city/parallax.conf"
+# Config path: allow env override, else default to example in repo
+CONFIG_DEFAULT="examples/pixel-city/parallax.conf"
+CONFIG="${HYPRLAX_BENCH_CONFIG:-$CONFIG_DEFAULT}"
 
 echo "=== 30 FPS Performance Test ==="
+echo "Config: $CONFIG"
+echo "Override config via: HYPRLAX_BENCH_CONFIG=/path/to/parallax.conf make bench-30fps"
 pkill hyprlax 2>/dev/null
 sleep 2
 

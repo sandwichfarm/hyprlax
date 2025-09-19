@@ -9,7 +9,8 @@ This guide shows how to run the built‑in benchmarks, read their output, and to
 
 Notes:
 - The bench scripts default to the example config at `examples/pixel-city/parallax.conf`.
-- `scripts/bench/bench-performance.sh` accepts an optional config path as the first argument.
+- You can override the config path with `HYPRLAX_BENCH_CONFIG=/path/to/parallax.conf`.
+- `scripts/bench/bench-performance.sh` also accepts an optional config path as the first argument.
 
 ## Quick Start
 - Run optimization checks: `make bench`
@@ -34,6 +35,11 @@ You can prefix a command with these, for example:
 HYPRLAX_PROFILE=1 HYPRLAX_RENDER_DIAG=1 make bench-perf
 ```
 
+To change the benchmark config without editing scripts:
+```
+HYPRLAX_BENCH_CONFIG=examples/pixel-city/parallax.conf make bench
+```
+
 ## Interpreting Results
 - Power and utilization: The scripts sample `nvidia-smi` during idle, during animations (workspace switches), and after animations settle.
 - FPS: Recent FPS samples are printed from `hyprlax-debug.log`.
@@ -56,4 +62,3 @@ HYPRLAX_PERSISTENT_VBO=1 HYPRLAX_UNIFORM_OFFSET=1 HYPRLAX_NO_GLFINISH=1 make ben
 - If the bench scripts cannot find your config, pass the path to `bench-performance.sh` or edit the script’s `CONFIG`.
 - To focus on idle power regressions, enable `HYPRLAX_RENDER_DIAG=1`, let animations complete, and watch for repeated `[RENDER_DIAG]` lines with all flags `0`.
 - Combine `HYPRLAX_FRAME_CALLBACK=1` with a moderate FPS cap (e.g., `--fps 60` or `--fps 30`) to reduce idle wakeups.
-
