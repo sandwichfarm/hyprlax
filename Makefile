@@ -206,7 +206,7 @@ VALGRIND_FLAGS = --leak-check=full --show-leak-kinds=definite,indirect --track-o
 # For Arch Linux, enable debuginfod for symbol resolution
 export DEBUGINFOD_URLS ?= https://debuginfod.archlinux.org
 
-TEST_TARGETS = tests/test_integration tests/test_ipc tests/test_blur tests/test_config tests/test_animation tests/test_easing tests/test_shader tests/test_platform tests/test_compositor tests/test_modules tests/test_renderer tests/test_workspace_changes tests/test_animation_state tests/test_config_validation tests/test_hyprland_events
+TEST_TARGETS = tests/test_integration tests/test_ipc tests/test_blur tests/test_config tests/test_animation tests/test_easing tests/test_shader tests/test_platform tests/test_compositor tests/test_modules tests/test_renderer tests/test_workspace_changes tests/test_animation_state tests/test_config_validation tests/test_hyprland_events tests/test_shared_buffer tests/test_headless_renderer
 ALL_TESTS = $(filter tests/test_%, $(wildcard tests/test_*.c))
 ALL_TEST_TARGETS = $(ALL_TESTS:.c=)
 
@@ -255,6 +255,12 @@ tests/test_animation_state: tests/test_animation_state.c
 
 tests/test_config_validation: tests/test_config_validation.c
 	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
+
+tests/test_shared_buffer: tests/test_shared_buffer.c src/core/shared_buffer.c src/core/log.c
+	$(CC) $(TEST_CFLAGS) $^ $(TEST_LIBS) -o $@
+
+tests/test_headless_renderer: tests/test_headless_renderer.c src/renderer/headless_renderer.c src/core/shared_buffer.c src/core/log.c
+	$(CC) $(TEST_CFLAGS) $(PKG_CFLAGS) $^ $(TEST_LIBS) $(PKG_LIBS) -o $@
 
 # Hyprland event parsing tests (link hyprland adapter and core compositor utils)
 tests/test_hyprland_events: tests/test_hyprland_events.c src/compositor/hyprland.c src/compositor/compositor.c src/core/log.c
