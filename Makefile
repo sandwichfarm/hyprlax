@@ -1,10 +1,19 @@
 CC = gcc
+
+# Version generation
+# If VERSION file doesn't exist, create it from git commit hash
+# CI/CD will overwrite this with tag version
+ifeq ($(wildcard VERSION),)
+$(shell git rev-parse --short HEAD 2>/dev/null > VERSION || echo "unknown" > VERSION)
+endif
+VERSION := $(shell cat VERSION)
+
 # Use generic architecture for CI compatibility
 ifdef CI
-CFLAGS = -Wall -Wextra -O2 -Isrc -Isrc/include
+CFLAGS = -Wall -Wextra -O2 -Isrc -Isrc/include -DHYPRLAX_VERSION=\"$(VERSION)\"
 LDFLAGS =
 else
-CFLAGS = -Wall -Wextra -O3 -march=native -flto -Isrc -Isrc/include
+CFLAGS = -Wall -Wextra -O3 -march=native -flto -Isrc -Isrc/include -DHYPRLAX_VERSION=\"$(VERSION)\"
 LDFLAGS = -flto
 endif
 
@@ -171,7 +180,13 @@ protocols/wlr-layer-shell-client-protocol.h: $(LAYER_SHELL_PROTOCOL)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(PKG_CFLAGS) -c $< -o $@
 
-$(TARGET): $(OBJS)
+# Ensure VERSION file exists before building
+VERSION:
+	@if [ ! -f VERSION ]; then \
+		git rev-parse --short HEAD 2>/dev/null > VERSION || echo "unknown" > VERSION; \
+	fi
+
+$(TARGET): VERSION $(OBJS)
 	$(CC) $(LDFLAGS) $(OBJS) $(PKG_LIBS) -lm -o $@
 
 clean:
