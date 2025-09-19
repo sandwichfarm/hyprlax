@@ -293,9 +293,9 @@ int init_gl() {
         fprintf(stderr, "Failed to build blur shader\n");
         return -1;
     }
-    
+
     if (config.debug) {
-        fprintf(stderr, "Building blur shader with BLUR_KERNEL_SIZE=%.1f, BLUR_WEIGHT_FALLOFF=%.2f\n", 
+        fprintf(stderr, "Building blur shader with BLUR_KERNEL_SIZE=%.1f, BLUR_WEIGHT_FALLOFF=%.2f\n",
                 BLUR_KERNEL_SIZE, BLUR_WEIGHT_FALLOFF);
     }
 
@@ -359,7 +359,7 @@ int init_gl() {
     if (state.blur_u_resolution == -1) {
         fprintf(stderr, "Warning: Failed to find uniform 'u_resolution' in blur shader\n");
     }
-    
+
     if (config.debug) {
         fprintf(stderr, "Blur shader uniform locations: texture=%d, opacity=%d, blur_amount=%d, resolution=%d\n",
                state.blur_u_texture, state.blur_u_opacity, state.blur_u_blur_amount, state.blur_u_resolution);
@@ -753,7 +753,7 @@ void render_frame() {
                 if (config.debug) {
                     static int blur_count = 0;
                     if (blur_count++ < 5) {  // Only print first 5 times to avoid spam
-                        fprintf(stderr, "Using blur shader for layer %d with blur amount: %.2f\n", 
+                        fprintf(stderr, "Using blur shader for layer %d with blur amount: %.2f\n",
                                 i, layer->blur_amount);
                     }
                 }
@@ -765,7 +765,7 @@ void render_frame() {
                 glUniform1f(state.blur_u_opacity, layer->opacity);
                 glUniform1f(state.blur_u_blur_amount, layer->blur_amount);
                 glUniform2f(state.blur_u_resolution, (float)state.width, (float)state.height);
-                
+
             } else {
                 glUseProgram(state.shader_program);
 
@@ -1398,7 +1398,7 @@ int parse_config_file(const char *filename) {
             float shift = shift_str ? atof(shift_str) : 1.0f;
             float opacity = opacity_str ? atof(opacity_str) : 1.0f;
             float blur = blur_str ? atof(blur_str) : 0.0f;
-            
+
             if (config.debug) {
                 fprintf(stderr, "Config parse layer: image=%s, shift=%.2f, opacity=%.2f, blur=%.2f\n",
                         image, shift, opacity, blur);

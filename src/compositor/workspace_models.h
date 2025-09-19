@@ -1,6 +1,6 @@
 /*
  * workspace_models.h - Compositor workspace model abstraction
- * 
+ *
  * Provides abstraction for different compositor workspace models:
  * - Numeric workspaces (Hyprland, Sway)
  * - Tag-based (River)
@@ -33,19 +33,19 @@ typedef struct workspace_context {
     union {
         /* Numeric workspace (most common) */
         int workspace_id;
-        
+
         /* River tags (bitmask) */
         struct {
             uint32_t visible_tags;  /* Which tags are visible */
             uint32_t focused_tag;   /* Primary tag for animation */
         } tags;
-        
+
         /* Wayfire workspace sets */
         struct {
             int set_id;
             int workspace_id;
         } wayfire_set;
-        
+
         /* Niri per-output stack */
         struct {
             int stack_index;        /* Position in vertical stack */
@@ -60,12 +60,12 @@ typedef struct workspace_change_event {
     monitor_instance_t *monitor;
     workspace_context_t old_context;
     workspace_context_t new_context;
-    
+
     /* Secondary monitor (for steal/move operations) */
     monitor_instance_t *secondary_monitor;
     workspace_context_t secondary_old_context;
     workspace_context_t secondary_new_context;
-    
+
     /* Event flags */
     bool affects_multiple_monitors;
     bool is_workspace_steal;    /* Workspace moved to this monitor */
@@ -92,12 +92,12 @@ typedef struct workspace_policy {
         TAG_POLICY_FIRST_SET,  /* Use first set tag */
         TAG_POLICY_NO_PARALLAX /* Disable parallax */
     } multi_tag_policy;
-    
+
     /* Workspace stealing/moving */
     bool animate_on_steal;
     bool animate_on_move;
     bool preserve_offset_on_move;
-    
+
     /* Plugin detection */
     bool auto_detect_plugins;
     bool enable_split_monitor;    /* Hyprland */
@@ -106,11 +106,11 @@ typedef struct workspace_policy {
 
 /* Workspace model detection */
 workspace_model_t workspace_detect_model(int compositor_type);
-bool workspace_detect_capabilities(int compositor_type, 
+bool workspace_detect_capabilities(int compositor_type,
                                   compositor_capabilities_t *caps);
 
 /* Context comparison and conversion */
-bool workspace_context_equal(const workspace_context_t *a, 
+bool workspace_context_equal(const workspace_context_t *a,
                             const workspace_context_t *b);
 int workspace_context_compare(const workspace_context_t *a,
                              const workspace_context_t *b);

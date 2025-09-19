@@ -1,6 +1,6 @@
 /*
  * platform.c - Platform management
- * 
+ *
  * Handles creation and management of platform backends.
  */
 
@@ -14,15 +14,15 @@
 static bool is_wayland_session(void) {
     const char *wayland_display = getenv("WAYLAND_DISPLAY");
     const char *xdg_session = getenv("XDG_SESSION_TYPE");
-    
+
     if (wayland_display && *wayland_display) {
         return true;
     }
-    
+
     if (xdg_session && strcmp(xdg_session, "wayland") == 0) {
         return true;
     }
-    
+
     return false;
 }
 
@@ -50,17 +50,17 @@ int platform_create(platform_t **out_platform, platform_type_t type) {
     if (!out_platform) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
-    
+
     platform_t *platform = calloc(1, sizeof(platform_t));
     if (!platform) {
         return HYPRLAX_ERROR_NO_MEMORY;
     }
-    
+
     /* Auto-detect if requested */
     if (type == PLATFORM_AUTO) {
         type = platform_detect();
     }
-    
+
     /* Select backend based on type */
     switch (type) {
 #ifdef ENABLE_WAYLAND
@@ -75,25 +75,25 @@ int platform_create(platform_t **out_platform, platform_type_t type) {
             free(platform);
             return HYPRLAX_ERROR_INVALID_ARGS;
     }
-    
+
     platform->initialized = false;
     platform->connected = false;
     *out_platform = platform;
-    
+
     return HYPRLAX_SUCCESS;
 }
 
 /* Destroy platform instance */
 void platform_destroy(platform_t *platform) {
     if (!platform) return;
-    
+
     if (platform->connected && platform->ops && platform->ops->disconnect) {
         platform->ops->disconnect();
     }
-    
+
     if (platform->initialized && platform->ops && platform->ops->destroy) {
         platform->ops->destroy();
     }
-    
+
     free(platform);
 }

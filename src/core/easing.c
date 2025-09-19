@@ -1,6 +1,6 @@
 /*
  * easing.c - Easing functions for smooth animation
- * 
+ *
  * Pure mathematical functions with no side effects or allocations.
  * All functions map input t ∈ [0,1] to output ∈ [0,1].
  */
@@ -59,10 +59,10 @@ float ease_back_out(float t) {
 /* Elastic easing out - exponentially decaying sine wave */
 float ease_elastic_out(float t) {
     const float c4 = (2.0f * M_PI) / 3.0f;
-    
+
     if (t == 0) return 0;
     if (t == 1) return 1;
-    
+
     return powf(2.0f, -10.0f * t) * sinf((t * 10.0f - 0.75f) * c4) + 1.0f;
 }
 
@@ -70,7 +70,7 @@ float ease_elastic_out(float t) {
 float ease_bounce_out(float t) {
     const float n1 = 7.5625f;
     const float d1 = 2.75f;
-    
+
     if (t < 1.0f / d1) {
         return n1 * t * t;
     } else if (t < 2.0f / d1) {
@@ -101,7 +101,7 @@ float apply_easing(float t, easing_type_t type) {
     // Clamp input to valid range
     if (t <= 0.0f) return 0.0f;
     if (t >= 1.0f) return 1.0f;
-    
+
     switch (type) {
         case EASE_LINEAR:       return ease_linear(t);
         case EASE_QUAD_OUT:     return ease_quad_out(t);
@@ -122,7 +122,7 @@ float apply_easing(float t, easing_type_t type) {
 /* String to easing type conversion */
 easing_type_t easing_from_string(const char *name) {
     if (!name) return EASE_LINEAR;
-    
+
     if (strcmp(name, "linear") == 0)       return EASE_LINEAR;
     if (strcmp(name, "quad") == 0)         return EASE_QUAD_OUT;
     if (strcmp(name, "cubic") == 0)        return EASE_CUBIC_OUT;
@@ -135,7 +135,7 @@ easing_type_t easing_from_string(const char *name) {
     if (strcmp(name, "elastic") == 0)      return EASE_ELASTIC_OUT;
     if (strcmp(name, "bounce") == 0)       return EASE_BOUNCE_OUT;
     if (strcmp(name, "snap") == 0)         return EASE_CUSTOM_SNAP;
-    
+
     return EASE_LINEAR;
 }
 
@@ -146,7 +146,7 @@ const char* easing_to_string(easing_type_t type) {
         "sine", "expo", "circ", "back", "elastic",
         "bounce", "snap"
     };
-    
+
     if (type >= 0 && type < EASE_MAX) {
         return names[type];
     }

@@ -18,7 +18,7 @@ static bool g_log_to_file = false;
 /* Initialize logging system */
 void log_init(bool debug, const char *log_file) {
     g_debug_enabled = debug;
-    
+
     if (log_file) {
         g_log_file = fopen(log_file, "a");
         if (g_log_file) {
@@ -51,14 +51,14 @@ void log_message(log_level_t level, const char *fmt, ...) {
     if (!g_debug_enabled && (level == LOG_DEBUG || level == LOG_TRACE)) {
         return;
     }
-    
+
     /* Get timestamp */
     struct timeval tv;
     gettimeofday(&tv, NULL);
     struct tm *tm_info = localtime(&tv.tv_sec);
     char timestamp[32];
     strftime(timestamp, sizeof(timestamp), "%H:%M:%S", tm_info);
-    
+
     /* Level prefix */
     const char *level_str = "";
     switch (level) {
@@ -68,26 +68,26 @@ void log_message(log_level_t level, const char *fmt, ...) {
         case LOG_DEBUG: level_str = "[DEBUG]"; break;
         case LOG_TRACE: level_str = "[TRACE]"; break;
     }
-    
+
     /* Format message */
     va_list args;
     char buffer[4096];
-    
+
     va_start(args, fmt);
     vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
-    
+
     /* Output to file if logging to file is enabled */
     if (g_log_to_file && g_log_file) {
-        fprintf(g_log_file, "%s.%03ld %s %s\n", 
+        fprintf(g_log_file, "%s.%03ld %s %s\n",
                 timestamp, tv.tv_usec / 1000, level_str, buffer);
         fflush(g_log_file);
     }
-    
+
     /* Output to stderr ONLY if:
      * 1. We're NOT logging to file (i.e., normal debug mode), OR
      * 2. It's an ERROR or WARN message (always show these)
-     * 
+     *
      * When logging to file, suppress INFO/DEBUG/TRACE from stderr */
     if (g_log_to_file) {
         /* When logging to file, only show ERROR and WARN on stderr */

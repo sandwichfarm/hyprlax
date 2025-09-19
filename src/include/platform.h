@@ -1,6 +1,6 @@
 /*
  * platform.h - Platform abstraction interface
- * 
+ *
  * Provides an abstraction layer for windowing system operations,
  * allowing support for different platforms
  */
@@ -60,31 +60,31 @@ typedef struct platform_ops {
     /* Lifecycle */
     int (*init)(void);
     void (*destroy)(void);
-    
+
     /* Connection management */
     int (*connect)(const char *display_name);
     void (*disconnect)(void);
     bool (*is_connected)(void);
-    
+
     /* Window management */
     int (*create_window)(const window_config_t *config);
     void (*destroy_window)(void);
     void (*show_window)(void);
     void (*hide_window)(void);
-    
+
     /* Event handling */
     int (*poll_events)(platform_event_t *event);
     int (*wait_events)(platform_event_t *event, int timeout_ms);
     void (*flush_events)(void);
-    
+
     /* Native handles for renderer */
     void* (*get_native_display)(void);
     void* (*get_native_window)(void);
-    
+
     /* Platform-specific features */
     bool (*supports_transparency)(void);
     bool (*supports_blur)(void);
-    
+
     /* Debug */
     const char* (*get_name)(void);
     const char* (*get_backend_name)(void);
