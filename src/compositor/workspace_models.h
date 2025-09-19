@@ -115,11 +115,23 @@ bool workspace_context_equal(const workspace_context_t *a,
 int workspace_context_compare(const workspace_context_t *a,
                              const workspace_context_t *b);
 
+/* Offset structure for 2D workspace models */
+typedef struct {
+    float x;
+    float y;
+} workspace_offset_t;
+
 /* Calculate parallax offset based on context change */
 float workspace_calculate_offset(const workspace_context_t *from,
                                 const workspace_context_t *to,
                                 float shift_pixels,
                                 const workspace_policy_t *policy);
+
+/* Calculate 2D parallax offset for 2D workspace models */
+workspace_offset_t workspace_calculate_offset_2d(const workspace_context_t *from,
+                                                const workspace_context_t *to,
+                                                float shift_pixels,
+                                                const workspace_policy_t *policy);
 
 /* Handle workspace change based on model */
 void workspace_handle_change(hyprlax_context_t *ctx,

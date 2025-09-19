@@ -34,7 +34,7 @@ platform_type_t platform_detect(void) {
         return PLATFORM_WAYLAND;
     }
 #endif
-    
+
     /* Default to first available platform */
 #ifdef ENABLE_WAYLAND
     fprintf(stderr, "Warning: Could not detect platform, defaulting to Wayland\n");
@@ -69,7 +69,7 @@ int platform_create(platform_t **out_platform, platform_type_t type) {
             platform->type = PLATFORM_WAYLAND;
             break;
 #endif
-            
+
         default:
             fprintf(stderr, "Error: Platform type %d not available in this build\n", type);
             free(platform);

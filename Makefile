@@ -321,8 +321,11 @@ memcheck: $(ALL_TEST_TARGETS)
 	fi
 	@echo "=== Running Tests with Valgrind Memory Check ==="
 	@failed=0; \
+	passed=0; \
+	total=0; \
 	for test in $(ALL_TEST_TARGETS); do \
 		if [ -x $$test ]; then \
+			total=$$((total + 1)); \
 			echo "\n--- Memory check: $$test ---"; \
 			if ! $(VALGRIND) $(VALGRIND_FLAGS) --log-file=$$test.valgrind.log $$test > /dev/null 2>&1; then \
 				echo "✗ $$test MEMORY ISSUES DETECTED"; \
@@ -331,10 +334,14 @@ memcheck: $(ALL_TEST_TARGETS)
 			else \
 				echo "✓ $$test MEMORY CLEAN"; \
 				rm -f $$test.valgrind.log; \
+				passed=$$((passed + 1)); \
 			fi; \
 		fi; \
 	done; \
 	echo "\n=== Memory Check Summary ==="; \
+	echo "Total: $$total tests"; \
+	echo "Passed: $$passed tests"; \
+	echo "Failed: $$failed tests"; \
 	if [ $$failed -eq 0 ]; then \
 		echo "✓ All tests memory clean!"; \
 	else \
