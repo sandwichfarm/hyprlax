@@ -264,15 +264,13 @@ prompt_installation_choice() {
     fi
     
     echo
-    echo -n -e "${CYAN}Please choose (1-3): ${NC}"
+    echo -e "${CYAN}Please choose (1-3): ${NC}"
     
-    # Read user choice
-    if [ -t 0 ]; then
-        read -r CHOICE
-    else
-        read -r CHOICE < /dev/tty
-    fi
+    # Read user choice - always use /dev/tty when piped
+    local CHOICE
+    read -r CHOICE < /dev/tty
     
+    # Return just the choice value
     echo "$CHOICE"
 }
 
@@ -613,7 +611,53 @@ main() {
     # Remove 'v' prefix for comparison
     VERSION_NUM=${VERSION#v}
     
-    # Check if already installed
+    # Check for multiple installations FIRST
+    local all_installs=$(find_all_installations)
+    local target_path=$(get_hyprlax_path)
+    
+    # Check for PATH conflicts before doing version comparison
+    if [ -n "$all_installs" ]; then
+        local install_count=$(echo "$all_installs" | tr '|' '\n' | wc -l)
+        local active_after=$(get_active_binary_after_install "$target_path")
+        
+        # If there's a PATH conflict, we must handle it first
+        if [ "$active_after" != "$target_path" ]; then
+            print_warning "PATH conflict detected!"
+            print_info "The active hyprlax binary is not where you're trying to install"
+            
+            # Show what's currently active
+            local current_active=$(which hyprlax 2>/dev/null || echo "")
+            if [ -n "$current_active" ]; then
+                local current_version=$("$current_active" --version 2>/dev/null | head -1 | grep -oP '\d+\.\d+\.\d+' || echo "unknown")
+                print_info "Currently active: $current_active (version: $current_version)"
+            fi
+            
+            local user_choice=$(prompt_installation_choice "$VERSION_NUM" "$target_path" "$all_installs")
+            
+            case "$user_choice" in
+                1)
+                    print_info "Proceeding with installation to $target_path"
+                    print_warning "Remember: $active_after will remain the active binary!"
+                    ;;
+                2)
+                    remove_all_installations "$all_installs"
+                    print_success "All existing installations removed"
+                    # Reset INSTALLED_VERSION since we removed everything
+                    INSTALLED_VERSION="none"
+                    ;;
+                3)
+                    print_info "Installation cancelled"
+                    exit 0
+                    ;;
+                *)
+                    print_error "Invalid choice. Installation cancelled"
+                    exit 1
+                    ;;
+            esac
+        fi
+    fi
+    
+    # NOW check if already installed (after handling conflicts)
     if [ "$INSTALLED_VERSION" != "none" ] && [ "$INSTALLED_VERSION" != "unknown" ]; then
         print_info "Currently installed: $INSTALLED_VERSION"
         
@@ -699,42 +743,6 @@ main() {
     
     # Check if this is a v2 version
     IS_V2=$(is_v2_version "$VERSION")
-    
-    # Check for multiple installations
-    local all_installs=$(find_all_installations)
-    local target_path=$(get_hyprlax_path)
-    
-    if [ -n "$all_installs" ]; then
-        # Count the number of installations
-        local install_count=$(echo "$all_installs" | tr '|' '\n' | wc -l)
-        
-        # Check if there would be a conflict
-        local active_after=$(get_active_binary_after_install "$target_path")
-        
-        # If there are multiple installations or a conflict would occur, prompt the user
-        if [ "$install_count" -gt 1 ] || [ "$active_after" != "$target_path" ]; then
-            local user_choice=$(prompt_installation_choice "$VERSION_NUM" "$target_path" "$all_installs")
-            
-            case "$user_choice" in
-                1)
-                    print_info "Proceeding with installation to $target_path"
-                    print_warning "Remember: $active_after will be the active binary!"
-                    ;;
-                2)
-                    remove_all_installations "$all_installs"
-                    print_success "All existing installations removed"
-                    ;;
-                3)
-                    print_info "Installation cancelled"
-                    exit 0
-                    ;;
-                *)
-                    print_error "Invalid choice. Installation cancelled"
-                    exit 1
-                    ;;
-            esac
-        fi
-    fi
     
     # Download binaries
     HYPRLAX_FILE=$(download_binary "$VERSION" "$ARCH" "hyprlax")
