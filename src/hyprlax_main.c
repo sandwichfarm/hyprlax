@@ -1071,26 +1071,67 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                         comp_event.data.workspace.to_y != 0) {
                         /* 2D workspace change */
                         if (ctx->config.debug) {
-                            LOG_TRACE("Main loop: 2D Workspace changed from (%d,%d) to (%d,%d) on %s",
+                            LOG_DEBUG("Main loop: 2D Workspace event detected");
+                            LOG_DEBUG("  From: workspace %d at (%d,%d)",
+                                   comp_event.data.workspace.from_workspace,
                                    comp_event.data.workspace.from_x,
-                                   comp_event.data.workspace.from_y,
+                                   comp_event.data.workspace.from_y);
+                            LOG_DEBUG("  To: workspace %d at (%d,%d)",
+                                   comp_event.data.workspace.to_workspace,
                                    comp_event.data.workspace.to_x,
-                                   comp_event.data.workspace.to_y,
-                                   target_monitor ? target_monitor->name : "unknown");
+                                   comp_event.data.workspace.to_y);
+                            LOG_DEBUG("  Monitor: %s", target_monitor ? target_monitor->name : "unknown");
                         }
 
                         if (target_monitor) {
-                            /* Update monitor's workspace context for 2D */
-                            workspace_context_t new_context = {
-                                .model = WS_MODEL_SET_BASED,
-                                .data.wayfire_set = {
-                                    .set_id = comp_event.data.workspace.to_y,
-                                    .workspace_id = comp_event.data.workspace.to_x
+                            /* Update monitor's workspace context for 2D compositors */
+                            /* Detect the actual model based on compositor type */
+                            workspace_model_t model = workspace_detect_model(
+                                ctx->compositor ? ctx->compositor->type : COMPOSITOR_AUTO);
+                            
+                            if (ctx->config.debug) {
+                                LOG_DEBUG("  Detected model: %s", workspace_model_to_string(model));
+                            }
+                            
+                            workspace_context_t new_context;
+                            new_context.model = model;
+                            
+                            if (model == WS_MODEL_PER_OUTPUT_NUMERIC) {
+                                /* Niri: encode 2D position as linear workspace ID */
+                                /* workspace_id = y * columns + x */
+                                new_context.data.workspace_id = comp_event.data.workspace.to_y * 3 + 
+                                                               comp_event.data.workspace.to_x;
+                                if (ctx->config.debug) {
+                                    LOG_DEBUG("  Niri: Encoded (%d,%d) as workspace ID %d",
+                                           comp_event.data.workspace.to_x,
+                                           comp_event.data.workspace.to_y,
+                                           new_context.data.workspace_id);
                                 }
-                            };
+                            } else if (model == WS_MODEL_SET_BASED) {
+                                /* Wayfire: use set and workspace within set */
+                                new_context.data.wayfire_set.set_id = comp_event.data.workspace.to_y;
+                                new_context.data.wayfire_set.workspace_id = comp_event.data.workspace.to_x;
+                                if (ctx->config.debug) {
+                                    LOG_DEBUG("  Wayfire: Set %d, workspace %d",
+                                           new_context.data.wayfire_set.set_id,
+                                           new_context.data.wayfire_set.workspace_id);
+                                }
+                            } else {
+                                /* Fallback for unknown 2D models */
+                                new_context.model = WS_MODEL_SET_BASED;
+                                new_context.data.wayfire_set.set_id = comp_event.data.workspace.to_y;
+                                new_context.data.wayfire_set.workspace_id = comp_event.data.workspace.to_x;
+                                if (ctx->config.debug) {
+                                    LOG_DEBUG("  Fallback: Using SET_BASED model");
+                                }
+                            }
+                            
+                            if (ctx->config.debug) {
+                                LOG_DEBUG("  Calling monitor_handle_workspace_context_change");
+                            }
                             monitor_handle_workspace_context_change(ctx, target_monitor, &new_context);
                         } else {
-                            /* Fallback to global handler */
+                            /* Fallback to deprecated global handler if no monitor found */
                             hyprlax_handle_workspace_change_2d(ctx,
                                                              comp_event.data.workspace.from_x,
                                                              comp_event.data.workspace.from_y,

@@ -8,6 +8,7 @@
 #include "../core/monitor.h"
 #include "../include/log.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 
@@ -279,6 +280,87 @@ const char* workspace_model_to_string(workspace_model_t model) {
         case WS_MODEL_SET_BASED: return "set_based";
         default: return "unknown";
     }
+}
+
+/* Calculate 2D parallax offset for 2D workspace models */
+workspace_offset_t workspace_calculate_offset_2d(const workspace_context_t *from,
+                                                const workspace_context_t *to,
+                                                float shift_pixels,
+                                                const workspace_policy_t *policy) {
+    workspace_offset_t offset = {0.0f, 0.0f};
+    
+    if (!from || !to || from->model != to->model) {
+        if (getenv("HYPRLAX_DEBUG")) {
+            fprintf(stderr, "[DEBUG] workspace_calculate_offset_2d: Invalid params or model mismatch\n");
+        }
+        return offset;
+    }
+    
+    if (getenv("HYPRLAX_DEBUG")) {
+        fprintf(stderr, "[DEBUG] workspace_calculate_offset_2d:\n");
+        fprintf(stderr, "[DEBUG]   Model: %s\n", workspace_model_to_string(from->model));
+        fprintf(stderr, "[DEBUG]   Shift pixels: %.1f\n", shift_pixels);
+    }
+    
+    switch (from->model) {
+        case WS_MODEL_SET_BASED:
+            /* Wayfire: 2D grid within sets */
+            if (from->data.wayfire_set.set_id == to->data.wayfire_set.set_id) {
+                /* Within same set, calculate 2D offset */
+                /* Assuming 3x3 grid by default */
+                int from_x = from->data.wayfire_set.workspace_id % 3;
+                int from_y = from->data.wayfire_set.workspace_id / 3;
+                int to_x = to->data.wayfire_set.workspace_id % 3;
+                int to_y = to->data.wayfire_set.workspace_id / 3;
+                
+                offset.x = (to_x - from_x) * shift_pixels;
+                offset.y = (to_y - from_y) * shift_pixels;
+                
+                if (getenv("HYPRLAX_DEBUG")) {
+                    fprintf(stderr, "[DEBUG]   Wayfire set %d: (%d,%d) -> (%d,%d)\n",
+                            from->data.wayfire_set.set_id, from_x, from_y, to_x, to_y);
+                }
+            }
+            break;
+            
+        case WS_MODEL_PER_OUTPUT_NUMERIC:
+            /* Niri: 2D scrollable workspaces */
+            /* Decode 2D position from workspace_id */
+            /* Using encoding: workspace_id = y * columns + x */
+            int columns = 3; /* Default column count */
+            int from_x = from->data.workspace_id % columns;
+            int from_y = from->data.workspace_id / columns;
+            int to_x = to->data.workspace_id % columns;
+            int to_y = to->data.workspace_id / columns;
+            
+            offset.x = (to_x - from_x) * shift_pixels;
+            offset.y = (to_y - from_y) * shift_pixels;
+            
+            if (getenv("HYPRLAX_DEBUG")) {
+                fprintf(stderr, "[DEBUG]   Niri workspace ID %d->%d decoded as:\n",
+                        from->data.workspace_id, to->data.workspace_id);
+                fprintf(stderr, "[DEBUG]     Position: (%d,%d) -> (%d,%d)\n",
+                        from_x, from_y, to_x, to_y);
+                fprintf(stderr, "[DEBUG]     Delta: X=%d, Y=%d\n",
+                        to_x - from_x, to_y - from_y);
+            }
+            break;
+            
+        default:
+            /* For 1D models, just use X axis */
+            offset.x = workspace_calculate_offset(from, to, shift_pixels, policy);
+            offset.y = 0.0f;
+            if (getenv("HYPRLAX_DEBUG")) {
+                fprintf(stderr, "[DEBUG]   1D model, using X-only offset\n");
+            }
+            break;
+    }
+    
+    if (getenv("HYPRLAX_DEBUG")) {
+        fprintf(stderr, "[DEBUG]   Calculated offset: X=%.1f, Y=%.1f\n", offset.x, offset.y);
+    }
+    
+    return offset;
 }
 
 /* Convert context to string for debugging */

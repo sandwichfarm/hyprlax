@@ -247,36 +247,107 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
     if (!monitor || !new_context) return;
 
     /* Check if context actually changed */
-    if (workspace_context_equal(&monitor->current_context, new_context)) return;
+    if (workspace_context_equal(&monitor->current_context, new_context)) {
+        if (getenv("HYPRLAX_DEBUG")) {
+            fprintf(stderr, "[DEBUG] monitor_handle_workspace_context_change: No change detected\n");
+        }
+        return;
+    }
 
-    /* Calculate offset based on context change */
-    float offset = workspace_calculate_offset(&monitor->current_context,
-                                             new_context,
-                                             monitor->config ? monitor->config->shift_pixels : 200.0f,
-                                             NULL);
+    if (getenv("HYPRLAX_DEBUG")) {
+        fprintf(stderr, "[DEBUG] monitor_handle_workspace_context_change:\n");
+        fprintf(stderr, "[DEBUG]   Monitor: %s\n", monitor->name);
+        fprintf(stderr, "[DEBUG]   Model: %s\n", workspace_model_to_string(new_context->model));
+        if (new_context->model == WS_MODEL_PER_OUTPUT_NUMERIC) {
+            fprintf(stderr, "[DEBUG]   From workspace ID: %d\n", monitor->current_context.data.workspace_id);
+            fprintf(stderr, "[DEBUG]   To workspace ID: %d\n", new_context->data.workspace_id);
+        }
+    }
 
-    /* Debug output - only visible with --debug flag */
+    /* Check if this is a 2D workspace model */
+    bool is_2d = (new_context->model == WS_MODEL_SET_BASED || 
+                  new_context->model == WS_MODEL_PER_OUTPUT_NUMERIC);
+    
+    workspace_offset_t offset_2d = {0.0f, 0.0f};
+    float offset_1d = 0.0f;
+    
+    if (is_2d) {
+        /* Calculate 2D offset for 2D models */
+        offset_2d = workspace_calculate_offset_2d(&monitor->current_context,
+                                                 new_context,
+                                                 monitor->config ? monitor->config->shift_pixels : 200.0f,
+                                                 NULL);
+        if (getenv("HYPRLAX_DEBUG")) {
+            fprintf(stderr, "[DEBUG]   Using 2D offset calculation\n");
+        }
+    } else {
+        /* Calculate 1D offset for linear models */
+        offset_1d = workspace_calculate_offset(&monitor->current_context,
+                                              new_context,
+                                              monitor->config ? monitor->config->shift_pixels : 200.0f,
+                                              NULL);
+        offset_2d.x = offset_1d;
+        offset_2d.y = 0.0f;
+        if (getenv("HYPRLAX_DEBUG")) {
+            fprintf(stderr, "[DEBUG]   Using 1D offset calculation\n");
+        }
+    }
+
+    if (getenv("HYPRLAX_DEBUG")) {
+        fprintf(stderr, "[DEBUG]   Offset: X=%.1f, Y=%.1f\n", offset_2d.x, offset_2d.y);
+    }
 
     /* Update context */
     monitor->previous_context = monitor->current_context;
     monitor->current_context = *new_context;
 
     /* Start animation if offset changed */
-    if (offset != 0.0f && ctx) {
-        /* Calculate absolute workspace position based on workspace ID */
-        int target_workspace = new_context->data.workspace_id;
-        int base_workspace = 1; /* Assuming workspace 1 is at position 0 */
-        float absolute_target = (target_workspace - base_workspace) *
+    if ((offset_2d.x != 0.0f || offset_2d.y != 0.0f) && ctx) {
+        /* Calculate absolute workspace position */
+        float absolute_target_x, absolute_target_y;
+        
+        if (is_2d) {
+            /* For 2D models, accumulate the offsets */
+            monitor->parallax_offset_x += offset_2d.x;
+            monitor->parallax_offset_y += offset_2d.y;
+            absolute_target_x = monitor->parallax_offset_x;
+            absolute_target_y = monitor->parallax_offset_y;
+            if (getenv("HYPRLAX_DEBUG")) {
+                fprintf(stderr, "[DEBUG]   2D accumulative offset: X=%.1f, Y=%.1f\n",
+                        monitor->parallax_offset_x, monitor->parallax_offset_y);
+            }
+        } else {
+            /* For 1D models, calculate absolute position from workspace ID */
+            int target_workspace = new_context->data.workspace_id;
+            int base_workspace = 1;
+            absolute_target_x = (target_workspace - base_workspace) *
                               (monitor->config ? monitor->config->shift_pixels : 200.0f);
+            absolute_target_y = 0.0f;
+            if (getenv("HYPRLAX_DEBUG")) {
+                fprintf(stderr, "[DEBUG]   1D absolute position: X=%.1f (workspace %d)\n",
+                        absolute_target_x, target_workspace);
+            }
+        }
 
         /* Update all layers with their absolute target positions */
         if (ctx->layers) {
+            if (getenv("HYPRLAX_DEBUG")) {
+                fprintf(stderr, "[DEBUG]   Updating layers with target: X=%.1f, Y=%.1f\n",
+                        absolute_target_x, absolute_target_y);
+            }
+            
             parallax_layer_t *layer = ctx->layers;
+            int layer_count = 0;
 
             while (layer) {
                 /* Each layer moves at its own speed based on shift_multiplier */
-                float layer_target_x = absolute_target * layer->shift_multiplier;
-                float layer_target_y = 0.0f;
+                float layer_target_x = absolute_target_x * layer->shift_multiplier;
+                float layer_target_y = absolute_target_y * layer->shift_multiplier;
+                
+                if (getenv("HYPRLAX_DEBUG")) {
+                    fprintf(stderr, "[DEBUG]     Layer %d: multiplier=%.2f, target=(%.1f, %.1f)\n",
+                            layer_count++, layer->shift_multiplier, layer_target_x, layer_target_y);
+                }
 
                 layer_update_offset(layer, layer_target_x, layer_target_y,
                                   monitor->config ? monitor->config->animation_duration : 1.0,
@@ -284,10 +355,15 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
 
                 layer = layer->next;
             }
+        } else {
+            if (getenv("HYPRLAX_DEBUG")) {
+                fprintf(stderr, "[DEBUG]   WARNING: No layers to update!\n");
+            }
         }
 
         /* Update monitor's animation separately for tracking */
-        monitor_start_parallax_animation_offset(ctx, monitor, offset);
+        float dominant_offset = fabs(offset_2d.x) > fabs(offset_2d.y) ? offset_2d.x : offset_2d.y;
+        monitor_start_parallax_animation_offset(ctx, monitor, dominant_offset);
     }
 }
 
