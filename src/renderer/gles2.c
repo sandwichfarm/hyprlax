@@ -155,7 +155,10 @@ static int gles2_init(void *native_display, void *native_window,
         fprintf(stderr, "[DEBUG] Compiling basic shader\n");
     }
     data->basic_shader = shader_create_program("basic");
-    if (shader_compile(data->basic_shader, shader_vertex_basic,
+    const char *use_uniform_offset = getenv("HYPRLAX_UNIFORM_OFFSET");
+    const char *vertex_src = (use_uniform_offset && *use_uniform_offset) ?
+                              shader_vertex_basic_offset : shader_vertex_basic;
+    if (shader_compile(data->basic_shader, vertex_src,
                       shader_fragment_basic) != HYPRLAX_SUCCESS) {
         fprintf(stderr, "Failed to compile basic shader\n");
         /* Continue anyway - we need at least basic rendering */
@@ -168,7 +171,9 @@ static int gles2_init(void *native_display, void *native_window,
         fprintf(stderr, "[DEBUG] Compiling blur shader\n");
     }
     data->blur_shader = shader_create_program("blur");
-    if (shader_compile_blur(data->blur_shader) != HYPRLAX_SUCCESS) {
+    if ((use_uniform_offset && *use_uniform_offset) ?
+        (shader_compile_blur_with_vertex(data->blur_shader, shader_vertex_basic_offset) != HYPRLAX_SUCCESS) :
+        (shader_compile_blur(data->blur_shader) != HYPRLAX_SUCCESS)) {
         fprintf(stderr, "Warning: Failed to compile blur shader - blur effects disabled\n");
         shader_destroy_program(data->blur_shader);
         data->blur_shader = NULL;
@@ -247,8 +252,11 @@ static void gles2_present(void) {
                         g_gles2_data->current_surface :
                         g_gles2_data->egl_surface;
 
-    /* Ensure all GL commands are complete before swapping */
-    glFinish();
+    /* Allow skipping glFinish via env for performance testing */
+    const char *no_finish = getenv("HYPRLAX_NO_GLFINISH");
+    if (!no_finish || strcmp(no_finish, "0") == 0) {
+        glFinish();
+    }
     eglSwapBuffers(g_gles2_data->egl_display, surface);
 }
 
@@ -349,15 +357,19 @@ static void gles2_draw_layer(const texture_t *texture, float x, float y,
          1.0f,  1.0f,  1.0f, 0.0f   /* Top-right */
     };
 
-    /* Adjust texture coordinates based on x and y offset */
-    vertices[2] = x;          /* Bottom-left U */
-    vertices[3] = 1.0f - y;   /* Bottom-left V (inverted) */
-    vertices[6] = 1.0f + x;   /* Bottom-right U */
-    vertices[7] = 1.0f - y;   /* Bottom-right V (inverted) */
-    vertices[10] = x;         /* Top-left U */
-    vertices[11] = 0.0f - y;  /* Top-left V (inverted) */
-    vertices[14] = 1.0f + x;  /* Top-right U */
-    vertices[15] = 0.0f - y;  /* Top-right V (inverted) */
+    /* Adjust coordinates based on mode */
+    const char *use_uniform_offset = getenv("HYPRLAX_UNIFORM_OFFSET");
+    if (!(use_uniform_offset && *use_uniform_offset)) {
+        /* Legacy path: encode offset into texcoords */
+        vertices[2] = x;          /* Bottom-left U */
+        vertices[3] = 1.0f - y;   /* Bottom-left V (inverted) */
+        vertices[6] = 1.0f + x;   /* Bottom-right U */
+        vertices[7] = 1.0f - y;   /* Bottom-right V (inverted) */
+        vertices[10] = x;         /* Top-left U */
+        vertices[11] = 0.0f - y;  /* Top-left V (inverted) */
+        vertices[14] = 1.0f + x;  /* Top-right U */
+        vertices[15] = 0.0f - y;  /* Top-right V (inverted) */
+    }
 
     /* Choose shader based on blur amount */
     shader_program_t *shader = g_gles2_data->basic_shader;
@@ -385,14 +397,31 @@ static void gles2_draw_layer(const texture_t *texture, float x, float y,
     gles2_bind_texture(texture, 0);
     shader_set_uniform_int(shader, "u_texture", 0);
 
-    /* Setup vertex attributes */
-    GLuint vbo;
-    glGenBuffers(1, &vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    /* If uniform-offset mode, set u_offset */
+    if (use_uniform_offset && *use_uniform_offset) {
+        GLint u_off = shader_get_uniform_location(shader, "u_offset");
+        if (u_off != -1) {
+            glUniform2f(u_off, x, -y);
+        }
+    }
 
-    GLint pos_attrib = glGetAttribLocation(shader->id, "a_position");
-    GLint tex_attrib = glGetAttribLocation(shader->id, "a_texcoord");
+    /* Setup vertex data */
+    const char *persist_vbo = getenv("HYPRLAX_PERSISTENT_VBO");
+    GLuint vbo = 0;
+    if (persist_vbo && *persist_vbo && g_gles2_data->vbo) {
+        glBindBuffer(GL_ARRAY_BUFFER, g_gles2_data->vbo);
+        /* If using uniform-offset, the static VBO data is sufficient; otherwise update texcoords */
+        if (!(use_uniform_offset && *use_uniform_offset)) {
+            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+        }
+    } else {
+        glGenBuffers(1, &vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    }
+
+    GLint pos_attrib = shader_get_attrib_location(shader, "a_position");
+    GLint tex_attrib = shader_get_attrib_location(shader, "a_texcoord");
 
     if (draw_count < 5 && getenv("HYPRLAX_DEBUG")) {
         fprintf(stderr, "[DEBUG] Attrib locations: pos=%d, tex=%d\n", pos_attrib, tex_attrib);
@@ -422,7 +451,9 @@ static void gles2_draw_layer(const texture_t *texture, float x, float y,
     /* Cleanup */
     if (pos_attrib >= 0) glDisableVertexAttribArray(pos_attrib);
     if (tex_attrib >= 0) glDisableVertexAttribArray(tex_attrib);
-    glDeleteBuffers(1, &vbo);
+    if (!(persist_vbo && *persist_vbo)) {
+        glDeleteBuffers(1, &vbo);
+    }
 
     if (draw_count < 5 && getenv("HYPRLAX_DEBUG")) {
         fprintf(stderr, "[DEBUG] gles2_draw_layer %d: Complete\n", draw_count);

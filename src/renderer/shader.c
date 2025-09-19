@@ -34,6 +34,18 @@ const char *shader_fragment_basic =
     "    gl_FragColor = vec4(color.rgb * final_alpha, final_alpha);\n"
     "}\n";
 
+/* Variant with texcoord offset uniform in vertex shader */
+const char *shader_vertex_basic_offset =
+    "precision highp float;\n"
+    "attribute vec2 a_position;\n"
+    "attribute vec2 a_texcoord;\n"
+    "uniform vec2 u_offset;\n"
+    "varying vec2 v_texcoord;\n"
+    "void main() {\n"
+    "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
+    "    v_texcoord = a_texcoord + u_offset;\n"
+    "}\n";
+
 /* Shader constants */
 #define BLUR_KERNEL_SIZE 5.0f
 #define BLUR_WEIGHT_FALLOFF 0.15f
@@ -77,6 +89,13 @@ shader_program_t* shader_create_program(const char *name) {
     program->name = name ? strdup(name) : strdup("unnamed");
     program->id = 0;
     program->compiled = false;
+    program->cache_ready = false;
+    program->loc_pos_attrib = -1;
+    program->loc_tex_attrib = -1;
+    program->loc_u_texture = -1;
+    program->loc_u_opacity = -1;
+    program->loc_u_blur_amount = -1;
+    program->loc_u_resolution = -1;
 
     return program;
 }
@@ -181,6 +200,15 @@ int shader_compile(shader_program_t *program,
 
     program->id = prog;
     program->compiled = true;
+    /* Populate cached locations for common uniforms/attributes */
+    program->loc_pos_attrib = glGetAttribLocation(program->id, "a_position");
+    program->loc_tex_attrib = glGetAttribLocation(program->id, "a_texcoord");
+    program->loc_u_texture = glGetUniformLocation(program->id, "u_texture");
+    program->loc_u_opacity = glGetUniformLocation(program->id, "u_opacity");
+    program->loc_u_blur_amount = glGetUniformLocation(program->id, "u_blur_amount");
+    program->loc_u_resolution = glGetUniformLocation(program->id, "u_resolution");
+    program->loc_u_offset = glGetUniformLocation(program->id, "u_offset");
+    program->cache_ready = true;
 
     return HYPRLAX_SUCCESS;
 }
@@ -240,6 +268,38 @@ void shader_set_uniform_int(const shader_program_t *program,
     if (location != -1) {
         glUniform1i(location, value);
     }
+}
+
+/* Fast accessors */
+int shader_get_attrib_location(const shader_program_t *program, const char *name) {
+    if (!program || !program->id || !name) return -1;
+    if (program->cache_ready) {
+        if (strcmp(name, "a_position") == 0) return program->loc_pos_attrib;
+        if (strcmp(name, "a_texcoord") == 0) return program->loc_tex_attrib;
+    }
+    return glGetAttribLocation(program->id, name);
+}
+
+int shader_get_uniform_location(const shader_program_t *program, const char *name) {
+    if (!program || !program->id || !name) return -1;
+    if (program->cache_ready) {
+        if (strcmp(name, "u_texture") == 0) return program->loc_u_texture;
+        if (strcmp(name, "u_opacity") == 0) return program->loc_u_opacity;
+        if (strcmp(name, "u_blur_amount") == 0) return program->loc_u_blur_amount;
+        if (strcmp(name, "u_resolution") == 0) return program->loc_u_resolution;
+        if (strcmp(name, "u_offset") == 0) return program->loc_u_offset;
+    }
+    return glGetUniformLocation(program->id, name);
+}
+
+/* Compile blur shader with a provided vertex shader */
+int shader_compile_blur_with_vertex(shader_program_t *program, const char *vertex_src) {
+    if (!program) return HYPRLAX_ERROR_INVALID_ARGS;
+    char *blur_fragment_src = shader_build_blur_fragment(5.0f, BLUR_KERNEL_SIZE);
+    if (!blur_fragment_src) return HYPRLAX_ERROR_NO_MEMORY;
+    int result = shader_compile(program, vertex_src, blur_fragment_src);
+    free(blur_fragment_src);
+    return result;
 }
 
 /* Build dynamic blur shader */

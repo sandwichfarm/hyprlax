@@ -29,6 +29,7 @@ typedef struct shader_program {
     int loc_u_opacity;
     int loc_u_blur_amount;
     int loc_u_resolution;
+    int loc_u_offset;
     bool cache_ready;
 } shader_program_t;
 
@@ -61,6 +62,9 @@ void shader_set_uniform_vec2(const shader_program_t *program,
 void shader_set_uniform_int(const shader_program_t *program,
                           const char *name, int value);
 
+/* Blur shader compile variants */
+int shader_compile_blur_with_vertex(shader_program_t *program, const char *vertex_src);
+
 /* Fast accessors for cached locations (returns -1 if not present) */
 int shader_get_attrib_location(const shader_program_t *program, const char *name);
 int shader_get_uniform_location(const shader_program_t *program, const char *name);
@@ -70,6 +74,7 @@ shader_uniforms_t* shader_get_uniforms(shader_program_t *program);
 
 /* Built-in shader sources */
 extern const char *shader_vertex_basic;
+extern const char *shader_vertex_basic_offset;
 extern const char *shader_fragment_basic;
 extern const char *shader_fragment_blur;
 
