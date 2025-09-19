@@ -1,10 +1,19 @@
 CC = gcc
+
+# Version generation
+# If VERSION file doesn't exist, create it from git commit hash
+# CI/CD will overwrite this with tag version
+ifeq ($(wildcard VERSION),)
+$(shell git rev-parse --short HEAD 2>/dev/null > VERSION || echo "unknown" > VERSION)
+endif
+VERSION := $(shell cat VERSION)
+
 # Use generic architecture for CI compatibility
 ifdef CI
-CFLAGS = -Wall -Wextra -O2 -Isrc -Isrc/include
+CFLAGS = -Wall -Wextra -O2 -Isrc -Isrc/include -DHYPRLAX_VERSION=\"$(VERSION)\"
 LDFLAGS =
 else
-CFLAGS = -Wall -Wextra -O3 -flto -Isrc -Isrc/include
+CFLAGS = -Wall -Wextra -O3 -march=native -flto -Isrc -Isrc/include -DHYPRLAX_VERSION=\"$(VERSION)\"
 LDFLAGS = -flto
 endif
 
@@ -77,8 +86,14 @@ WAYLAND_SCANNER = $(shell pkg-config --variable=wayland_scanner wayland-scanner)
 ifeq ($(ENABLE_WAYLAND),1)
 XDG_SHELL_PROTOCOL = $(WAYLAND_PROTOCOLS_DIR)/stable/xdg-shell/xdg-shell.xml
 LAYER_SHELL_PROTOCOL = protocols/wlr-layer-shell-unstable-v1.xml
+RIVER_STATUS_PROTOCOL = protocols/river-status-unstable-v1.xml
 PROTOCOL_SRCS = protocols/xdg-shell-protocol.c protocols/wlr-layer-shell-protocol.c
 PROTOCOL_HDRS = protocols/xdg-shell-client-protocol.h protocols/wlr-layer-shell-client-protocol.h
+# River status protocol is optional, only include if River is enabled
+ifeq ($(ENABLE_RIVER),1)
+PROTOCOL_SRCS += protocols/river-status-protocol.c
+PROTOCOL_HDRS += protocols/river-status-client-protocol.h
+endif
 else
 PROTOCOL_SRCS =
 PROTOCOL_HDRS =
@@ -166,12 +181,26 @@ protocols/wlr-layer-shell-client-protocol.h: $(LAYER_SHELL_PROTOCOL)
 	@mkdir -p protocols
 	$(WAYLAND_SCANNER) client-header < $< > $@
 
+protocols/river-status-protocol.c: $(RIVER_STATUS_PROTOCOL)
+	@mkdir -p protocols
+	$(WAYLAND_SCANNER) private-code < $< > $@
+
+protocols/river-status-client-protocol.h: $(RIVER_STATUS_PROTOCOL)
+	@mkdir -p protocols
+	$(WAYLAND_SCANNER) client-header < $< > $@
+
 # Compile
 %.o: %.c $(PROTOCOL_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(PKG_CFLAGS) -c $< -o $@
 
-$(TARGET): $(OBJS)
+# Ensure VERSION file exists before building
+VERSION:
+	@if [ ! -f VERSION ]; then \
+		git rev-parse --short HEAD 2>/dev/null > VERSION || echo "unknown" > VERSION; \
+	fi
+
+$(TARGET): VERSION $(OBJS)
 	$(CC) $(LDFLAGS) $(OBJS) $(PKG_LIBS) -lm -o $@
 
 clean:

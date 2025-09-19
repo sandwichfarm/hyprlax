@@ -1,5 +1,8 @@
 #define _GNU_SOURCE
-#define HYPRLAX_VERSION "2.0.0-beta.2"
+/* Version is now defined at compile time via -DHYPRLAX_VERSION in Makefile */
+#ifndef HYPRLAX_VERSION
+#define HYPRLAX_VERSION "unknown"
+#endif
 #define INITIAL_MAX_LAYERS 8
 #define MAX_CONFIG_LINE_SIZE 512  // Maximum line length in config files
 #define BLUR_SHADER_MAX_SIZE 2048 // Maximum size for dynamically built shader

@@ -61,6 +61,13 @@ jobs:
           pkg-config \
           make
 
+    - name: Write VERSION file from tag
+      run: |
+        # Extract version from tag (remove 'v' prefix)
+        VERSION="${GITHUB_REF_NAME#v}"
+        echo "$VERSION" > VERSION
+        echo "Building version: $VERSION"
+
     - name: Build
       env:
         CC: ${{ matrix.cc }}

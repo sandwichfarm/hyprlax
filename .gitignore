@@ -5,6 +5,9 @@ hyprlax-ctl
 *.a
 *.so
 
+# Version file (generated at build time)
+VERSION
+
 # Generated protocol files
 protocols/*.c
 protocols/*.h

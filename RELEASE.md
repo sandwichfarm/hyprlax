@@ -11,13 +11,25 @@ We follow [Semantic Versioning](https://semver.org/):
 
 Format: `v{MAJOR}.{MINOR}.{PATCH}` (e.g., `v1.0.0`, `v1.2.3`)
 
+### Version Management
+
+The version is **never hardcoded in source code**. Instead:
+- **Local builds**: Version is automatically generated from git commit hash
+- **CI/CD builds**: Version is extracted from the git tag
+
+The build system handles this automatically:
+1. If no `VERSION` file exists, the Makefile creates one with the current git commit hash
+2. CI/CD workflows write the tag version to `VERSION` file before building
+3. The version is passed to the compiler via `-DHYPRLAX_VERSION` flag
+4. The `VERSION` file is in `.gitignore` and never committed
+
 ## Release Workflow
 
 ### 1. Prepare the Release
 
-1. Ensure all changes are committed and pushed to `main`
-2. Update version references if needed
-3. Ensure CI passes on `main`
+1. Ensure all changes are committed and pushed to `main` (or `master`)
+2. Ensure CI passes on the main branch
+3. No manual version updates needed - version is derived from git tag
 
 ### 2. Create and Push Tag
 
@@ -32,11 +44,12 @@ git push origin v1.0.0
 ### 3. Automated Release Process
 
 When a tag is pushed, GitHub Actions will automatically:
-1. Build the binary for multiple architectures
-2. Run tests
-3. Create a GitHub release
-4. Upload built binaries as release assets
-5. Generate release notes from commits
+1. Extract version from tag and write to VERSION file
+2. Build the binary with the correct version embedded
+3. Run tests
+4. Create a GitHub release
+5. Upload built binaries as release assets
+6. Generate release notes from commits
 
 ### 4. Manual Steps (if needed)
 
@@ -115,10 +128,8 @@ These won't be marked as "latest" on GitHub.
 git checkout feature/refactor  # or develop, beta, etc.
 git branch --show-current      # Verify: Should NOT show 'master'
 
-# Update version with pre-release suffix
-echo "1.1.0-beta.1" > VERSION
-
-# Update CHANGELOG with pre-release section
+# No manual version update needed - version comes from tag
+# Update CHANGELOG with pre-release section if desired
 ```
 
 #### 2. Create Pre-Release Tag
@@ -153,9 +164,10 @@ git push origin v1.1.0-beta.1
 
 The workflow will automatically:
 1. Detect pre-release tag pattern (v*-*)
-2. Create GitHub release marked as pre-release
-3. Build from the feature branch
-4. Add warning labels to artifacts
+2. Extract version from tag and write to VERSION file
+3. Build from the feature branch with correct version
+4. Create GitHub release marked as pre-release
+5. Add warning labels to artifacts
 
 Manual steps:
 1. Edit release notes to emphasize pre-release status
@@ -189,11 +201,8 @@ After successful pre-release testing:
 git checkout master
 git merge --no-ff feature/refactor -m "Merge feature/refactor for v1.1.0 release"
 
-# 2. Remove pre-release suffix
-echo "1.1.0" > VERSION
-git commit -am "chore: prepare stable release v1.1.0"
-
-# 3. Create stable release tag from master
+# 2. Create stable release tag from master
+# No manual VERSION changes needed - tag drives version
 git tag -a v1.1.0 -m "Release v1.1.0: [Description]"
 git push origin master --tags
 ```

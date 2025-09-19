@@ -13,7 +13,10 @@
 #include <stddef.h>
 
 /* Version information */
-#define HYPRLAX_VERSION "2.0.0-dev"
+/* Version is now defined at compile time via -DHYPRLAX_VERSION in Makefile */
+#ifndef HYPRLAX_VERSION
+#define HYPRLAX_VERSION "unknown"
+#endif
 #define HYPRLAX_ABI_VERSION 1
 
 /* Common macros */
