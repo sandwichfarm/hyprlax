@@ -1,4 +1,5 @@
 > **hyprlax is presently under heavy development**, follow progress [here](https://github.com/sandwichfarm/hyprlax/issues/13)
+> 
 > New version will include Multi-Monitor Support, Robust Configuration and support for additional Compositors such as Niri and River (though still works best with _hyprland_)
 
 # hyprlax
