@@ -89,10 +89,19 @@ jobs:
             libwayland-dev \
             libegl1-mesa-dev \
             libgles2-mesa-dev \
-            libx11-dev \
-            libxext-dev \
             wayland-scanner++ \
             pkg-config
+      
+      - name: Generate VERSION file
+        if: steps.pr_info.outputs.skip != 'true'
+        run: |
+          # Sanitize branch name (replace / with -)
+          BRANCH_NAME=$(echo "${{ steps.pr_info.outputs.head_ref }}" | sed 's/\//-/g')
+          # Get short commit hash
+          SHORT_SHA=$(echo "${{ steps.pr_info.outputs.head_sha }}" | cut -c1-7)
+          # Create VERSION file with branch-commit format
+          echo "${BRANCH_NAME}-${SHORT_SHA}" > VERSION
+          echo "Generated version: $(cat VERSION)"
       
       - name: Build hyprlax
         if: steps.pr_info.outputs.skip != 'true'

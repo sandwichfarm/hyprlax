@@ -62,8 +62,6 @@ jobs:
             wayland-protocols \
             libegl1-mesa-dev \
             libgles2-mesa-dev \
-            libx11-dev \
-            libxext-dev \
             check
       
       - name: Build binary
@@ -71,10 +69,10 @@ jobs:
           CC: ${{ matrix.cc }}
           ARCH: ${{ matrix.arch }}
         run: |
-          # Add pre-release version info to build
-          VERSION=${{ github.ref_name }}
+          # Extract version from tag (remove 'v' prefix)
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "$VERSION" > VERSION
           echo "Building pre-release version: $VERSION"
-          echo "#define HYPRLAX_VERSION \"$VERSION-PRE\"" > src/version.h
           
           make clean
           make
@@ -88,9 +86,7 @@ jobs:
         run: |
           # Rename binaries to match release workflow naming
           mv hyprlax hyprlax-${{ matrix.arch }}
-          mv hyprlax-ctl hyprlax-ctl-${{ matrix.arch }}
           chmod +x hyprlax-${{ matrix.arch }}
-          chmod +x hyprlax-ctl-${{ matrix.arch }}
       
       - name: Upload hyprlax artifact
         uses: actions/upload-artifact@v4
@@ -98,11 +94,6 @@ jobs:
           name: hyprlax-${{ matrix.arch }}
           path: hyprlax-${{ matrix.arch }}
       
-      - name: Upload hyprlax-ctl artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: hyprlax-ctl-${{ matrix.arch }}
-          path: hyprlax-ctl-${{ matrix.arch }}
 
   create-pre-release:
     needs: [validate-branch, build-pre-release]
@@ -187,20 +178,17 @@ jobs:
           ### 🔧 Installation (Testing Only)
           
           \`\`\`bash
-          # Download binaries
+          # Download binary
           wget https://github.com/sandwichfarm/hyprlax/releases/download/${VERSION}/hyprlax-x86_64
-          wget https://github.com/sandwichfarm/hyprlax/releases/download/${VERSION}/hyprlax-ctl-x86_64
           
           # Make executable and install (at your own risk)
-          chmod +x hyprlax-x86_64 hyprlax-ctl-x86_64
+          chmod +x hyprlax-x86_64
           sudo mv hyprlax-x86_64 /usr/local/bin/hyprlax
-          sudo mv hyprlax-ctl-x86_64 /usr/local/bin/hyprlax-ctl
           \`\`\`
           
           ### 📦 Available Builds
           
           - \`hyprlax-x86_64\` - Main hyprlax binary for Intel/AMD 64-bit
-          - \`hyprlax-ctl-x86_64\` - Control client for Intel/AMD 64-bit
           
           *Note: ARM64 builds not available for pre-releases. Please build from source.*
           
@@ -245,7 +233,6 @@ jobs:
           prerelease: true  # ALWAYS true for pre-releases
           files: |
             hyprlax-x86_64
-            hyprlax-ctl-x86_64
             SHA256SUMS
           fail_on_unmatched_files: true
           generate_release_notes: false  # We generate our own

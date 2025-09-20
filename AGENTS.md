@@ -14,10 +14,15 @@ Hyprlax is a smooth parallax wallpaper animation system for Hyprland (Wayland co
 - **Image Loading**: stb_image (header-only library)
 
 ### Architecture
-- Single-binary daemon that runs in background
-- Connects to Hyprland via IPC socket for workspace events
-- GPU-accelerated rendering with custom shaders
-- Multi-layer support with per-layer animation properties
+- Modular architecture with separated concerns:
+  - **Core**: Animation engine, configuration, layer management
+  - **Platform**: Wayland abstraction layer
+  - **Compositor**: Adapter system for different compositors
+  - **Renderer**: OpenGL ES 2.0 rendering with custom shaders
+- Runtime IPC system for dynamic control
+- Multi-compositor support (Hyprland, Sway, Wayfire, Niri, River, etc.)
+- Integrated control interface via `hyprlax ctl` subcommand
+- Comprehensive test suite with memory leak detection
 
 ## Development Environment
 
@@ -38,6 +43,9 @@ make            # Standard optimized build
 make debug      # Debug build with symbols
 make clean      # Clean build artifacts
 make install    # Install to /usr/local/bin
+make test       # Run comprehensive test suite
+make memcheck   # Memory leak testing with Valgrind
+make coverage   # Test coverage analysis
 ```
 
 ### Testing
@@ -49,7 +57,19 @@ make install    # Install to /usr/local/bin
 ./hyprlax --debug --layer bg.jpg:0.3:1.0:expo:0:1.0:3.0 \
                   --layer fg.png:1.0:0.8
 
+# Runtime control (integrated control interface)
+./hyprlax ctl status                    # Check daemon status
+./hyprlax ctl add image.jpg 1.5 0.8     # Add layer dynamically
+./hyprlax ctl set fps 144               # Change frame rate
+./hyprlax ctl set duration 2.0          # Modify animation duration
+./hyprlax ctl get fps                   # Query current settings
+./hyprlax ctl list                      # List active layers
+
+# Run test suite
+make test
+
 # Check for memory leaks
+make memcheck
 valgrind --leak-check=full ./hyprlax test.jpg
 ```
 
@@ -125,25 +145,88 @@ int load_layer(struct layer *layer, const char *path,
 ```
 hyprlax/
 ├── src/
-│   ├── hyprlax.c         # Main implementation (single file)
-│   └── stb_image.h       # Image loading library
-├── protocols/            # Wayland protocol files
-├── docs/                 # User documentation
-├── examples/             # Example configurations
-├── Makefile             # Build configuration
-└── AGENTS.md            # This file
+│   ├── core/               # Core functionality
+│   │   ├── animation.c     # Animation engine
+│   │   ├── config.c        # Configuration management
+│   │   ├── easing.c        # Easing functions
+│   │   └── layer.c         # Layer management
+│   ├── platform/           # Platform abstraction
+│   │   ├── platform.c      # Platform detection/initialization
+│   │   ├── wayland.c       # Wayland implementation
+│   ├── compositor/         # Compositor adapters
+│   │   ├── compositor.c    # Compositor detection/management
+│   │   ├── hyprland.c      # Hyprland IPC integration
+│   │   ├── sway.c          # Sway/i3 IPC integration
+│   │   ├── wayfire.c       # Wayfire (2D workspaces)
+│   │   ├── niri.c          # Niri (scrollable workspaces)
+│   │   ├── river.c         # River (tag-based workspaces)
+│   │   ├── generic_wayland.c # Generic Wayland fallback
+│   ├── renderer/           # Rendering system
+│   │   ├── renderer.c      # Renderer interface
+│   │   ├── shader.c        # Shader management
+│   │   └── gles2.c         # OpenGL ES 2.0 implementation
+│   ├── include/            # Header files
+│   │   ├── core.h          # Core module definitions
+│   │   ├── platform.h      # Platform abstractions
+│   │   ├── compositor.h    # Compositor interfaces
+│   │   ├── renderer.h      # Renderer interfaces
+│   │   └── shader.h        # Shader definitions
+│   ├── ipc.c               # IPC system for runtime control
+│   ├── ipc.h               # IPC system headers
+│   ├── main.c              # Entry point and argument parsing
+│   ├── hyprlax_main.c      # Main daemon logic
+│   ├── hyprlax_ctl.c       # Integrated control interface
+│   └── stb_image.h         # Image loading library
+├── protocols/              # Wayland protocol files
+├── docs/                   # User documentation
+├── examples/               # Example configurations
+├── tests/                  # Comprehensive test suite
+│   ├── test_animation.c    # Animation system tests
+│   ├── test_compositor.c   # Compositor detection tests
+│   ├── test_ipc.c          # IPC system tests
+│   ├── test_integration.c  # Integration tests
+│   └── test_*.c           # Additional test modules
+├── scripts/                # Build and utility scripts
+├── Makefile               # Build configuration
+└── AGENTS.md              # This file
 ```
 
 ### Adding Features
 
 When adding new features:
-1. Update the `struct layer` or `struct config` as needed
-2. Add command-line parsing in `main()`
-3. Implement logic in appropriate function
-4. Update shaders if needed
-5. Add debug output
-6. Update documentation
-7. Add example usage
+1. **Choose appropriate module**: Core, Platform, Compositor, or Renderer
+2. **Update relevant structures**: `struct layer`, `struct config`, etc.
+3. **Add command-line parsing** in `main.c`
+4. **Implement logic** in the appropriate module
+5. **Update IPC system** if runtime control is needed (`ipc.c`)
+6. **Add compositor support** if workspace-related (`src/compositor/`)
+7. **Update shaders** if rendering changes are needed (`src/renderer/shader.c`)
+8. **Add tests** to the test suite (`tests/test_*.c`)
+9. **Add debug output** behind appropriate flags
+10. **Update documentation** and examples
+
+### New Architecture Features
+
+#### Runtime IPC System
+- **Location**: `src/ipc.c`, `src/ipc.h`
+- **Purpose**: Dynamic control of running daemon
+- **Commands**: ADD, REMOVE, MODIFY, LIST, CLEAR, STATUS, SET_PROPERTY, GET_PROPERTY
+- **Access**: Via `hyprlax ctl` integrated subcommand
+
+#### Modular Compositor Support
+- **Location**: `src/compositor/`
+- **Supported Compositors**:
+  - **Hyprland**: Full IPC integration with workspace events
+  - **Sway**: i3-compatible IPC protocol
+  - **Wayfire**: 2D workspace grid support
+  - **River**: Tag-based workspace system
+  - **Niri**: Scrollable workspace model
+  - **Generic Wayland**: Fallback for unsupported compositors
+
+#### Platform Abstraction
+- **Location**: `src/platform/`
+- **Wayland**: Layer-shell protocol implementation
+- **Auto-detection**: Runtime platform selection
 
 ## Commit Message Format
 
@@ -179,8 +262,11 @@ Before submitting changes:
 - [ ] Code compiles without warnings
 - [ ] Single-layer mode works
 - [ ] Multi-layer mode works
-- [ ] No memory leaks (valgrind clean)
-- [ ] Animation is smooth (60+ FPS)
+- [ ] All tests pass (`make test`)
+- [ ] No memory leaks (`make memcheck`)
+- [ ] Animation is smooth (144 FPS target)
+- [ ] IPC system works (`hyprlax ctl` commands)
+- [ ] Compositor detection works correctly
 - [ ] Debug mode provides useful output
 - [ ] Documentation updated
 - [ ] Examples work
@@ -189,10 +275,11 @@ Before submitting changes:
 
 ### Critical Path
 The render loop must maintain 144 FPS:
-- `render_frame()` - Keep under 7ms
+- `render_frame()` - Keep under 7ms (144 FPS = ~6.9ms per frame)
 - Texture operations - Use power-of-2 sizes
 - Shader complexity - Minimize calculations
 - Layer count - Test with 5+ layers
+- IPC processing - Non-blocking for runtime control
 
 ### Memory Management
 - Free textures when switching wallpapers
@@ -209,6 +296,56 @@ The render loop must maintain 144 FPS:
 - Handle IPC errors gracefully
 
 ## Common Tasks
+
+### Addressing Pull Request Review Comments
+
+When asked to address review comments for a specific PR:
+
+**Prerequisites**: Must be given a specific PR number (e.g., "address review comments on PR #42")
+
+**Procedure**:
+1. **Use `gh` CLI tool** for all GitHub interactions
+2. **Check review comments in DESC order** (newest first):
+   ```bash
+   gh pr view [PR_NUMBER] --comments
+   ```
+3. **Identify UNRESOLVED inline review comments**:
+   ```bash
+   gh api repos/{owner}/{repo}/pulls/[PR_NUMBER]/comments
+   ```
+4. **Critical Rule**: If you encounter review comments that appear already addressed:
+   - **DO NOT** assume the task is complete
+   - **CONTINUE** searching for unresolved inline review comments
+   - Many resolved comments may exist alongside new unresolved ones
+5. **🚨 VALIDATE BEFORE IMPLEMENTING**: For each unresolved comment:
+   - **Analyze the suggested change carefully**
+   - **Verify the correctness** of the review comment
+   - **Consider edge cases** and potential side effects
+   - **Do NOT blindly implement** suggestions without validation
+   - **Question assertions**: Are they actually invalid or just flagged?
+   - **Understand the context**: Does the change make sense in the codebase?
+6. **Address each validated comment** systematically
+7. **Verify completion** by checking that all inline review comments are resolved
+
+**Critical Validation Examples**:
+- ❌ **Bad**: Removing `ck_assert(state.previous != state.current || i == 0)` without checking test data
+- ✅ **Good**: Analyzing test data shows no consecutive identical values, so assertion is valid
+- ❌ **Bad**: Accepting bounds check "fix" without understanding the existing validation
+- ✅ **Good**: Confirming bounds are already checked before applying memcpy improvement
+
+**Common Pitfalls to Avoid**:
+- ❌ Stopping after finding addressed comments
+- ❌ Assuming old resolved comments mean task is done
+- ❌ Missing inline review comments that are children of review summaries
+- ❌ Not using `gh` CLI tool for accurate comment status
+- ❌ **Blindly implementing review suggestions without validation**
+- ❌ **Removing valid assertions or safety checks**
+- ❌ **Not understanding the mathematical/logical correctness**
+
+**Only perform this procedure when**:
+- Explicitly requested to address review comments
+- Given a specific PR number
+- NOT for general code review or improvement tasks
 
 ### Adding a new easing function
 1. Add enum value to `easing_type_t`

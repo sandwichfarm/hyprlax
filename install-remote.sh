@@ -56,7 +56,7 @@ Usage: curl -sSL https://hyprlax.com/install.sh | bash [-s -- OPTIONS]
 
 OPTIONS:
     -s, --system      Install system-wide (requires sudo)
-    -u, --user        Install for current user only (default)
+    -u, --user        Install for current user only
     -v, --version     Install specific version (default: latest)
     -2, --v2          Install latest version 2.x.x release
     -p, --prerelease  Include prereleases when using --v2
@@ -65,7 +65,7 @@ OPTIONS:
     -h, --help        Show this help message
 
 EXAMPLES:
-    curl -sSL https://hyprlax.com/install.sh | bash
+    curl -sSL https://hyprlax.com/install.sh | bash         # Interactive
     curl -sSL https://hyprlax.com/install.sh | bash -s -- --system
     curl -sSL https://hyprlax.com/install.sh | bash -s -- --version v1.2.3
     curl -sSL https://hyprlax.com/install.sh | bash -s -- --v2
@@ -73,6 +73,54 @@ EXAMPLES:
     curl -sSL https://hyprlax.com/install.sh | bash -s -- --version v1.0.0 --downgrade
 EOF
     exit 0
+}
+
+# Prompt for installation type
+prompt_install_type() {
+    if [ -n "$INSTALL_TYPE" ]; then
+        # Already set via command line
+        return
+    fi
+    
+    echo "================================"
+    echo "   Installation Location"
+    echo "================================"
+    echo
+    print_info "Please select installation location:"
+    echo
+    echo "  ${GREEN}1)${NC} System-wide ${CYAN}(/usr/local/bin)${NC} ${GREEN}[RECOMMENDED]${NC}"
+    echo "     • Available to all users"
+    echo "     • Works with compositor autostart (exec-once)"
+    echo "     • Requires sudo for installation"
+    echo
+    echo "  ${YELLOW}2)${NC} User-specific ${CYAN}(~/.local/bin)${NC}"
+    echo "     • Only available to current user"
+    echo "     • ${YELLOW}May not work with compositor autostart${NC}"
+    echo "     • No sudo required"
+    echo
+    
+    while true; do
+        read -p "Select option [1-2] (default: 1): " -n 1 -r choice
+        echo
+        
+        case "$choice" in
+            1|"")
+                INSTALL_TYPE="system"
+                print_success "Selected: System-wide installation"
+                break
+                ;;
+            2)
+                INSTALL_TYPE="user"
+                print_warning "Selected: User installation"
+                print_warning "Note: You may need to use full path in exec-once"
+                break
+                ;;
+            *)
+                print_error "Invalid choice. Please select 1 or 2."
+                ;;
+        esac
+    done
+    echo
 }
 
 # Parse arguments
@@ -119,9 +167,9 @@ done
 # Get binary paths based on install type
 get_binary_paths() {
     if [ "$INSTALL_TYPE" = "system" ]; then
-        echo "/usr/local/bin/hyprlax /usr/local/bin/hyprlax-ctl"
+        echo "/usr/local/bin/hyprlax"
     else
-        echo "$HOME/.local/bin/hyprlax $HOME/.local/bin/hyprlax-ctl"
+        echo "$HOME/.local/bin/hyprlax"
     fi
 }
 
@@ -134,14 +182,8 @@ get_hyprlax_path() {
     fi
 }
 
-# Get hyprlax-ctl binary path based on install type  
-get_ctl_path() {
-    if [ "$INSTALL_TYPE" = "system" ]; then
-        echo "/usr/local/bin/hyprlax-ctl"
-    else
-        echo "$HOME/.local/bin/hyprlax-ctl"
-    fi
-}
+# Note: hyprlax-ctl is now integrated into hyprlax as 'hyprlax ctl'
+# This function is kept for backward compatibility during upgrades
 
 # Get installed version
 get_installed_version() {
@@ -702,8 +744,14 @@ install_binaries() {
     local ctl_file="$2"
     local is_v2="$3"
     local hyprlax_path=$(get_hyprlax_path)
-    local ctl_path=$(get_ctl_path)
     local install_dir=$(dirname "$hyprlax_path")
+    
+    # Define ctl_path based on install type
+    if [ "$INSTALL_TYPE" = "system" ]; then
+        local ctl_path="/usr/local/bin/hyprlax-ctl"
+    else
+        local ctl_path="$HOME/.local/bin/hyprlax-ctl"
+    fi
     
     # Always install hyprlax
     install_single_binary "$hyprlax_file" "$hyprlax_path" "hyprlax"
@@ -739,6 +787,9 @@ main() {
     echo "     hyprlax Installer"
     echo "================================"
     echo
+    
+    # Prompt for installation type if not specified
+    prompt_install_type
     
     # Detect architecture
     ARCH=$(detect_arch)
@@ -987,7 +1038,13 @@ main() {
     # Backup existing installation
     if [ "$INSTALLED_VERSION" != "none" ]; then
         local hyprlax_path=$(get_hyprlax_path)
-        local ctl_path=$(get_ctl_path)
+        
+        # Define ctl_path based on install type
+        if [ "$INSTALL_TYPE" = "system" ]; then
+            local ctl_path="/usr/local/bin/hyprlax-ctl"
+        else
+            local ctl_path="$HOME/.local/bin/hyprlax-ctl"
+        fi
         
         if [ -f "$hyprlax_path" ]; then
             local backup_path="${hyprlax_path}.backup.$(date +%Y%m%d_%H%M%S)"
@@ -1041,9 +1098,9 @@ main() {
         fi
         echo
         print_info "To get started:"
-        print_step "1. Add to your Hyprland config:"
+        print_step "1. Add to your compositor config:"
         echo "      exec-once = hyprlax /path/to/wallpaper.jpg"
-        print_step "2. Reload Hyprland or logout/login"
+        print_step "2. Reload your compositor or logout/login"
     else
         if [ "$IS_V2" = "1" ]; then
             print_success "hyprlax has been updated to v2 $VERSION_NUM"
@@ -1052,8 +1109,6 @@ main() {
             print_success "hyprlax and hyprlax-ctl have been updated to $VERSION_NUM"
         fi
     fi
-    
-    echo
     
     # VERIFY THE INSTALLATION
     local hyprlax_path=$(get_hyprlax_path)

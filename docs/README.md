@@ -19,6 +19,8 @@ Welcome to the hyprlax documentation! This directory contains comprehensive guid
 ## 🔧 Developer Documentation
 
 - **[Development Guide](development.md)** - Building, modifying, and contributing to hyprlax
+- **[Benchmarking](benchmarking.md)** - Running perf and power checks with Make targets
+- **[Optimization Guide](optimization.md)** - Performance toggles and recommended settings
 
 ## Quick Links
 

@@ -1,0 +1,169 @@
+=== Hyprlax Performance Test ===
+Config: /home/sandwich/Develop/hyprlax/examples/pixel-city/parallax.conf
+Duration: 30s
+
+=== Test 0: Baseline (Before Hyprlax) ===
+Sample 1: Power=43.67W, Util=12%, State=P8
+Sample 2: Power=43.72W, Util=6%, State=P8
+Sample 3: Power=43.82W, Util=12%, State=P8
+Baseline Average: Power=43.7W, Util=10.0%
+
+Starting hyprlax...
+[INFO]  [INIT] Step 0: Initializing multi-monitor support
+[DEBUG] [INIT] Multi-monitor mode: ALL
+[INFO]  [INIT] Step 1: Initializing IPC
+[IPC] Initializing IPC subsystem
+[IPC] Socket path: /tmp/hyprlax-sandwich.sock
+[IPC] No existing instance detected
+[IPC] Socket created successfully
+[IPC] Binding socket to /tmp/hyprlax-sandwich.sock
+[IPC] Starting to listen on socket
+[IPC] Socket successfully listening at: /tmp/hyprlax-sandwich.sock
+[INFO]  IPC server initialized
+[INFO]  [INIT] Step 2: Initializing platform
+[DEBUG] Detected output 62 (total: 1)
+[DEBUG] Platform: Wayland
+[INFO]  [INIT] Step 3: Initializing compositor
+[DEBUG]   IPC connected
+[INFO]  Compositor: Hyprland
+[INFO]    Blur support: yes
+[INFO]  [INIT] Step 4: Creating window
+[DEBUG] Output name: DP-4
+[TRACE] Output scale: DP-4 scale=1
+[TRACE] Output mode: DP-4 3840x2160@59Hz
+[TRACE] Output geometry: DP-4 at (0,0) transform=0
+Monitor DP-4 geometry: 3840x2160@59Hz scale=1
+Added monitor DP-4 (id=1, total=1)
+[DEBUG] Created layer surface for monitor DP-4
+[DEBUG] Successfully created surface for monitor DP-4
+[DEBUG] Layer surface configure called: 3840x2160
+[DEBUG] Layer surface dimensions set: 3840x2160
+[DEBUG] Configure event received with dimensions: 3840x2160
+[INFO]  [INIT] Step 5: Initializing renderer
+[DEBUG] [INIT] Got window size from Wayland: 3840x2160
+[DEBUG] Renderer: OpenGL ES 2.0
+[INFO]  [INIT] Step 6: Creating EGL surfaces for monitors
+[DEBUG] Created EGL surface for monitor DP-4
+[INFO]  [INIT] Step 7: Loading layer textures
+[DEBUG] Loaded texture for layer: /home/sandwich/Develop/hyprlax/examples/pixel-city/1.png (576x324)
+[DEBUG] Loaded texture for layer: /home/sandwich/Develop/hyprlax/examples/pixel-city/2.png (576x324)
+[DEBUG] Loaded texture for layer: /home/sandwich/Develop/hyprlax/examples/pixel-city/3.png (576x324)
+[DEBUG] Loaded texture for layer: /home/sandwich/Develop/hyprlax/examples/pixel-city/4.png (576x324)
+[DEBUG] Loaded texture for layer: /home/sandwich/Develop/hyprlax/examples/pixel-city/5.png (576x324)
+[DEBUG] Loaded texture for layer: /home/sandwich/Develop/hyprlax/examples/pixel-city/6.png (576x324)
+[INFO]  Loaded 6 layer textures
+[INFO]  hyprlax initialized successfully
+[DEBUG]   FPS target: 60
+[DEBUG]   Shift amount: 200.0 pixels
+[DEBUG]   Animation duration: 4.0 seconds
+[DEBUG]   Easing: expo
+[DEBUG]   VSync: disabled
+[DEBUG]   Idle poll rate: 2.0 Hz (500ms)
+[DEBUG] Starting main loop (target FPS: 60)
+[DEBUG] Frame time calculated: 0.016667 seconds (target FPS: 60)
+[DEBUG] Layer surface configure called: 3840x2160
+[DEBUG] Layer surface dimensions set: 3840x2160
+[DEBUG] Pending resize event stored: 3840x2160
+[DEBUG] Layer surface configure called: 3840x2160
+[DEBUG] Layer surface dimensions set: 3840x2160
+[DEBUG] Pending resize event stored: 3840x2160
+[DEBUG] Returning resize event: 3840x2160
+[INFO]  Window resized: 3840x2160
+[DEBUG] RENDERING: animations=0, time_since_render=0.041
+[DEBUG] IDLE: animations=0, needs_render=0, sleeping 0.500s
+hyprlax running with PID: 63986
+Waiting for GPU to settle after startup...
+[DEBUG] IDLE: animations=0, needs_render=0, sleeping 0.500s
+
+=== Test 1: Initial Idle State (3s) ===
+Sample 1: Power=43.90W, Util=16%
+Sample 2: Power=43.82W, Util=12%
+[DEBUG] IDLE: animations=0, needs_render=0, sleeping 0.500s
+Sample 3: Power=43.73W, Util=16%
+Idle Average: Power=43.8W, Util=14.6%
+
+=== Test 2: Workspace Changes (10s) ===
+Original workspace: 1
+Simulating workspace changes...
+  Switching to workspace 2
+ok
+[DEBUG] Workspace changed from 1 to 2 on DP-4
+[DEBUG] Monitor DP-4: starting animation 0.0 -> 200.0
+[DEBUG] RENDERING: animations=1, time_since_render=11.539
+[DEBUG] FPS: 0.1, Layers: 6, Animations: active
+  During animation: Power=43.44W, Util=88%, State=P8
+[DEBUG] RENDERING: animations=1, time_since_render=0.017
+[DEBUG] FPS: 59.8, Layers: 6, Animations: active
+  Switching to workspace 3
+ok
+[DEBUG] Workspace changed from 2 to 3 on DP-4
+[DEBUG] Monitor DP-4: starting animation 189.4 -> 389.4
+[DEBUG] RENDERING: animations=1, time_since_render=0.017
+[DEBUG] FPS: 59.7, Layers: 6, Animations: active
+  During animation: Power=341.13W, Util=63%, State=P0
+[DEBUG] RENDERING: animations=1, time_since_render=0.017
+[DEBUG] FPS: 59.8, Layers: 6, Animations: active
+  Switching to workspace 4
+ok
+[DEBUG] Workspace changed from 3 to 4 on DP-4
+[DEBUG] Monitor DP-4: starting animation 383.6 -> 583.6
+[DEBUG] RENDERING: animations=1, time_since_render=0.017
+[DEBUG] FPS: 59.8, Layers: 6, Animations: active
+  During animation: Power=351.16W, Util=64%, State=P0
+[DEBUG] RENDERING: animations=1, time_since_render=0.017
+[DEBUG] FPS: 59.8, Layers: 6, Animations: active
+  Switching to workspace 2
+ok
+[DEBUG] Workspace changed from 4 to 2 on DP-4
+[DEBUG] Monitor DP-4: starting animation 577.8 -> 177.8
+[DEBUG] RENDERING: animations=1, time_since_render=0.017
+[DEBUG] FPS: 59.8, Layers: 6, Animations: active
+  During animation: Power=352.42W, Util=64%, State=P0
+[DEBUG] RENDERING: animations=1, time_since_render=0.017
+[DEBUG] FPS: 59.8, Layers: 6, Animations: active
+  Returning to original workspace 1
+ok
+[DEBUG] Workspace changed from 2 to 1 on DP-4
+[DEBUG] Monitor DP-4: starting animation 189.2 -> -10.8
+[DEBUG] RENDERING: animations=1, time_since_render=0.035
+[DEBUG] FPS: 28.6, Layers: 6, Animations: active
+[DEBUG] RENDERING: animations=1, time_since_render=0.034
+[DEBUG] FPS: 29.8, Layers: 6, Animations: active
+
+=== Test 3: Post-Animation Idle (5s) ===
+Waiting for animations to complete...
+[DEBUG] RENDERING: animations=1, time_since_render=0.033
+[DEBUG] FPS: 30.2, Layers: 6, Animations: active
+[DEBUG] RENDERING: animations=1, time_since_render=0.034
+[DEBUG] FPS: 29.4, Layers: 6, Animations: active
+Sample 1: Power=110.09W, Util=2%
+Sample 2: Power=59.06W, Util=6%
+Sample 3: Power=48.24W, Util=3%
+[DEBUG] IDLE: animations=0, needs_render=0, sleeping 0.500s
+Post-Animation Average: Power=72.4W, Util=3.6%
+
+=== FPS Analysis ===
+[DEBUG] FPS: 59.8, Layers: 6, Animations: active
+[DEBUG] FPS: 28.6, Layers: 6, Animations: active
+[DEBUG] FPS: 29.8, Layers: 6, Animations: active
+[DEBUG] FPS: 30.2, Layers: 6, Animations: active
+[DEBUG] FPS: 29.4, Layers: 6, Animations: active
+
+=== Idle Detection ===
+[DEBUG] IDLE: animations=0, needs_render=0, sleeping 0.500s
+[DEBUG] IDLE: animations=0, needs_render=0, sleeping 0.500s
+[DEBUG] IDLE: animations=0, needs_render=0, sleeping 0.500s
+
+=== SUMMARY ===
+Baseline (no hyprlax): Power=43.7W, Util=10.0%
+Initial Idle: Power=43.8W, Util=14.6%
+Post-Animation: Power=72.4W, Util=3.6%
+
+Power increase from baseline:
+  Initial idle: +.1W
+  Post-animation: +28.7W
+
+❌ FAIL: Post-animation power is significantly higher than initial idle!
+   This indicates GPU is not returning to idle properly.
+
+Stopping hyprlax...

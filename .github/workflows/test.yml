@@ -110,7 +110,7 @@ jobs:
           --suppress=unusedFunction \
           --suppress=constVariablePointer \
           --inline-suppr \
-          src/ipc.c src/hyprlax-ctl.c
+          src/ipc.c src/hyprlax_ctl.c
     
     - name: Check code formatting
       run: |

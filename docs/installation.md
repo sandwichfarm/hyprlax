@@ -50,9 +50,11 @@ sudo mv hyprlax-aarch64 /usr/local/bin/hyprlax
 ## Building from Source
 
 ### Dependencies
-_Only Arch Linux has been thorougly tested, if you find issues with dependency installations on your system, please open an issue_
+_Only Arch Linux has been thoroughly tested. If you find issues with dependency installations on your system, please open an issue_
 
 #### Core Dependencies
+
+hyprlax supports Wayland compositors. Install the required dependencies:
 
 ##### Arch Linux
 ```bash
@@ -83,6 +85,25 @@ sudo zypper install gcc make wayland-devel wayland-protocols-devel \
 sudo xbps-install base-devel wayland wayland-protocols \
                   MesaLib-devel pkg-config
 ```
+
+##### NixOS
+```nix
+# In configuration.nix or shell.nix
+environment.systemPackages = with pkgs; [
+  # Build tools
+  gcc gnumake pkg-config
+  
+  # Wayland support
+  wayland wayland-protocols
+  
+  # OpenGL
+  mesa libGL libGLU
+];
+```
+
+#### Compositor-Specific Dependencies
+
+Some compositors may require additional packages:
 
 #### Optional Dependencies for Development
 
@@ -166,8 +187,19 @@ hyprlax --version
 
 You should see:
 ```
-hyprlax 1.2.0
-Smooth parallax wallpaper animations for Hyprland
+hyprlax 1.3.0
+Dynamic parallax wallpaper engine with multi-compositor support
+Detected compositor: Hyprland  (or your current compositor)
+Platform: Wayland
+```
+
+To check supported features:
+```bash
+# Check compositor detection
+hyprlax --detect-compositor
+
+# List capabilities
+hyprlax --capabilities
 ```
 
 ## Upgrading
