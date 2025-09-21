@@ -1,0 +1,56 @@
+# Mouse-driven parallax example: foreground flower + blurred background
+
+[global]
+fps = 144
+debug = false
+duration = 0.0            # workspace animation not used in cursor mode
+shift = 100               # legacy shift; unused in cursor-only mode
+vsync = false
+easing = expo
+
+[global.parallax]
+mode = "cursor"           # Mouse-driven parallax for focus-follow effect
+
+[global.parallax.sources]
+workspace.weight = 1.0     # disable workspace-driven movement
+cursor.weight = 1.0
+
+# Invert X so layers shift opposite cursor (stronger depth feeling)
+[global.parallax.invert.cursor]
+x = false
+y = false
+
+# Clamp vertical offset to 0 to prevent the flower bottom from rising above the canvas bottom
+[global.parallax.max_offset_px]
+x = 220
+y = 80           
+
+[global.input.cursor]
+follow_global = true
+normalize_to = "monitor"
+sensitivity_x = 0.5
+sensitivity_y = 0.50
+deadzone_px = 3
+ema_alpha = 0.25
+animation_duration = 3.0
+easing = "expo"
+
+# Layers are rendered back -> front
+[[global.layers]]
+path = "bg.jpg"  # blurred background image
+shift_multiplier = { x = 0.50, y = 0.25 }
+scale = 1.2
+opacity = 0.3
+blur = 2.0                  # strong bokeh-like blur
+fit = "cover"
+align = { x = 0.5, y = 0.5 }
+margin_px = { x = 100, y = 100 }
+
+[[global.layers]]
+path = "flower.png"
+fit = "contain"              # no stretching
+scale = 0.70                 # smaller → sits
+align = { x = 0.5, y = -0.2 } 
+shift_multiplier = { x = 1.0, y = 1.0 }
+opacity = 1.0
+blur = 0.0

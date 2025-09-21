@@ -1,0 +1,30 @@
+# Basic hyprlax configuration
+# Simple two-layer parallax wallpaper
+
+[global]
+fps = 60                # Lower FPS for battery saving
+debug = false
+duration = 1.0          # 1 second workspace animation
+shift = 150             # Moderate parallax shift
+vsync = true
+easing = "ease_out"
+
+# Single background image example
+# Uncomment to use just one image:
+# [[global.layers]]
+# path = "~/Pictures/wallpaper.jpg"
+# shift_multiplier = 1.0
+# opacity = 1.0
+
+# Two-layer parallax example
+[[global.layers]]
+path = "~/Pictures/background.jpg"
+shift_multiplier = 0.5    # Moves at half speed
+opacity = 1.0
+blur = 1.0                 # Slight blur for depth
+
+[[global.layers]]
+path = "~/Pictures/foreground.png"
+shift_multiplier = 1.0    # Normal parallax speed
+opacity = 0.95             # Slightly transparent
+blur = 0.0                 # Sharp foreground
