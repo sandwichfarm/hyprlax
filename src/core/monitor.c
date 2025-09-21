@@ -104,8 +104,8 @@ void monitor_list_add(monitor_list_t *list, monitor_instance_t *monitor) {
     }
 
     list->count++;
-    fprintf(stderr, "Added monitor %s (id=%u, total=%d)\n",
-            monitor->name, monitor->id, list->count);
+    LOG_INFO("Monitor added: %s (id=%u, total=%d)",
+             monitor->name, monitor->id, list->count);
 }
 
 /* Remove monitor from list */
@@ -131,9 +131,9 @@ void monitor_list_remove(monitor_list_t *list, monitor_instance_t *monitor) {
                 }
             }
 
-            list->count--;
-            fprintf(stderr, "Removed monitor %s (id=%u, remaining=%d)\n",
-                    monitor->name, monitor->id, list->count);
+    list->count--;
+    LOG_INFO("Monitor removed: %s (id=%u, remaining=%d)",
+             monitor->name, monitor->id, list->count);
             break;
         }
         prev = current;

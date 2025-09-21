@@ -1110,6 +1110,11 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
 
     /* 6. Create EGL surfaces for all monitors now that renderer exists */
     LOG_INFO("[INIT] Step 6: Creating EGL surfaces for monitors");
+    /* Ensure monitors are realized if Wayland outputs are already known */
+    if (ctx->platform && ctx->platform->type == PLATFORM_WAYLAND) {
+        extern void wayland_realize_monitors_now(void);
+        wayland_realize_monitors_now();
+    }
     if (ctx->monitors) {
         monitor_instance_t *monitor = ctx->monitors->head;
         while (monitor) {
@@ -1619,8 +1624,7 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
     /* Always use monitor list - single monitor is just count=1 */
     if (!ctx->monitors || ctx->monitors->count == 0) {
         LOG_WARN("No monitors available for rendering");
-        /* Gracefully stop when no monitors are present */
-        ctx->running = false;
+        /* Keep running to allow Wayland to finish output discovery */
         return;
     }
 

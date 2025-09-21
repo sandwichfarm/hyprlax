@@ -553,6 +553,13 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
         vertices[11] = 0.0f - y;
         vertices[14] = 1.0f + x;
         vertices[15] = 0.0f - y;
+    } else if (!(use_uniform_offset && *use_uniform_offset)) {
+        /* Extended params path but drive offset via texcoord translation (legacy behavior)
+           so tiling works identically without relying on u_offset. */
+        vertices[2]  += x;  vertices[3]  += -y;  /* bottom-left */
+        vertices[6]  += x;  vertices[7]  += -y;  /* bottom-right */
+        vertices[10] += x;  vertices[11] += -y;  /* top-left */
+        vertices[14] += x;  vertices[15] += -y;  /* top-right */
     }
 
     /* Choose shader based on blur amount */
@@ -595,6 +602,9 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
         }
     }
 
+    /* Ensure the layer texture is bound before changing sampler state */
+    gles2_bind_texture(texture, 0);
+
     /* Set uniforms */
     shader_set_uniform_float(shader, "u_opacity", opacity);
 
@@ -624,7 +634,7 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
         }
     }
 
-    /* Set texture wrap modes based on overflow */
+    /* Set texture wrap modes based on overflow (affects currently bound texture) */
     if (using_params) {
         GLenum wrap_s = GL_CLAMP_TO_EDGE;
         GLenum wrap_t = GL_CLAMP_TO_EDGE;
@@ -751,8 +761,7 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
         goto done;
     }
 
-    /* Bind texture (sampler already set to unit 0 if needed) */
-    gles2_bind_texture(texture, 0);
+    /* Texture already bound earlier when setting wrap state */
 
     /* If uniform-offset mode, set u_offset */
     if (use_uniform_offset && *use_uniform_offset) {
