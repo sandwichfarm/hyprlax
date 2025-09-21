@@ -12,12 +12,13 @@
 #include "include/log.h"
 
 static FILE *g_log_file = NULL;
-static bool g_debug_enabled = false;
 static bool g_log_to_file = false;
+static log_level_t g_min_level = LOG_WARN; /* default: warnings and errors only */
 
 /* Initialize logging system */
 void log_init(bool debug, const char *log_file) {
-    g_debug_enabled = debug;
+    /* Back-compat: map legacy debug flag to a minimum level */
+    g_min_level = debug ? LOG_DEBUG : LOG_WARN;
 
     if (log_file) {
         g_log_file = fopen(log_file, "a");
@@ -45,12 +46,16 @@ void log_cleanup(void) {
     g_log_to_file = false;
 }
 
-/* Log message with level */
+void log_set_level(log_level_t level) {
+    if (level < LOG_ERROR) level = LOG_ERROR;
+    if (level > LOG_TRACE) level = LOG_TRACE;
+    g_min_level = level;
+}
+
+/* Log message with level (filtered by g_min_level) */
 void log_message(log_level_t level, const char *fmt, ...) {
-    /* Skip debug/trace messages if not in debug mode */
-    if (!g_debug_enabled && (level == LOG_DEBUG || level == LOG_TRACE)) {
-        return;
-    }
+    /* Filter by configured minimum level */
+    if (level > g_min_level) return;
 
     /* Get timestamp */
     struct timeval tv;
@@ -84,23 +89,14 @@ void log_message(log_level_t level, const char *fmt, ...) {
         fflush(g_log_file);
     }
 
-    /* Output to stderr ONLY if:
-     * 1. We're NOT logging to file (i.e., normal debug mode), OR
-     * 2. It's an ERROR or WARN message (always show these)
-     *
-     * When logging to file, suppress INFO/DEBUG/TRACE from stderr */
+    /* Stderr policy:
+     * - If logging to file, mirror only WARN/ERROR to stderr to avoid spam
+     * - Otherwise, print all messages that passed the level filter */
     if (g_log_to_file) {
-        /* When logging to file, only show ERROR and WARN on stderr */
         if (level == LOG_ERROR || level == LOG_WARN) {
             fprintf(stderr, "%s %s\n", level_str, buffer);
         }
-    } else if (g_debug_enabled) {
-        /* Normal debug mode (no file) - show everything on stderr */
-        fprintf(stderr, "%s %s\n", level_str, buffer);
     } else {
-        /* Not in debug mode and not logging to file - only show ERROR and WARN */
-        if (level == LOG_ERROR || level == LOG_WARN) {
-            fprintf(stderr, "%s %s\n", level_str, buffer);
-        }
+        fprintf(stderr, "%s %s\n", level_str, buffer);
     }
 }

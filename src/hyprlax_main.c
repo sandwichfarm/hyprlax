@@ -167,7 +167,10 @@ static bool process_cursor_event(hyprlax_context_t *ctx) {
 
     double x = 0.0, y = 0.0;
     bool got_pos = false;
-    if (ctx->config.cursor_follow_global && ctx->compositor && ctx->compositor->ops && ctx->compositor->ops->send_command) {
+    if (ctx->config.cursor_follow_global &&
+        ctx->compositor && ctx->compositor->ops && ctx->compositor->ops->send_command &&
+        ctx->compositor->type == COMPOSITOR_HYPRLAND) {
+        /* Only Hyprland exposes a global cursor IPC we use here. */
         char resp[512] = {0};
         int rc = ctx->compositor->ops->send_command("j/cursorpos", resp, sizeof(resp));
         if (rc != HYPRLAX_SUCCESS || resp[0] == '\0') {
@@ -181,9 +184,7 @@ static bool process_cursor_event(hyprlax_context_t *ctx) {
                 pcolon = strchr(px, ':'); if (pcolon) x = strtod(pcolon + 1, NULL);
                 pcolon = strchr(py, ':'); if (pcolon) y = strtod(pcolon + 1, NULL);
                 got_pos = true;
-                if (ctx->config.debug) {
-                    LOG_TRACE("Hyprland cursor IPC: x=%.1f, y=%.1f", x, y);
-                }
+                LOG_TRACE("Hyprland cursor IPC: x=%.1f, y=%.1f", x, y);
             }
         }
     }
@@ -191,9 +192,7 @@ static bool process_cursor_event(hyprlax_context_t *ctx) {
         extern bool wayland_get_cursor_global(double *x, double *y);
         if (wayland_get_cursor_global(&x, &y)) {
             got_pos = true;
-            if (ctx->config.debug) {
-                LOG_TRACE("Wayland pointer fallback: x=%.1f, y=%.1f", x, y);
-            }
+            LOG_TRACE("Wayland pointer fallback: x=%.1f, y=%.1f", x, y);
         }
     }
     if (!got_pos) return false;
@@ -234,10 +233,8 @@ static bool process_cursor_event(hyprlax_context_t *ctx) {
 
     float prev_x = ctx->cursor_norm_x;
     float prev_y = ctx->cursor_norm_y;
-    if (ctx->config.debug) {
-        LOG_TRACE("Cursor normalize: mon=(%d,%d %dx%d) center=(%.1f,%.1f) dx=%.1f dy=%.1f -> nx=%.4f ny=%.4f",
-                  mon_x, mon_y, mon_w, mon_h, cx, cy, dx, dy, nx, ny);
-    }
+    LOG_TRACE("Cursor normalize: mon=(%d,%d %dx%d) center=(%.1f,%.1f) dx=%.1f dy=%.1f -> nx=%.4f ny=%.4f",
+              mon_x, mon_y, mon_w, mon_h, cx, cy, dx, dy, nx, ny);
 
     cursor_apply_sample(ctx, nx, ny);
 
@@ -295,7 +292,7 @@ static void process_workspace_event(hyprlax_context_t *ctx, const compositor_eve
     /* In cursor-only mode, monitors are realized via Wayland output events.
        Skip workspace event processing entirely to avoid any parallax updates. */
     if (ctx->config.parallax_mode == PARALLAX_CURSOR) {
-        if (ctx->config.debug) LOG_TRACE("Ignoring workspace event in cursor-only parallax mode");
+        LOG_TRACE("Ignoring workspace event in cursor-only parallax mode");
         return;
     }
 
@@ -304,7 +301,7 @@ static void process_workspace_event(hyprlax_context_t *ctx, const compositor_eve
     if (ctx->monitors && comp_event->data.workspace.monitor_name[0] != '\0') {
         target_monitor = monitor_list_find_by_name(ctx->monitors,
                                                   comp_event->data.workspace.monitor_name);
-        if (ctx->config.debug && target_monitor) {
+        if (target_monitor) {
             LOG_TRACE("Workspace event for monitor: %s",
                       comp_event->data.workspace.monitor_name);
         }
@@ -548,10 +545,21 @@ static int parse_config_file(hyprlax_context_t *ctx, const char *filename) {
 
 /* Parse command-line arguments */
 static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
-    /* Honor HYPRLAX_DEBUG env var as equivalent to --debug */
+    /* Honor environment variables for log levels */
+    const char *trace_env = getenv("HYPRLAX_TRACE");
     const char *dbg_env = getenv("HYPRLAX_DEBUG");
-    if (dbg_env && *dbg_env && strcmp(dbg_env, "0") != 0 && strcasecmp(dbg_env, "false") != 0) {
+    const char *verb_env = getenv("HYPRLAX_VERBOSE"); /* optional numeric override 0..4 */
+    if (verb_env && *verb_env) {
+        int v = atoi(verb_env);
+        if (v < 0) v = 0; if (v > 4) v = 4;
+        ctx->config.log_level = v;
+        if (v >= 3) ctx->config.debug = true; /* map DEBUG/TRACE to debug behavior */
+    } else if (trace_env && *trace_env && strcmp(trace_env, "0") != 0 && strcasecmp(trace_env, "false") != 0) {
         ctx->config.debug = true;
+        ctx->config.log_level = 4; /* LOG_TRACE */
+    } else if (dbg_env && *dbg_env && strcmp(dbg_env, "0") != 0 && strcasecmp(dbg_env, "false") != 0) {
+        ctx->config.debug = true;
+        ctx->config.log_level = 3; /* LOG_DEBUG */
     }
     static struct option long_options[] = {
         {"help", no_argument, 0, 'h'},
@@ -563,10 +571,12 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
         {"config", required_argument, 0, 'c'},
         {"debug", no_argument, 0, 'D'},
         {"debug-log", optional_argument, 0, 'L'},
+        {"trace", no_argument, 0, 'T'},
         {"renderer", required_argument, 0, 'r'},
         {"platform", required_argument, 0, 'p'},
         {"compositor", required_argument, 0, 'C'},
         {"vsync", no_argument, 0, 'V'},
+        {"verbose", required_argument, 0, 1020},
         {"idle-poll-rate", required_argument, 0, 1003},
         {"overflow", required_argument, 0, 1010},
         {"tile-x", no_argument, 0, 1011},
@@ -584,7 +594,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
     int opt;
     int option_index = 0;
 
-    while ((opt = getopt_long(argc, argv, "hvf:s:d:e:c:DL::r:p:C:V",
+    while ((opt = getopt_long(argc, argv, "hvf:s:d:e:c:DL::r:p:C:VT",
                               long_options, &option_index)) != -1) {
         switch (opt) {
             case 'h':
@@ -597,12 +607,14 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 printf("  -d, --duration <seconds>  Animation duration (default: 1.0)\n");
                 printf("  -e, --easing <type>       Easing function (default: cubic)\n");
                 printf("  -c, --config <file>       Load configuration from file\n");
-                printf("  -D, --debug               Enable debug output\n");
+                printf("  -D, --debug               Enable debug output (INFO/DEBUG)\n");
                 printf("  -L, --debug-log[=FILE]    Write debug output to file (default: /tmp/hyprlax-PID.log)\n");
+                printf("      --trace               Enable trace output (most verbose)\n");
                 printf("  -r, --renderer <backend>  Renderer backend (gles2, auto)\n");
                 printf("  -p, --platform <backend>  Platform backend (wayland, auto)\n");
                 printf("  -C, --compositor <backend> Compositor (hyprland, sway, generic, auto)\n");
                 printf("  -V, --vsync               Enable VSync (default: off)\n");
+                printf("      --verbose <level>     Log level: error|warn|info|debug|trace or 0..4\n");
                 printf("      --parallax <mode>     Parallax mode: workspace|cursor|hybrid\n");
                 printf("      --mouse-weight <w>    Weight of cursor source (0..1)\n");
                 printf("      --workspace-weight <w> Weight of workspace source (0..1)\n");
@@ -660,6 +672,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 ctx->config.debug = true;
                 /* Propagate to components that check the env var */
                 setenv("HYPRLAX_DEBUG", "1", 1);
+                ctx->config.log_level = 3; /* LOG_DEBUG */
                 break;
 
             case 'L':
@@ -673,6 +686,14 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                     snprintf(log_file, sizeof(log_file), "/tmp/hyprlax-%d.log", getpid());
                     ctx->config.debug_log_path = strdup(log_file);
                 }
+                if (ctx->config.log_level < 3) ctx->config.log_level = 3; /* ensure LOG_DEBUG */
+                break;
+
+            case 'T': /* --trace */
+                ctx->config.debug = true; /* trace implies debug behavior */
+                setenv("HYPRLAX_DEBUG", "1", 1); /* enable legacy debug gating for adapters */
+                setenv("HYPRLAX_TRACE", "1", 1);
+                ctx->config.log_level = 4; /* LOG_TRACE */
                 break;
 
             case 'r':
@@ -690,6 +711,22 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
             case 'V':
                 ctx->config.vsync = true;
                 break;
+
+            case 1020: { /* --verbose */
+                int lvl = -1;
+                if (!strcmp(optarg, "error")) lvl = 0;
+                else if (!strcmp(optarg, "warn") || !strcmp(optarg, "warning")) lvl = 1;
+                else if (!strcmp(optarg, "info")) lvl = 2;
+                else if (!strcmp(optarg, "debug")) lvl = 3;
+                else if (!strcmp(optarg, "trace")) lvl = 4;
+                else { lvl = atoi(optarg); if (lvl < 0) lvl = 0; if (lvl > 4) lvl = 4; }
+                ctx->config.log_level = lvl;
+                if (lvl >= 3) {
+                    ctx->config.debug = true;
+                    setenv("HYPRLAX_DEBUG", "1", 1);
+                }
+                if (lvl == 4) setenv("HYPRLAX_TRACE", "1", 1);
+                break; }
 
             case 1001:  /* --primary-only */
                 ctx->monitor_mode = MULTI_MON_PRIMARY;
@@ -980,6 +1017,11 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
 
     /* Initialize logging system */
     log_init(ctx->config.debug, ctx->config.debug_log_path);
+    /* Apply explicit log level (supports --trace and HYPRLAX_VERBOSE) */
+    extern void log_set_level(log_level_t level);
+    if (ctx->config.log_level >= 0) {
+        log_set_level((log_level_t)ctx->config.log_level);
+    }
     if (ctx->config.debug_log_path) {
         LOG_INFO("Debug logging to file: %s", ctx->config.debug_log_path);
     }
@@ -1021,6 +1063,13 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
     if (ret != HYPRLAX_SUCCESS) {
         LOG_ERROR("[INIT] Compositor initialization failed with code %d", ret);
         return ret;
+    }
+
+    /* Cursor follow note for compositors without global cursor IPC */
+    if (ctx->config.debug && ctx->config.cursor_follow_global && ctx->compositor) {
+        if (ctx->compositor->type == COMPOSITOR_NIRI || ctx->compositor->type == COMPOSITOR_RIVER) {
+            LOG_INFO("Cursor follow: using Wayland pointer fallback (no global cursor IPC)");
+        }
     }
 
     /* 3b. Initialize cursor provider if needed */

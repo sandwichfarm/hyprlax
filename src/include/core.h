@@ -122,6 +122,7 @@ typedef struct {
 
     /* Debug settings */
     bool debug;
+    int log_level;             /* 0..4: ERROR..TRACE (see log_level_t) */
     bool dry_run;
     char *debug_log_path;
 

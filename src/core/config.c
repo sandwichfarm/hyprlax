@@ -9,6 +9,7 @@
 #include <string.h>
 #include <getopt.h>
 #include "../include/core.h"
+#include "../include/log.h"
 
 /* Set default configuration values */
 void config_set_defaults(config_t *cfg) {
@@ -25,6 +26,7 @@ void config_set_defaults(config_t *cfg) {
     cfg->vsync = false;  /* Default off to prevent GPU blocking when idle */
     cfg->idle_poll_rate = 2.0f;  /* Default 2 Hz = 500ms polling when idle */
     cfg->debug = false;
+    cfg->log_level = LOG_WARN; /* default to warnings/errors only */
     cfg->dry_run = false;
     cfg->blur_enabled = true;
     cfg->ipc_enabled = true;
