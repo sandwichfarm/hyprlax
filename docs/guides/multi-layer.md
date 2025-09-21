@@ -15,7 +15,6 @@ Each layer has several properties that control its appearance and behavior:
 1. **Shift Multiplier** - Controls movement speed relative to workspace changes
 2. **Opacity** - Transparency level of the layer
 3. **Blur Amount** - Simulates depth-of-field with blur effects
-4. **Animation Settings** - Per-layer easing, delay, and duration
 
 ### Layer Order
 
@@ -28,9 +27,9 @@ Layers are rendered in the order they're specified:
 ### Method 1: Command Line
 
 ```bash
-hyprlax --layer background.jpg:0.3:1.0:expo:0:1.0:3.0 \
-        --layer midground.png:0.6:0.8:expo:0.1:1.0:1.5 \
-        --layer foreground.png:1.0:0.6:expo:0.2:1.0:0
+hyprlax --layer background.jpg:0.3:1.0:3.0 \
+        --layer midground.png:0.6:0.8:1.5 \
+        --layer foreground.png:1.0:0.6
 ```
 
 ### Method 2: Configuration File
@@ -194,9 +193,9 @@ layer shapes3.png 1.1 0.4 0.0
 Create natural movement with animation delays:
 
 ```bash
-hyprlax --layer bg.jpg:0.3:1.0:expo:0:1.0:3.0 \
-        --layer mg.png:0.6:0.8:expo:0.1:1.1:1.5 \
-        --layer fg.png:1.0:0.7:expo:0.2:1.2:0
+hyprlax --layer bg.jpg:0.3:1.0:3.0 \
+        --layer mg.png:0.6:0.8:1.5 \
+        --layer fg.png:1.0:0.7
 ```
 
 ### Parallax Scrolling Effects

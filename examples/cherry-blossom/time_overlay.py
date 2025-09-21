@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import subprocess
+import time
+import tempfile
+from PIL import Image, ImageDraw, ImageFont
+from datetime import datetime
+import argparse
+
+# Configuration
+FONT_SIZE = 120  # Default font size (easily adjustable)
+FONT_COLOR = (255, 255, 255, 255)  # Pure white
+SHADOW_COLOR = (0, 0, 0, 200)  # Darker shadow for readability
+SHADOW_OFFSET = 4
+UPDATE_INTERVAL = 30  # Update every 30 seconds
+
+# Layer configuration
+LAYER_Z = 5  # Position between bg (default 0) and fg (higher z)
+LAYER_OPACITY = 1.0
+LAYER_SCALE = 1.0
+
+def create_time_image(font_size=FONT_SIZE, position='bottom-right'):
+    """Generate transparent PNG with current time"""
+    current_time = datetime.now().strftime("%H:%M")
+    
+    # Create transparent image matching screen resolution
+    width, height = 3840, 2160
+    img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    
+    # Try to use a nice font, fallback to default if not available
+    font = None
+    try:
+        # Try system fonts (common paths on different distributions)
+        font_paths = [
+            "/usr/share/fonts/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/noto/NotoSans-Bold.ttf",
+            "/usr/share/fonts/gsfonts/NimbusSans-Bold.otf",
+        ]
+        for path in font_paths:
+            if os.path.exists(path):
+                font = ImageFont.truetype(path, font_size)
+                print(f"Using font: {path}")
+                break
+        if not font:
+            # Try to use Pillow's default but with size
+            font = ImageFont.load_default(size=max(font_size//4, 20))
+            print(f"Warning: Using default font with size {max(font_size//4, 20)}")
+    except Exception as e:
+        print(f"Font error: {e}")
+        font = ImageFont.load_default()
+    
+    # Calculate text dimensions
+    bbox = draw.textbbox((0, 0), current_time, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+    
+    # Position the text
+    margin = 150  # Increased margin
+    
+    if position == 'bottom-right':
+        x = width - text_width - margin
+        y = height - text_height - margin
+    elif position == 'top-right':
+        x = width - text_width - margin
+        y = margin
+    elif position == 'center':
+        x = (width - text_width) // 2
+        y = (height - text_height) // 2
+    else:  # bottom-left
+        x = margin
+        y = height - text_height - margin
+    
+    # Draw shadow for better visibility
+    draw.text((x + SHADOW_OFFSET, y + SHADOW_OFFSET), current_time, 
+              font=font, fill=SHADOW_COLOR)
+    
+    # Draw main text
+    draw.text((x, y), current_time, font=font, fill=FONT_COLOR)
+    
+    # Debug: Draw a visible border to confirm image is being rendered
+    # draw.rectangle([0, 0, width-1, height-1], outline=(255, 0, 0, 100), width=5)
+    
+    print(f"Time '{current_time}' positioned at ({x}, {y}), size: {text_width}x{text_height}")
+    
+    return img
+
+def update_layer(image_path, layer_id=None):
+    """Add or update the time layer via IPC"""
+    if layer_id is None:
+        # Add new layer
+        cmd = [
+            "hyprlax", "ctl", "add", image_path,
+            f"z={LAYER_Z}",
+            f"opacity={LAYER_OPACITY}",
+            f"scale={LAYER_SCALE}"
+        ]
+    else:
+        # For updates, we need to remove and re-add
+        # (since modify can't change the image path)
+        subprocess.run(["hyprlax", "ctl", "remove", str(layer_id)], 
+                      capture_output=True)
+        cmd = [
+            "hyprlax", "ctl", "add", image_path,
+            f"z={LAYER_Z}",
+            f"opacity={LAYER_OPACITY}",
+            f"scale={LAYER_SCALE}"
+        ]
+    
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    
+    if result.returncode != 0:
+        print(f"Error updating layer: {result.stderr}", file=sys.stderr)
+        return None
+    
+    # Extract layer ID from output if adding new layer
+    # Expected format: "Added layer with ID: X"
+    if "Added layer with ID:" in result.stdout:
+        try:
+            layer_id = int(result.stdout.split("ID:")[1].strip())
+            return layer_id
+        except:
+            pass
+    
+    return layer_id
+
+def get_layer_id():
+    """Try to find our time layer ID from the list"""
+    result = subprocess.run(["hyprlax", "ctl", "list"], 
+                           capture_output=True, text=True)
+    if result.returncode == 0:
+        lines = result.stdout.strip().split('\n')
+        for line in lines:
+            if 'time_overlay' in line:
+                # Extract ID from line format: "ID: X | ..."
+                try:
+                    id_str = line.split('|')[0].replace('ID:', '').strip()
+                    return int(id_str)
+                except:
+                    pass
+    return None
+
+def main():
+    parser = argparse.ArgumentParser(description='Add time overlay to hyprlax')
+    parser.add_argument('--font-size', type=int, default=FONT_SIZE,
+                       help=f'Font size for the time display (default: {FONT_SIZE})')
+    parser.add_argument('--position', type=str, default='bottom-right',
+                       choices=['bottom-right', 'top-right', 'center', 'bottom-left'],
+                       help='Position of the time display (default: bottom-right)')
+    parser.add_argument('--once', action='store_true',
+                       help='Run once and exit (for cron)')
+    parser.add_argument('--interval', type=int, default=UPDATE_INTERVAL,
+                       help=f'Update interval in seconds (default: {UPDATE_INTERVAL})')
+    parser.add_argument('--verbose', '-v', action='store_true',
+                       help='Verbose output')
+    args = parser.parse_args()
+    
+    # Create temporary directory for our time images
+    temp_dir = tempfile.mkdtemp(prefix='hyprlax_time_')
+    image_path = os.path.join(temp_dir, 'time_overlay.png')
+    
+    if args.verbose:
+        print(f"Starting time overlay with font size {args.font_size}")
+        print(f"Temporary image: {image_path}")
+    
+    try:
+        layer_id = None
+        iteration = 0
+        
+        while True:
+            # Generate new time image
+            current_time = datetime.now().strftime("%H:%M")
+            img = create_time_image(args.font_size, args.position)
+            img.save(image_path)
+            
+            if args.verbose or (iteration == 0 and args.once):
+                print(f"Generated time image: {current_time}")
+            
+            # Update layer
+            if layer_id is None:
+                layer_id = get_layer_id()
+            
+            new_layer_id = update_layer(image_path, layer_id)
+            
+            if new_layer_id:
+                if args.verbose or (iteration == 0 and args.once):
+                    if layer_id is None:
+                        print(f"Added time overlay layer (ID: {new_layer_id})")
+                    else:
+                        print(f"Updated time overlay to {current_time}")
+                layer_id = new_layer_id
+            
+            iteration += 1
+            
+            if args.once:
+                break
+            
+            # Wait for next update
+            if args.verbose:
+                print(f"Waiting {args.interval} seconds...")
+            time.sleep(args.interval)
+            
+    except KeyboardInterrupt:
+        print("\nStopping time overlay...")
+        if layer_id:
+            subprocess.run(["hyprlax", "ctl", "remove", str(layer_id)])
+    finally:
+        # Cleanup
+        if os.path.exists(image_path):
+            os.remove(image_path)
+        if os.path.exists(temp_dir):
+            os.rmdir(temp_dir)
+
+if __name__ == "__main__":
+    main()

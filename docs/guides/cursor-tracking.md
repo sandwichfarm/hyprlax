@@ -101,27 +101,7 @@ easing = "ease_out"         # Easing function for cursor animation
 
 ## Normalization
 
-### Monitor Normalization
-Cursor position relative to current monitor (default):
-
-```toml
-[global.input.cursor]
-normalize_to = "monitor"
-```
-
-- Mouse at monitor center = no parallax
-- Mouse at monitor edges = full parallax
-
-### Canvas Normalization
-Cursor position relative to entire desktop:
-
-```toml
-[global.input.cursor]
-normalize_to = "canvas"
-```
-
-- Better for multi-monitor setups
-- Consistent across all screens
+Note: Cursor normalization targets are currently fixed; configuration of `normalize_to` is not supported.
 
 ## Movement Control
 
@@ -313,11 +293,7 @@ sensitivity_y = 1.2
 
 ```bash
 # Test with debug output
-hyprlax --config cursor-config.toml --debug
-
-# Monitor cursor values
-hyprlax ctl get cursor_x
-hyprlax ctl get cursor_y
+HYPRLAX_DEBUG=1 hyprlax --config cursor-config.toml --debug
 ```
 
 ## Complete Example

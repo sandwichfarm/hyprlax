@@ -35,11 +35,11 @@ See [Legacy Format](legacy-format.md) for syntax.
 |---------|-------------|---------------|-------------|
 | Basic settings | ✅ | ✅ | ✅ |
 | Multi-layer | ✅ (--layer) | ✅ | ✅ |
-| Per-layer controls | ❌ | Limited | ✅ Full |
-| Cursor parallax | Basic | ❌ | ✅ Full |
+| Per-layer controls | Limited | Limited | ✅ Full |
+| Cursor parallax | ✅ | ❌ | ✅ Full |
 | Content fitting | ❌ | ❌ | ✅ |
-| Advanced easing | ❌ | ❌ | ✅ |
-| Parallax modes | ❌ | ❌ | ✅ |
+| Advanced easing | ✅ (global) | ❌ | ✅ |
+| Parallax modes | ✅ | ❌ | ✅ |
 
 ## Configuration Priority
 

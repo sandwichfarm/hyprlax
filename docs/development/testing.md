@@ -34,13 +34,7 @@ valgrind --leak-check=full ./tests/test_config
 ```
 
 ### Coverage Report
-```bash
-# Generate coverage report
-make coverage
-
-# View report
-firefox coverage/index.html
-```
+Coverage targets are not currently provided by the build; use external tools if needed.
 
 ## Test Structure
 

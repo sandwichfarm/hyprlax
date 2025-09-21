@@ -8,62 +8,24 @@ Easing functions control the acceleration and deceleration of animations, creati
 
 ## Function Types
 
+The engine implements "ease-out" variants for non-linear curves. Supported values:
+
 ### linear
-**Constant speed throughout the animation**
+Constant speed throughout the animation
 ```
 Speed: ────────────────────
 Usage: Mechanical, robotic movements
 ```
-- No acceleration or deceleration
-- Best for: Technical transitions, scrolling
 
-### ease
-**Smooth acceleration and deceleration**
-```
-Speed: ╱─────────╲
-Usage: General purpose, natural motion
-```
-- Gentle start and end
-- Best for: Most UI animations
-
-### ease_in
-**Slow start, then accelerate**
+### quad
+Quadratic ease-out (gentle deceleration)
 ```
 Speed: ╱──────────
-Usage: Objects falling, gaining momentum
+Usage: Subtle motions
 ```
-- Starts slowly, speeds up
-- Best for: Exit animations, drops
 
-### ease_out
-**Fast start, then decelerate**
-```
-Speed: ──────────╲
-Usage: Objects coming to rest
-```
-- Starts quickly, slows down
-- Best for: Entrance animations, arrivals
-
-### ease_in_out
-**Slow start and end**
-```
-Speed: ╱────────╲
-Usage: Smooth transitions
-```
-- Symmetric acceleration/deceleration
-- Best for: Focus changes, smooth loops
-
-### expo (default)
-**Exponential acceleration/deceleration**
-```
-Speed: ╱═════════╲
-Usage: Modern UI, dramatic effect
-```
-- More dramatic than ease
-- Best for: Modern interfaces, emphasis
-
-### cubic
-**Cubic curve acceleration**
+### cubic (default)
+Cubically eased deceleration
 ```
 Speed: ╱─────────╲
 Usage: Smooth, predictable motion
@@ -107,6 +69,13 @@ Usage: Circular motion feel
 - Based on circular arc
 - Best for: Rotational hints, orbits
 
+### expo
+Exponential ease-out (snappy start)
+```
+Speed: ──╱
+Usage: Modern, responsive motion
+```
+
 ### elastic
 **Elastic overshoot and settle**
 ```
@@ -134,30 +103,37 @@ Usage: Impact simulation
 - Bounces at the end
 - Best for: Landings, impacts
 
+### snap
+Custom snappy ease-out
+```
+Speed: ─╱──
+Usage: Extra responsive feel
+```
+
 ## Usage Examples
 
 ### Command Line
 ```bash
 # Default exponential
-hyprlax --easing expo image.jpg
+hyprlax --easing cubic image.jpg
 
 # Smooth natural motion
-hyprlax --easing ease --duration 1.5 image.jpg
+hyprlax --easing sine --duration 1.5 image.jpg
 
 # Playful bounce
 hyprlax --easing bounce --duration 2.0 image.jpg
 
 # Quick and snappy
-hyprlax --easing ease_out --duration 0.5 image.jpg
+hyprlax --easing expo --duration 0.5 image.jpg
 ```
 
 ### TOML Configuration
 ```toml
 [global]
-easing = "expo"          # Global default
+easing = "cubic"         # Global default
 
 [global.input.cursor]
-easing = "ease_out"      # Cursor-specific
+easing = "expo"           # Cursor-specific
 ```
 
 ### IPC Runtime
@@ -169,12 +145,12 @@ hyprlax ctl set easing elastic
 ## Choosing the Right Easing
 
 ### For Workspace Switching
-- **Recommended**: `expo`, `ease_out`, `ease`
+- **Recommended**: `expo`, `cubic`, `sine`
 - **Duration**: 0.5 - 1.5 seconds
 - Natural, not distracting
 
 ### For Cursor Parallax
-- **Recommended**: `ease_out`, `expo`, `linear`
+- **Recommended**: `expo`, `cubic`, `linear`
 - **Duration**: 2.0 - 4.0 seconds
 - Smooth following, no bounce
 

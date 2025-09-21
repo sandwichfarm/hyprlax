@@ -15,16 +15,38 @@ export HYPRLAX_DEBUG=1
 hyprlax image.jpg  # Debug enabled
 ```
 
-### HYPRLAX_CONFIG
-Default configuration file path.
+### HYPRLAX_TRACE
+Enable trace-level logging (very verbose).
 
-**Values:** Path to config file  
-**Default:** None
+**Values:** `0` (off), non-empty (on)
 
 ```bash
-export HYPRLAX_CONFIG=~/.config/hyprlax/myconfig.toml
-hyprlax image.jpg  # Uses myconfig.toml
+export HYPRLAX_TRACE=1
+hyprlax --debug image.jpg
 ```
+
+### HYPRLAX_VERBOSE
+Numeric log level override.
+
+**Values:** `0..4` where 0=error, 1=warn, 2=info, 3=debug, 4=trace
+
+```bash
+export HYPRLAX_VERBOSE=3  # debug
+hyprlax image.jpg
+```
+
+### Rendering/Performance Tweaks
+
+The renderer recognizes the following variables:
+
+- `HYPRLAX_PERSISTENT_VBO=1` — reuse VBOs to reduce allocations
+- `HYPRLAX_UNIFORM_OFFSET=1` — pass offsets via uniforms (keeps geometry static)
+- `HYPRLAX_NO_GLFINISH=1` — skip glFinish to reduce CPU/GPU sync
+- `HYPRLAX_SEPARABLE_BLUR=1` — enable separable blur path
+- `HYPRLAX_BLUR_DOWNSCALE=<n>` — render blur at lower resolution (2, 4, ...)
+- `HYPRLAX_FRAME_CALLBACK=1` — use Wayland frame callbacks for timing
+- `HYPRLAX_RENDER_DIAG=1` — print render diagnostics when idle
+- `HYPRLAX_PROFILE=1` — print frame timing/profile lines
 
 ## Compositor Detection
 

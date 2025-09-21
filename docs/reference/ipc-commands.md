@@ -11,22 +11,25 @@ hyprlax ctl <command> [arguments...]
 ## Layer Management
 
 ### add
-Add a new image layer.
+Add a new image layer (IPC overlay). Optional parameters are key=value pairs.
 
 ```bash
-hyprlax ctl add <image_path> [shift] [opacity] [blur]
+hyprlax ctl add <image_path> [scale=..] [opacity=..] [x=..] [y=..] [z=..]
 ```
 
-| Argument | Type | Default | Range | Description |
-|----------|------|---------|-------|-------------|
-| `image_path` | string | required | - | Path to image file |
-| `shift` | float | 1.0 | 0.0-2.0 | Parallax speed multiplier |
-| `opacity` | float | 1.0 | 0.0-1.0 | Layer transparency |
-| `blur` | float | 0.0 | 0.0-10.0 | Blur amount |
+Optional keys:
+
+| Key | Type | Default | Range | Description |
+|-----|------|---------|-------|-------------|
+| `scale` | float | 1.0 | 0.1-5.0 | Scale factor |
+| `opacity` | float | 1.0 | 0.0-1.0 | Transparency |
+| `x` | float | 0.0 | any | X position offset (px) |
+| `y` | float | 0.0 | any | Y position offset (px) |
+| `z` | int | next | 0-31 | Z-order (layer stack position) |
 
 **Example:**
 ```bash
-hyprlax ctl add ~/walls/sunset.jpg 0.5 0.9 2.0
+hyprlax ctl add ~/walls/sunset.jpg opacity=0.9 scale=1.2 z=10
 ```
 
 ### remove
@@ -73,8 +76,8 @@ hyprlax ctl list
 
 **Output format:**
 ```
-Layer 0: image.jpg (shift=0.5, opacity=1.0, blur=2.0)
-Layer 1: overlay.png (shift=1.0, opacity=0.8, blur=0.0)
+ID: 1 | Path: image.jpg | Scale: 1.00 | Opacity: 1.00 | Position: (0.00, 0.00) | Z: 0 | Visible: yes
+ID: 2 | Path: overlay.png | Scale: 1.20 | Opacity: 0.90 | Position: (40.00, 20.00) | Z: 10 | Visible: yes
 ```
 
 ### clear
@@ -96,7 +99,7 @@ hyprlax ctl set <property> <value>
 | Property | Type | Range | Description |
 |----------|------|-------|-------------|
 | `fps` | int | 30-240 | Target frame rate |
-| `shift` | int | 0-1000 | Base parallax shift (pixels) |
+| `shift` | float | 0-1000 | Base parallax shift (pixels) |
 | `duration` | float | 0.1-10.0 | Animation duration (seconds) |
 | `easing` | string | see list | Easing function name |
 | `blur_passes` | int | 0-5 | Number of blur passes |
@@ -140,8 +143,7 @@ hyprlax ctl status
 - Process ID
 - Compositor type
 - Active layers count
-- Current FPS setting
-- Memory usage
+- Current FPS setting (if available)
 
 ### reload
 Reload configuration file.
@@ -169,7 +171,7 @@ done
 ```bash
 #!/bin/bash
 # Add second image invisible
-hyprlax ctl add image2.jpg 1.0 0.0
+hyprlax ctl add image2.jpg opacity=0.0 z=1
 
 # Fade between images
 for i in {10..0}; do

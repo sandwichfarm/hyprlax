@@ -69,10 +69,10 @@ hyprlax automatically detects your compositor using:
 Force a specific compositor:
 ```bash
 hyprlax --compositor hyprland image.jpg
-hyprlax --compositor river image.jpg
-hyprlax --compositor niri image.jpg
 hyprlax --compositor sway image.jpg
 hyprlax --compositor generic image.jpg
+# Note: River, Niri and Wayfire are auto-detected; manual selection currently
+# accepts only: hyprland, sway, generic.
 ```
 
 ## Testing Your Compositor
@@ -91,7 +91,7 @@ hyprlax --debug --shift 200 test.jpg
 hyprlax --config examples/mouse-parallax/hyprlax.toml
 
 # Test blur support
-hyprlax --layer test.jpg 1.0 1.0 10.0
+hyprlax --layer test.jpg:1.0:1.0:10.0
 ```
 
 ## Known Issues

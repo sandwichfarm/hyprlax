@@ -19,12 +19,12 @@ Complete reference for hyprlax TOML configuration format.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `fps` | integer | 144 | Target frame rate (30-240) |
+| `fps` | integer | 60 | Target frame rate (30-240) |
 | `debug` | boolean | false | Enable debug output |
 | `duration` | float | 1.0 | Workspace animation duration (seconds) |
-| `shift` | integer | 200 | Legacy parallax shift (pixels) |
-| `vsync` | boolean | true | Enable vertical sync |
-| `easing` | string | "expo" | Default easing function |
+| `shift` | integer | 150 | Legacy parallax shift (pixels) |
+| `vsync` | boolean | false | Enable vertical sync |
+| `easing` | string | "cubic" | Default easing function |
 
 ### Easing Functions
 - `linear` - Constant speed
@@ -82,7 +82,7 @@ Clamp maximum parallax offset:
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `follow_global` | boolean | true | Use global cursor position |
-| `normalize_to` | string | "monitor" | Normalize to: "monitor" or "canvas" |
+| `normalize_to` | string | - | Not currently configurable |
 | `sensitivity_x` | float | 1.0 | X-axis sensitivity multiplier |
 | `sensitivity_y` | float | 1.0 | Y-axis sensitivity multiplier |
 | `deadzone_px` | integer | 0 | Dead zone radius in pixels |

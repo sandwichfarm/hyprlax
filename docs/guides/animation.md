@@ -70,7 +70,7 @@ Easing functions control the acceleration and deceleration of animations, making
 | `quart` | Strong acceleration (x⁴) | Emphatic movements |
 | `quint` | Very strong acceleration (x⁵) | Dramatic effects |
 | `sine` | Smooth sine wave curve | Very natural, organic |
-| `expo` | Exponential acceleration | **Default** - Snappy, modern |
+| `expo` | Exponential ease-out | Snappy, modern |
 | `circ` | Circular function curve | Unique, slightly bouncy |
 | `back` | Slight overshoot at end | Playful, energetic |
 | `elastic` | Bouncy spring effect | Fun, attention-grabbing |
@@ -123,20 +123,7 @@ hyprlax wallpaper.jpg
 
 ### Delay
 
-Adds a pause before the animation starts.
-
-```bash
-# Start immediately (default)
-hyprlax --delay 0 wallpaper.jpg
-
-# Wait 0.5 seconds before animating
-hyprlax --delay 0.5 wallpaper.jpg
-```
-
-**Use cases:**
-- Sync with other desktop animations
-- Create staggered effects with multiple layers
-- Allow time for workspace switch to register
+Note: A global animation delay is not currently configurable from the CLI.
 
 ### Frame Rate
 
@@ -159,52 +146,19 @@ hyprlax --fps 24 wallpaper.jpg
 - 30 FPS: Power efficient, still smooth
 - 24 FPS: Cinematic, may feel less responsive
 
-## Per-Layer Animation (Multi-Layer Mode)
+## Multi-Layer Parameters
 
-Each layer can have independent animation settings for complex effects.
-
-### Command Line Syntax
+When adding layers via CLI, use:
 
 ```bash
---layer image:shift:opacity:easing:delay:duration:blur
+--layer image:shift:opacity[:blur]
 ```
 
-### Examples
-
-#### Staggered Timing
+Examples:
 ```bash
-# Background starts first
---layer bg.jpg:0.3:1.0:expo:0:1.0:3.0
-
-# Midground follows
---layer mg.png:0.6:0.8:expo:0.1:1.0:1.5
-
-# Foreground last
---layer fg.png:1.0:0.7:expo:0.2:1.0:0
-```
-
-#### Mixed Easing Functions
-```bash
-# Smooth background
---layer bg.jpg:0.3:1.0:sine:0:1.5:3.0
-
-# Snappy midground
---layer mg.png:0.6:0.8:expo:0:0.8:1.5
-
-# Bouncy foreground
---layer fg.png:1.0:0.7:elastic:0:1.2:0
-```
-
-#### Different Durations
-```bash
-# Slow background (2 seconds)
---layer bg.jpg:0.3:1.0:expo:0:2.0:3.0
-
-# Medium midground (1 second)
---layer mg.png:0.6:0.8:expo:0:1.0:1.5
-
-# Fast foreground (0.5 seconds)
---layer fg.png:1.0:0.7:expo:0:0.5:0
+--layer bg.jpg:0.3:1.0:3.0   # slow, heavily blurred background
+--layer mg.png:0.6:0.8:1.5   # midground with light blur
+--layer fg.png:1.0:0.7       # foreground, no blur
 ```
 
 ## Animation Presets
@@ -267,12 +221,12 @@ hyprlax -s 400 wallpaper.jpg
 Create complex animations with careful timing:
 
 ```bash
-# Wave effect - each layer starts slightly after previous
-hyprlax --layer l1.png:0.3:1.0:expo:0.0:1.0:2.0 \
-        --layer l2.png:0.5:0.9:expo:0.1:1.0:1.5 \
-        --layer l3.png:0.7:0.8:expo:0.2:1.0:1.0 \
-        --layer l4.png:0.9:0.7:expo:0.3:1.0:0.5 \
-        --layer l5.png:1.1:0.6:expo:0.4:1.0:0.0
+# Wave effect – vary speeds and blur per layer
+hyprlax --layer l1.png:0.3:1.0:2.0 \
+        --layer l2.png:0.5:0.9:1.5 \
+        --layer l3.png:0.7:0.8:1.0 \
+        --layer l4.png:0.9:0.7:0.5 \
+        --layer l5.png:1.1:0.6
 ```
 
 ## Performance Considerations
@@ -293,8 +247,7 @@ For smooth animations on lower-end systems:
 # Reduce FPS
 hyprlax --fps 30 wallpaper.jpg
 
-# Disable vsync
-hyprlax --vsync 0 wallpaper.jpg
+# Avoid enabling vsync (default is off)
 
 # Use simpler easing
 hyprlax -e linear wallpaper.jpg
@@ -307,16 +260,16 @@ hyprlax -d 0.5 wallpaper.jpg
 
 ### Stuttering
 - Lower FPS: `--fps 30`
-- Disable vsync: `--vsync 0`
+- Try toggling vsync: add or remove `--vsync` (default is off)
 - Use fewer layers
 - Reduce blur amounts
 
 ### Tearing
-- Enable vsync: `--vsync 1`
+- Enable vsync: add `--vsync`
 - Match monitor refresh rate: `--fps 60` (for 60Hz display)
 
 ### Delayed Response
-- Reduce animation delay: `--delay 0`
+- Global delay configuration is not available; reduce duration instead
 - Use shorter duration: `-d 0.3`
 - Try snappier easing: `-e expo`
 

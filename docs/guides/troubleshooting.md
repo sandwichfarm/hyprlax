@@ -130,9 +130,11 @@ which hyprlax
    hyprlax --fps 30 wallpaper.jpg
    ```
 
-2. **Disable vsync**
+2. **Toggle vsync**
    ```bash
-   hyprlax --vsync 0 wallpaper.jpg
+   # Enable vsync (default is off)
+   hyprlax --vsync wallpaper.jpg
+   # Or run without --vsync if previously enabled
    ```
 
 3. **Use simpler easing**
@@ -199,7 +201,7 @@ which hyprlax
 1. **Reduce blur amounts**
    ```bash
    # Instead of blur:5.0, use blur:2.0
-   --layer bg.jpg:0.3:1.0:expo:0:1.0:2.0
+   --layer bg.jpg:0.3:1.0:2.0
    ```
 
 2. **Pre-blur backgrounds**

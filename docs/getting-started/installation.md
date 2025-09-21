@@ -185,21 +185,15 @@ Check that hyprlax is installed correctly:
 hyprlax --version
 ```
 
-You should see:
+You should see output similar to:
 ```
-hyprlax 1.3.0
-Dynamic parallax wallpaper engine with multi-compositor support
-Detected compositor: Hyprland  (or your current compositor)
-Platform: Wayland
+hyprlax <version>
+Buttery-smooth parallax wallpaper daemon with support for multiple compositors, platforms and renderers
 ```
 
-To check supported features:
+To inspect runtime behavior and auto-detection, run with debug enabled:
 ```bash
-# Check compositor detection
-hyprlax --detect-compositor
-
-# List capabilities
-hyprlax --capabilities
+HYPRLAX_DEBUG=1 hyprlax --debug ~/Pictures/test.jpg
 ```
 
 ## Upgrading

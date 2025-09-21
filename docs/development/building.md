@@ -86,14 +86,13 @@ make
 ```
 Produces optimized binary at `./hyprlax`
 
-### Debug Build
+### Verbose/Custom Builds
+Use environment or make variables to tweak flags:
 ```bash
-make debug
+make VERBOSE=1                 # Show full compiler commands
+make CFLAGS="-Og -g"           # Debug-friendly flags
+make CFLAGS="-O3 -march=native"  # Performance build
 ```
-- Includes debug symbols (`-g`)
-- Disables optimization (`-O0`)
-- Enables assertions
-- Better for development/debugging
 
 ### Clean Build
 ```bash
@@ -193,14 +192,16 @@ sudo make uninstall
 | Target | Description |
 |--------|-------------|
 | `all` | Build hyprlax binary (default) |
-| `debug` | Debug build with symbols |
 | `clean` | Remove build artifacts |
 | `install` | Install to system |
 | `uninstall` | Remove from system |
 | `test` | Run test suite |
-| `bench` | Run benchmarks |
-| `check` | Run static analysis |
-| `format` | Format source code |
+| `memcheck` | Run tests under valgrind |
+| `bench` | Run benchmark helper script |
+| `bench-perf` | Detailed performance benchmark |
+| `bench-30fps` | Power consumption benchmark |
+| `lint` | Run lint script (if available) |
+| `lint-fix` | Auto-fix lint issues (if available) |
 
 ## Dependencies Resolution
 
@@ -223,13 +224,7 @@ sudo apt install libgl1-mesa-dev  # Debian/Ubuntu
 ```
 
 ### TOML Library Issues
-```bash
-# Build tomlc99 from source
-git clone https://github.com/cktan/tomlc99.git
-cd tomlc99
-make
-sudo make install
-```
+No external TOML library is required; a vendor copy is included and built automatically.
 
 ## Troubleshooting
 

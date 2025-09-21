@@ -7,7 +7,7 @@ Optimize hyprlax for your system's performance and power requirements.
 ### Battery/Power Saving
 ```bash
 # Low power configuration
-hyprlax --fps 30 --vsync 1 image.jpg
+hyprlax --fps 30 --vsync image.jpg
 
 # With environment flags
 HYPRLAX_FRAME_CALLBACK=1 hyprlax --fps 30 image.jpg
@@ -25,7 +25,7 @@ HYPRLAX_PERSISTENT_VBO=1 HYPRLAX_UNIFORM_OFFSET=1 hyprlax image.jpg
 HYPRLAX_PERSISTENT_VBO=1 \
 HYPRLAX_UNIFORM_OFFSET=1 \
 HYPRLAX_NO_GLFINISH=1 \
-hyprlax --fps 144 --vsync 0 image.jpg
+hyprlax --fps 144 image.jpg
 ```
 
 ## Frame Rate Settings
@@ -74,10 +74,10 @@ HYPRLAX_BLUR_DOWNSCALE=4 hyprlax image.jpg  # 4x downscale
 ```
 
 #### Reduce Blur Passes
-```toml
-[global]
-blur_passes = 1  # Minimum passes (default: 2-3)
-blur_size = 7    # Smaller kernel (default: 15)
+Use separable blur and downscale via environment variables:
+```bash
+export HYPRLAX_SEPARABLE_BLUR=1
+export HYPRLAX_BLUR_DOWNSCALE=2   # 2x downscale (try 4 for more speed)
 ```
 
 ### Quality vs Performance
@@ -322,12 +322,12 @@ shift_multiplier = 1.2
 4. Lower resolution images
 
 ### Stuttering
-1. Enable vsync: `hyprlax --vsync 1`
+1. Try toggling vsync: enable with `--vsync` (default is off)
 2. Use persistent VBO: `HYPRLAX_PERSISTENT_VBO=1`
 3. Match monitor refresh rate
 
 ### Tearing
-1. Enable vsync: `--vsync 1`
+1. Enable vsync: add `--vsync`
 2. Don't skip glFinish
 3. Use frame callbacks
 

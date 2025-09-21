@@ -42,8 +42,8 @@ spawn-at-startup "hyprlax" "~/Pictures/wallpaper.jpg"
 Create a simple two-layer parallax:
 
 ```bash
-hyprlax --layer ~/walls/background.jpg 0.5 1.0 \
-        --layer ~/walls/foreground.png 1.0 0.9
+hyprlax --layer ~/walls/background.jpg:0.5:1.0 \
+        --layer ~/walls/foreground.png:1.0:0.9
 ```
 
 This creates:
@@ -76,7 +76,7 @@ hyprlax --debug ~/Pictures/test.jpg
 
 ### Poor performance
 - Lower FPS: `hyprlax --fps 60 image.jpg`
-- Disable vsync: `hyprlax --vsync 0 image.jpg`
+- Avoid enabling vsync (default is off)
 
 ### Wrong compositor detected
 - Force compositor: `hyprlax --compositor hyprland image.jpg`
