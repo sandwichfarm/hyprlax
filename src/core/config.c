@@ -26,7 +26,7 @@ void config_set_defaults(config_t *cfg) {
     cfg->vsync = false;  /* Default off to prevent GPU blocking when idle */
     cfg->idle_poll_rate = 2.0f;  /* Default 2 Hz = 500ms polling when idle */
     cfg->debug = false;
-    cfg->log_level = LOG_WARN; /* default to warnings/errors only */
+    cfg->log_level = -1; /* -1 means not explicitly set, will use LOG_WARN or LOG_DEBUG based on debug flag */
     cfg->dry_run = false;
     cfg->blur_enabled = true;
     cfg->ipc_enabled = true;
