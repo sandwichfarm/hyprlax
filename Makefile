@@ -100,7 +100,7 @@ PROTOCOL_HDRS =
 endif
 
 # Core module sources (always included)
-CORE_SRCS = src/core/easing.c src/core/animation.c src/core/layer.c src/core/config.c src/core/monitor.c src/core/log.c
+CORE_SRCS = src/core/easing.c src/core/animation.c src/core/layer.c src/core/config.c src/core/monitor.c src/core/log.c src/core/parallax.c
 
 # Renderer module sources (conditional)
 RENDERER_SRCS = src/renderer/renderer.c src/renderer/shader.c
@@ -145,6 +145,9 @@ SRCS = src/hyprlax.c src/ipc.c $(CORE_SRCS) $(RENDERER_SRCS) $(PLATFORM_SRCS) \
 else
 SRCS = $(MAIN_SRCS) src/ipc.c $(CORE_SRCS) $(RENDERER_SRCS) $(PLATFORM_SRCS) \
        $(COMPOSITOR_SRCS) $(PROTOCOL_SRCS)
+
+# Vendor libraries and optional modules
+SRCS += src/vendor/toml.c src/core/config_toml.c
 endif
 OBJS = $(SRCS:.c=.o)
 TARGET = hyprlax
@@ -294,6 +297,13 @@ tests/test_compositor_ops: tests/test_compositor_ops.c \
     src/compositor/hyprland.c src/compositor/sway.c src/compositor/wayfire.c \
     src/compositor/niri.c src/compositor/river.c src/compositor/generic_wayland.c \
     src/compositor/compositor.c src/core/log.c protocols/river-status-protocol.c
+	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) $(PKG_LIBS) -o $@
+
+# New parallax-related tests
+tests/test_toml_config: tests/test_toml_config.c src/core/config_toml.c src/core/config.c src/core/parallax.c src/core/log.c src/core/easing.c src/vendor/toml.c
+	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) -o $@
+
+tests/test_runtime_properties: tests/test_runtime_properties.c src/hyprlax_main.c src/core/parallax.c src/core/log.c src/core/config.c
 	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) $(PKG_LIBS) -o $@
 
 # Run all tests

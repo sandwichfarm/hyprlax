@@ -112,6 +112,7 @@ riverctl map normal Super 2 set-focused-tags 2
 - No blur support
 - Basic event system
 - Tag model may not map perfectly to linear workspaces
+ - Caveat — Cursor follow: River does not expose a global cursor position via IPC. hyprlax falls back to the Wayland pointer, so cursor-driven parallax updates when the pointer is over the wallpaper surface. (This is expected; use workspace mode or hybrid on River if you want movement independent of pointer focus.)
 
 ---
 
@@ -175,6 +176,7 @@ spawn-at-startup "hyprlax" "~/Pictures/wallpaper.jpg"
 **Limitations:**
 - No blur support (not implemented in Niri)
 - Newer compositor, potential compatibility issues
+ - Caveat — Cursor follow: Niri does not expose a global cursor position via IPC. hyprlax falls back to the Wayland pointer, so cursor-driven parallax updates when the pointer is over the wallpaper surface. Prefer workspace or hybrid mode if you want movement independent of pointer focus.
 
 ---
 

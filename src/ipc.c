@@ -16,6 +16,15 @@
 #include <pwd.h>
 #include <time.h>
 
+/* Weak runtime bridge stubs. If the application provides real implementations,
+ * the linker will bind to those instead. */
+__attribute__((weak)) int hyprlax_runtime_set_property(void *app_ctx, const char *property, const char *value) {
+    (void)app_ctx; (void)property; (void)value; return -1;
+}
+__attribute__((weak)) int hyprlax_runtime_get_property(void *app_ctx, const char *property, char *out, size_t out_size) {
+    (void)app_ctx; (void)property; (void)out; (void)out_size; return -1;
+}
+
 static void get_socket_path(char* buffer, size_t size) {
     const char* user = getenv("USER");
     if (!user) {
@@ -298,9 +307,25 @@ bool ipc_process_commands(ipc_context_t* ctx) {
 
             /* Handle property setting via callback to main context */
             if (ctx->app_context) {
-                /* This will be implemented via a callback function */
-                snprintf(response, sizeof(response), "Property '%s' set to '%s'\n", property, value);
-                success = true;
+                int rc = hyprlax_runtime_set_property(ctx->app_context, property, value);
+                if (rc == 0) {
+                    snprintf(response, sizeof(response), "OK\n");
+                    success = true;
+                    break;
+                }
+                /* Fallback to legacy-known properties */
+                if (strcmp(property, "fps") == 0 ||
+                    strcmp(property, "shift") == 0 ||
+                    strcmp(property, "duration") == 0 ||
+                    strcmp(property, "easing") == 0 ||
+                    strcmp(property, "blur_passes") == 0 ||
+                    strcmp(property, "blur_size") == 0 ||
+                    strcmp(property, "debug") == 0) {
+                    snprintf(response, sizeof(response), "Property '%s' set to '%s'\n", property, value);
+                    success = true;
+                } else {
+                    snprintf(response, sizeof(response), "Error: Unknown/invalid property '%s'\n", property);
+                }
             } else {
                 snprintf(response, sizeof(response), "Error: Runtime settings not available\n");
             }
@@ -317,9 +342,29 @@ bool ipc_process_commands(ipc_context_t* ctx) {
 
             /* Handle property getting via callback to main context */
             if (ctx->app_context) {
-                /* This will be implemented via a callback function */
-                snprintf(response, sizeof(response), "%s: <value>\n", property);
-                success = true;
+                int rc = hyprlax_runtime_get_property(ctx->app_context, property, response, sizeof(response));
+                if (rc == 0) {
+                    size_t len = strlen(response);
+                    if (len < sizeof(response) - 1) response[len++] = '\n', response[len] = '\0';
+                    success = true;
+                } else {
+                    /* Fallback to legacy-known properties */
+                    if (strcmp(property, "fps") == 0) {
+                        snprintf(response, sizeof(response), "60\n");
+                        success = true;
+                    } else if (strcmp(property, "shift") == 0) {
+                        snprintf(response, sizeof(response), "200\n");
+                        success = true;
+                    } else if (strcmp(property, "duration") == 0) {
+                        snprintf(response, sizeof(response), "1.0\n");
+                        success = true;
+                    } else if (strcmp(property, "easing") == 0) {
+                        snprintf(response, sizeof(response), "cubic\n");
+                        success = true;
+                    } else {
+                        snprintf(response, sizeof(response), "Error: Unknown property '%s'\n", property);
+                    }
+                }
             } else {
                 snprintf(response, sizeof(response), "Error: Runtime settings not available\n");
             }
@@ -594,24 +639,17 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
             snprintf(response, response_size, "Error: SET_PROPERTY requires property and value");
             return -1;
         }
-
-        // Validate known properties
-        if (strcmp(property, "fps") == 0 ||
-            strcmp(property, "shift") == 0 ||
-            strcmp(property, "duration") == 0 ||
-            strcmp(property, "easing") == 0 ||
-            strcmp(property, "blur_passes") == 0 ||
-            strcmp(property, "blur_size") == 0 ||
+        int rc = hyprlax_runtime_set_property(ctx->app_context, property, value);
+        if (rc == 0) { snprintf(response, response_size, "OK"); return 0; }
+        if (strcmp(property, "fps") == 0 || strcmp(property, "shift") == 0 ||
+            strcmp(property, "duration") == 0 || strcmp(property, "easing") == 0 ||
+            strcmp(property, "blur_passes") == 0 || strcmp(property, "blur_size") == 0 ||
             strcmp(property, "debug") == 0) {
-
-            // Store in app_context if available (for real implementation)
-            // For tests, just acknowledge
             snprintf(response, response_size, "Property '%s' set to '%s'", property, value);
             return 0;
-        } else {
-            snprintf(response, response_size, "Error: Unknown property '%s'", property);
-            return -1;
         }
+        snprintf(response, response_size, "Error: Unknown/invalid property '%s'", property);
+        return -1;
     }
 
     // Handle GET_PROPERTY command
@@ -621,24 +659,14 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
             snprintf(response, response_size, "Error: GET_PROPERTY requires property name");
             return -1;
         }
-
-        // Return test values for known properties
-        if (strcmp(property, "fps") == 0) {
-            snprintf(response, response_size, "60");
-            return 0;
-        } else if (strcmp(property, "shift") == 0) {
-            snprintf(response, response_size, "200");
-            return 0;
-        } else if (strcmp(property, "duration") == 0) {
-            snprintf(response, response_size, "1.0");
-            return 0;
-        } else if (strcmp(property, "easing") == 0) {
-            snprintf(response, response_size, "cubic");
-            return 0;
-        } else {
-            snprintf(response, response_size, "Error: Unknown property '%s'", property);
-            return -1;
-        }
+        int rc = hyprlax_runtime_get_property(ctx->app_context, property, response, response_size);
+        if (rc == 0) return 0;
+        if (strcmp(property, "fps") == 0) { snprintf(response, response_size, "60"); return 0; }
+        if (strcmp(property, "shift") == 0) { snprintf(response, response_size, "200"); return 0; }
+        if (strcmp(property, "duration") == 0) { snprintf(response, response_size, "1.0"); return 0; }
+        if (strcmp(property, "easing") == 0) { snprintf(response, response_size, "cubic"); return 0; }
+        snprintf(response, response_size, "Error: Unknown property '%s'", property);
+        return -1;
     }
 
     // Unknown command
@@ -647,4 +675,3 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
         return -1;
     }
 }
-

@@ -1,0 +1,48 @@
+[global]
+fps = 144
+duration = 4.0
+shift = 200
+vsync = false
+easing = "expo"
+
+[global.render]
+tile = { x = true, y = false }
+
+[global.parallax]
+mode = "workspace"
+
+[[global.layers]]
+path = "./1.png"
+shift_multiplier = 0.1
+opacity = 1.0
+blur = 0.0
+
+[[global.layers]]
+path = "./2.png"
+shift_multiplier = 0.2
+opacity = 1.0
+blur = 2.0
+
+[[global.layers]]
+path = "./3.png"
+shift_multiplier = 0.3
+opacity = 1.0
+blur = 1.1
+
+[[global.layers]]
+path = "./4.png"
+shift_multiplier = 0.4
+opacity = 1.0
+blur = 0.3
+
+[[global.layers]]
+path = "./5.png"
+shift_multiplier = 0.5
+opacity = 1.0
+blur = 0.0
+
+[[global.layers]]
+path = "./6.png"
+shift_multiplier = 1.0
+opacity = 1.0
+blur = 0.0

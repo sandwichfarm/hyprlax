@@ -30,6 +30,30 @@ void config_set_defaults(config_t *cfg) {
     cfg->ipc_enabled = true;
     cfg->config_path = NULL;
     cfg->socket_path = NULL;
+
+    /* Parallax defaults */
+    cfg->parallax_mode = PARALLAX_WORKSPACE;
+    cfg->parallax_workspace_weight = 1.0f;
+    cfg->parallax_cursor_weight = 0.0f;
+    cfg->invert_workspace_x = false; /* Default: match legacy hyprlax scroll */
+    cfg->invert_workspace_y = false;
+    cfg->invert_cursor_x = false;
+    cfg->invert_cursor_y = false;
+    cfg->parallax_max_offset_x = 100000.0f; /* effectively no clamp by default */
+    cfg->parallax_max_offset_y = 100000.0f;
+    /* Render overflow defaults */
+    cfg->render_overflow_mode = 0; /* repeat_edge */
+    cfg->render_margin_px_x = 0.0f;
+    cfg->render_margin_px_y = 0.0f;
+    cfg->render_tile_x = 0;
+    cfg->render_tile_y = 0;
+    cfg->cursor_sensitivity_x = 1.0f;
+    cfg->cursor_sensitivity_y = 1.0f;
+    cfg->cursor_deadzone_px = 4.0f;
+    cfg->cursor_ema_alpha = 0.25f;
+    cfg->cursor_anim_duration = 0.0; /* disabled by default (low-latency) */
+    cfg->cursor_easing = EASE_CUBIC_OUT;
+    cfg->cursor_follow_global = true; /* default: animate even when cursor isn’t over background */
 }
 
 /* Parse command-line arguments */

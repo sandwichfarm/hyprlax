@@ -27,7 +27,10 @@ const char *shader_fragment_basic =
     "varying vec2 v_texcoord;\n"
     "uniform sampler2D u_texture;\n"
     "uniform float u_opacity;\n"
+    "uniform vec2 u_mask_outside;\n"
     "void main() {\n"
+    "    if ((u_mask_outside.x > 0.5 && (v_texcoord.x < 0.0 || v_texcoord.x > 1.0)) ||\n"
+    "        (u_mask_outside.y > 0.5 && (v_texcoord.y < 0.0 || v_texcoord.y > 1.0))) discard;\n"
     "    vec4 color = texture2D(u_texture, v_texcoord);\n"
     "    // Premultiply alpha for correct blending\n"
     "    float final_alpha = color.a * u_opacity;\n"
@@ -59,8 +62,11 @@ static const char *shader_fragment_blur_template =
     "uniform float u_opacity;\n"
     "uniform vec2 u_resolution;\n"
     "uniform float u_blur_amount;\n"
+    "uniform vec2 u_mask_outside;\n"
     "\n"
     "void main() {\n"
+    "    if ((u_mask_outside.x > 0.5 && (v_texcoord.x < 0.0 || v_texcoord.x > 1.0)) ||\n"
+    "        (u_mask_outside.y > 0.5 && (v_texcoord.y < 0.0 || v_texcoord.y > 1.0))) discard;\n"
     "    vec2 texel_size = 1.0 / u_resolution;\n"
     "    vec4 result = vec4(0.0);\n"
     "    float total_weight = 0.0;\n"
@@ -90,8 +96,11 @@ static const char *shader_fragment_blur_separable =
     "uniform vec2 u_resolution;\n"
     "uniform float u_blur_amount;\n"
     "uniform vec2 u_direction;\n"
+    "uniform vec2 u_mask_outside;\n"
     "\n"
     "void main() {\n"
+    "    if ((u_mask_outside.x > 0.5 && (v_texcoord.x < 0.0 || v_texcoord.x > 1.0)) ||\n"
+    "        (u_mask_outside.y > 0.5 && (v_texcoord.y < 0.0 || v_texcoord.y > 1.0))) discard;\n"
     "    vec2 texel = 1.0 / u_resolution;\n"
     "    float spread = max(u_blur_amount, 0.001);\n"
     "    vec4 sum = vec4(0.0);\n"
@@ -236,6 +245,7 @@ int shader_compile(shader_program_t *program,
     program->loc_u_blur_amount = glGetUniformLocation(program->id, "u_blur_amount");
     program->loc_u_resolution = glGetUniformLocation(program->id, "u_resolution");
     program->loc_u_offset = glGetUniformLocation(program->id, "u_offset");
+    program->loc_u_mask_outside = glGetUniformLocation(program->id, "u_mask_outside");
     program->cache_ready = true;
 
     return HYPRLAX_SUCCESS;

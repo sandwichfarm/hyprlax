@@ -21,6 +21,7 @@
 #include "../../protocols/wlr-layer-shell-client-protocol.h"
 #include "../include/hyprlax.h"
 #include "../core/monitor.h"
+#include "../include/wayland_api.h"
 
 /* Output info tracking */
 typedef struct output_info {
@@ -64,7 +65,45 @@ typedef struct {
     bool has_pending_resize;
     int pending_width;
     int pending_height;
+
+    /* Input tracking */
+    struct wl_seat *seat;
+    struct wl_pointer *pointer;
+    double pointer_global_x;
+    double pointer_global_y;
+    bool pointer_valid;
+    struct wl_surface *pointer_surface; /* last focused surface for motion mapping */
 } wayland_data_t;
+
+/* Seat & pointer listeners forward declarations */
+static void seat_handle_capabilities(void *data, struct wl_seat *seat, uint32_t caps);
+static void seat_handle_name(void *data, struct wl_seat *seat, const char *name);
+static const struct wl_seat_listener seat_listener = {
+    .capabilities = seat_handle_capabilities,
+    .name = seat_handle_name,
+};
+
+static void pointer_handle_enter(void *data, struct wl_pointer *ptr, uint32_t serial,
+                                 struct wl_surface *surface, wl_fixed_t sx, wl_fixed_t sy);
+static void pointer_handle_leave(void *data, struct wl_pointer *ptr, uint32_t serial, struct wl_surface *surface);
+static void pointer_handle_motion(void *data, struct wl_pointer *ptr, uint32_t time, wl_fixed_t sx, wl_fixed_t sy);
+static void pointer_handle_button(void *data, struct wl_pointer *ptr, uint32_t serial, uint32_t time, uint32_t button, uint32_t state);
+static void pointer_handle_axis(void *data, struct wl_pointer *ptr, uint32_t time, uint32_t axis, wl_fixed_t value);
+static void pointer_handle_frame(void *data, struct wl_pointer *ptr);
+static void pointer_handle_axis_source(void *data, struct wl_pointer *ptr, uint32_t axis_source);
+static void pointer_handle_axis_stop(void *data, struct wl_pointer *ptr, uint32_t time, uint32_t axis);
+static void pointer_handle_axis_discrete(void *data, struct wl_pointer *ptr, uint32_t axis, int32_t discrete);
+static const struct wl_pointer_listener pointer_listener = {
+    .enter = pointer_handle_enter,
+    .leave = pointer_handle_leave,
+    .motion = pointer_handle_motion,
+    .button = pointer_handle_button,
+    .axis = pointer_handle_axis,
+    .frame = pointer_handle_frame,
+    .axis_source = pointer_handle_axis_source,
+    .axis_stop = pointer_handle_axis_stop,
+    .axis_discrete = pointer_handle_axis_discrete,
+};
 
 /* Global instance (simplified for now) */
 static wayland_data_t *g_wayland_data = NULL;
@@ -86,10 +125,53 @@ static const struct wl_callback_listener frame_listener = {
     .done = frame_done,
 };
 
+/* Forward for monitor surface creation */
+int wayland_create_monitor_surface(monitor_instance_t *monitor);
+
 /* Store context for monitor detection - set by platform init */
 void wayland_set_context(hyprlax_context_t *ctx) {
-    if (g_wayland_data) {
-        g_wayland_data->ctx = ctx;
+    if (!g_wayland_data) return;
+    g_wayland_data->ctx = ctx;
+
+    /* If outputs were discovered before context was set (common when we
+       roundtrip during connect), realize them now so rendering can start. */
+    if (g_wayland_data->ctx && g_wayland_data->ctx->monitors) {
+        output_info_t *info = g_wayland_data->outputs;
+        while (info) {
+            /* Skip if already added */
+            monitor_instance_t *mon = monitor_list_find_by_output(g_wayland_data->ctx->monitors, info->output);
+            if (!mon && info->width > 0 && info->height > 0) {
+                mon = monitor_instance_create(info->name);
+                if (mon) {
+                    mon->wl_output = info->output;
+                    monitor_update_geometry(mon, info->width, info->height,
+                                            info->scale, info->refresh_rate);
+                    monitor_set_global_position(mon, info->global_x, info->global_y);
+
+                    config_t *config = monitor_resolve_config(mon, &g_wayland_data->ctx->config);
+                    monitor_apply_config(mon, config);
+
+                    if (g_wayland_data->ctx->compositor) {
+                        workspace_model_t model = workspace_detect_model(g_wayland_data->ctx->compositor->type);
+                        mon->current_context.model = model;
+                        mon->current_context.data.workspace_id = COMPOSITOR_GET_WORKSPACE(g_wayland_data->ctx->compositor);
+                        mon->previous_context = mon->current_context;
+                    }
+
+                    monitor_list_add(g_wayland_data->ctx->monitors, mon);
+
+                    /* Defer surface creation until size is valid (we're only creating when size>0 here),
+                       but safe to create now as well */
+                    int ret = wayland_create_monitor_surface(mon);
+                    if (ret == HYPRLAX_SUCCESS) {
+                        LOG_DEBUG("Successfully created surface for monitor %s", mon->name);
+                    } else {
+                        LOG_ERROR("Failed to create surface for monitor %s", mon->name);
+                    }
+                }
+            }
+            info = info->next;
+        }
     }
 }
 
@@ -153,10 +235,15 @@ static void registry_global(void *data, struct wl_registry *registry,
 
             LOG_DEBUG("Detected output %u (total: %d)", id, wl_data->output_count);
         }
-    } else if (strcmp(interface, "zwlr_layer_shell_v1") == 0) {
-        wl_data->layer_shell = wl_registry_bind(registry, id,
-                                               &zwlr_layer_shell_v1_interface, 1);
+} else if (strcmp(interface, "zwlr_layer_shell_v1") == 0) {
+    wl_data->layer_shell = wl_registry_bind(registry, id,
+                                           &zwlr_layer_shell_v1_interface, 1);
+} else if (strcmp(interface, "wl_seat") == 0) {
+    wl_data->seat = wl_registry_bind(registry, id, &wl_seat_interface, 5);
+    if (wl_data->seat) {
+        wl_seat_add_listener(wl_data->seat, &seat_listener, wl_data);
     }
+}
 }
 
 static void registry_global_remove(void *data, struct wl_registry *registry,
@@ -197,6 +284,41 @@ static void layer_surface_configure(void *data,
         wl_data->pending_width = width;
         wl_data->pending_height = height;
         LOG_DEBUG("Pending resize event stored: %dx%d", width, height);
+    }
+
+    /* Ensure monitors are realized once we have dimensions */
+    if (wl_data && wl_data->ctx && wl_data->ctx->monitors && wl_data->ctx->monitors->count == 0) {
+        output_info_t *info = wl_data->outputs;
+        while (info) {
+            if (info->width > 0 && info->height > 0) {
+                monitor_instance_t *mon = monitor_list_find_by_output(wl_data->ctx->monitors, info->output);
+                if (!mon) {
+                    mon = monitor_instance_create(info->name);
+                    if (mon) {
+                        mon->wl_output = info->output;
+                        monitor_update_geometry(mon, info->width, info->height,
+                                                info->scale, info->refresh_rate);
+                        monitor_set_global_position(mon, info->global_x, info->global_y);
+                        config_t *config = monitor_resolve_config(mon, &wl_data->ctx->config);
+                        monitor_apply_config(mon, config);
+                        if (wl_data->ctx->compositor) {
+                            workspace_model_t model = workspace_detect_model(wl_data->ctx->compositor->type);
+                            mon->current_context.model = model;
+                            mon->current_context.data.workspace_id = COMPOSITOR_GET_WORKSPACE(wl_data->ctx->compositor);
+                            mon->previous_context = mon->current_context;
+                        }
+                        monitor_list_add(wl_data->ctx->monitors, mon);
+                        int ret2 = wayland_create_monitor_surface(mon);
+                        if (ret2 == HYPRLAX_SUCCESS) {
+                            LOG_DEBUG("Successfully created surface for monitor %s", mon->name);
+                        } else {
+                            LOG_ERROR("Failed to create surface for monitor %s", mon->name);
+                        }
+                    }
+                }
+            }
+            info = info->next;
+        }
     }
 }
 
@@ -289,6 +411,26 @@ static int wayland_connect(const char *display_name) {
 /* Disconnect from Wayland display */
 static void wayland_disconnect(void) {
     if (!g_wayland_data) return;
+
+    /* Destroy per-monitor Wayland resources if context is present */
+    if (g_wayland_data->ctx && g_wayland_data->ctx->monitors) {
+        monitor_instance_t *mon = g_wayland_data->ctx->monitors->head;
+        while (mon) {
+            if (mon->wl_egl_window) {
+                wl_egl_window_destroy(mon->wl_egl_window);
+                mon->wl_egl_window = NULL;
+            }
+            if (mon->layer_surface) {
+                zwlr_layer_surface_v1_destroy(mon->layer_surface);
+                mon->layer_surface = NULL;
+            }
+            if (mon->wl_surface) {
+                wl_surface_destroy(mon->wl_surface);
+                mon->wl_surface = NULL;
+            }
+            mon = mon->next;
+        }
+    }
 
     if (g_wayland_data->egl_window) {
         wl_egl_window_destroy(g_wayland_data->egl_window);
@@ -674,6 +816,35 @@ static void output_handle_mode(void *data, struct wl_output *output,
         info->refresh_rate = refresh / 1000;  /* mHz to Hz */
         LOG_TRACE("Output mode: %s %dx%d@%dHz",
                 info->name, width, height, info->refresh_rate);
+
+        /* If context is available and monitor not yet created, realize it now */
+        if (g_wayland_data && g_wayland_data->ctx && g_wayland_data->ctx->monitors) {
+            monitor_instance_t *mon = monitor_list_find_by_output(g_wayland_data->ctx->monitors, output);
+            if (!mon && width > 0 && height > 0) {
+                mon = monitor_instance_create(info->name);
+                if (mon) {
+                    mon->wl_output = output;
+                    monitor_update_geometry(mon, info->width, info->height,
+                                            info->scale, info->refresh_rate);
+                    monitor_set_global_position(mon, info->global_x, info->global_y);
+                    config_t *config = monitor_resolve_config(mon, &g_wayland_data->ctx->config);
+                    monitor_apply_config(mon, config);
+                    if (g_wayland_data->ctx->compositor) {
+                        workspace_model_t model = workspace_detect_model(g_wayland_data->ctx->compositor->type);
+                        mon->current_context.model = model;
+                        mon->current_context.data.workspace_id = COMPOSITOR_GET_WORKSPACE(g_wayland_data->ctx->compositor);
+                        mon->previous_context = mon->current_context;
+                    }
+                    monitor_list_add(g_wayland_data->ctx->monitors, mon);
+                    int ret = wayland_create_monitor_surface(mon);
+                    if (ret == HYPRLAX_SUCCESS) {
+                        LOG_DEBUG("Successfully created surface for monitor %s", mon->name);
+                    } else {
+                        LOG_ERROR("Failed to create surface for monitor %s", mon->name);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -740,6 +911,96 @@ static void output_handle_name(void *data, struct wl_output *output, const char 
         info->name[sizeof(info->name) - 1] = '\0';
         LOG_DEBUG("Output name: %s", info->name);
     }
+}
+
+/* Seat & pointer listener impl */
+static void seat_handle_capabilities(void *data, struct wl_seat *seat, uint32_t caps) {
+    wayland_data_t *wl_data = (wayland_data_t *)data;
+    if (!wl_data) return;
+    if (caps & WL_SEAT_CAPABILITY_POINTER) {
+        if (!wl_data->pointer) {
+            wl_data->pointer = wl_seat_get_pointer(seat);
+            if (wl_data->pointer) wl_pointer_add_listener(wl_data->pointer, &pointer_listener, wl_data);
+        }
+    } else {
+        if (wl_data->pointer) {
+            wl_pointer_destroy(wl_data->pointer);
+            wl_data->pointer = NULL;
+            wl_data->pointer_valid = false;
+        }
+    }
+}
+static void seat_handle_name(void *data, struct wl_seat *seat, const char *name) {
+    (void)data; (void)seat; (void)name;
+}
+
+static void pointer_update_global_from_surface(wayland_data_t *wl_data, struct wl_surface *surface, wl_fixed_t sx, wl_fixed_t sy) {
+    if (!wl_data || !wl_data->ctx || !wl_data->ctx->monitors) return;
+    monitor_instance_t *mon = wl_data->ctx->monitors->head;
+    while (mon) {
+        if (mon->wl_surface == surface) {
+            wl_data->pointer_global_x = mon->global_x + wl_fixed_to_double(sx);
+            wl_data->pointer_global_y = mon->global_y + wl_fixed_to_double(sy);
+            wl_data->pointer_valid = true;
+            return;
+        }
+        mon = mon->next;
+    }
+}
+
+static void pointer_handle_enter(void *data, struct wl_pointer *ptr, uint32_t serial,
+                                 struct wl_surface *surface, wl_fixed_t sx, wl_fixed_t sy) {
+    (void)ptr; (void)serial;
+    wayland_data_t *wl_data = (wayland_data_t*)data;
+    if (!wl_data) return;
+    wl_data->pointer_surface = surface;
+    pointer_update_global_from_surface(wl_data, surface, sx, sy);
+}
+static void pointer_handle_leave(void *data, struct wl_pointer *ptr, uint32_t serial, struct wl_surface *surface) {
+    wayland_data_t *wl_data = (wayland_data_t*)data;
+    (void)ptr; (void)serial; (void)surface;
+    if (wl_data) {
+        wl_data->pointer_surface = NULL;
+        /* If configured to animate only on background, clear validity on leave */
+        if (wl_data->ctx && !wl_data->ctx->config.cursor_follow_global) {
+            wl_data->pointer_valid = false;
+        }
+    }
+}
+static void pointer_handle_motion(void *data, struct wl_pointer *ptr, uint32_t time, wl_fixed_t sx, wl_fixed_t sy) {
+    wayland_data_t *wl_data = (wayland_data_t*)data;
+    (void)ptr; (void)time;
+    if (!wl_data || !wl_data->pointer_surface) return;
+    pointer_update_global_from_surface(wl_data, wl_data->pointer_surface, sx, sy);
+}
+static void pointer_handle_button(void *data, struct wl_pointer *ptr, uint32_t serial, uint32_t time, uint32_t button, uint32_t state) {
+    (void)data; (void)ptr; (void)serial; (void)time; (void)button; (void)state;
+}
+static void pointer_handle_axis(void *data, struct wl_pointer *ptr, uint32_t time, uint32_t axis, wl_fixed_t value) {
+    (void)data; (void)ptr; (void)time; (void)axis; (void)value;
+}
+
+static void pointer_handle_frame(void *data, struct wl_pointer *ptr) {
+    (void)data; (void)ptr;
+}
+
+static void pointer_handle_axis_source(void *data, struct wl_pointer *ptr, uint32_t axis_source) {
+    (void)data; (void)ptr; (void)axis_source;
+}
+
+static void pointer_handle_axis_stop(void *data, struct wl_pointer *ptr, uint32_t time, uint32_t axis) {
+    (void)data; (void)ptr; (void)time; (void)axis;
+}
+
+static void pointer_handle_axis_discrete(void *data, struct wl_pointer *ptr, uint32_t axis, int32_t discrete) {
+    (void)data; (void)ptr; (void)axis; (void)discrete;
+}
+
+bool wayland_get_cursor_global(double *x, double *y) {
+    if (!g_wayland_data || !g_wayland_data->pointer_valid) return false;
+    if (x) *x = g_wayland_data->pointer_global_x;
+    if (y) *y = g_wayland_data->pointer_global_y;
+    return true;
 }
 
 static void output_handle_description(void *data, struct wl_output *output, const char *description) {
