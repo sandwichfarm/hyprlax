@@ -44,6 +44,23 @@ typedef struct {
     texture_format_t format;
 } texture_t;
 
+/* Extended draw parameters */
+typedef struct renderer_layer_params {
+    int fit_mode;       /* matches layer_fit_mode_t */
+    float content_scale;
+    float align_x;      /* 0..1 left->right */
+    float align_y;      /* 0..1 top->bottom */
+    float base_uv_x;    /* additional UV shift */
+    float base_uv_y;
+    int overflow_mode;  /* 0=repeat_edge,1=repeat,2=repeat_x,3=repeat_y,4=none */
+    float margin_px_x;  /* extra margins (pixels) to avoid edges when translating */
+    float margin_px_y;
+    int tile_x;         /* 1 = repeat in X regardless of overflow */
+    int tile_y;         /* 1 = repeat in Y regardless of overflow */
+    float auto_safe_norm_x; /* additional normalized shrink based on max offset */
+    float auto_safe_norm_y;
+} renderer_layer_params_t;
+
 /* Renderer operations interface */
 typedef struct renderer_ops {
     /* Lifecycle */
@@ -64,6 +81,10 @@ typedef struct renderer_ops {
     void (*clear)(float r, float g, float b, float a);
     void (*draw_layer)(const texture_t *texture, float x, float y,
                       float opacity, float blur_amount);
+
+    void (*draw_layer_ex)(const texture_t *texture, float x, float y,
+                         float opacity, float blur_amount,
+                         const renderer_layer_params_t *params);
 
     /* Configuration */
     void (*resize)(int width, int height);

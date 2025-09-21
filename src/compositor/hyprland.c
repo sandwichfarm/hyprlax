@@ -495,17 +495,43 @@ static int hyprland_send_command(const char *command, char *response,
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
 
-    /* Send command */
-    if (write(cmd_fd, command, strlen(command)) < 0) {
-        close(cmd_fd);
-        return HYPRLAX_ERROR_INVALID_ARGS;
+    /* Send command null-terminated (Hyprland IPC expects NUL-terminated string) */
+    size_t clen = strlen(command) + 1; /* include NUL */
+    const char *cptr = command;
+    ssize_t wrote = 0;
+    while ((size_t)wrote < clen) {
+        ssize_t n = write(cmd_fd, cptr + wrote, clen - (size_t)wrote);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            if (getenv("HYPRLAX_DEBUG")) {
+                fprintf(stderr, "[DEBUG] Hyprland IPC write failed: %s\n", strerror(errno));
+            }
+            close(cmd_fd);
+            return HYPRLAX_ERROR_INVALID_ARGS;
+        }
+        wrote += n;
     }
 
-    /* Read response if buffer provided */
+    /* Read response if buffer provided (short, non-blocking wait for JSON) */
     if (response && response_size > 0) {
-        ssize_t n = read(cmd_fd, response, response_size - 1);
-        if (n > 0) {
-            response[n] = '\0';
+        int flags = fcntl(cmd_fd, F_GETFL, 0);
+        fcntl(cmd_fd, F_SETFL, flags | O_NONBLOCK);
+        ssize_t total = 0;
+        struct pollfd pfd = { .fd = cmd_fd, .events = POLLIN };
+        /* Try a few short polls to catch the immediate reply without blocking exit */
+        for (int attempt = 0; attempt < 5 && total < (ssize_t)(response_size - 1); attempt++) {
+            int pr = poll(&pfd, 1, 10); /* 10 ms */
+            if (pr <= 0) continue; /* timeout or interrupted */
+            for (;;) {
+                ssize_t n = read(cmd_fd, response + total, (response_size - 1) - (size_t)total);
+                if (n > 0) { total += n; continue; }
+                break; /* EAGAIN/EOF */
+            }
+            if (total > 0) break;
+        }
+        response[total] = '\0';
+        if (getenv("HYPRLAX_DEBUG")) {
+            fprintf(stderr, "[DEBUG] Hyprland IPC response: %.*s\n", (int)total, response);
         }
     }
 

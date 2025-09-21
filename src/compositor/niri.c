@@ -21,10 +21,9 @@
 #include <ctype.h>
 #include "../include/compositor.h"
 #include "../include/hyprlax_internal.h"
+#include "../include/log.h"
 
 /* Niri configuration */
-// TODO: Make column width configurable or auto-detect from actual tile sizes
-static const float NIRI_COLUMN_WIDTH = 1900.0f;
 
 /* Window info for tracking focus */
 typedef struct {
@@ -108,14 +107,12 @@ static int niri_init(void *platform_data) {
     g_niri_data->event_stream = NULL;
     g_niri_data->event_pid = 0;
     g_niri_data->connected = false;
-    g_niri_data->debug_enabled = getenv("HYPRLAX_DEBUG") != NULL;
+    g_niri_data->debug_enabled = getenv("HYPRLAX_DEBUG") != NULL; /* legacy */
     g_niri_data->windows = NULL;
     g_niri_data->window_count = 0;
     g_niri_data->window_capacity = 0;
 
-    if (g_niri_data->debug_enabled) {
-        fprintf(stderr, "[DEBUG] Niri adapter initialized\n");
-    }
+    LOG_DEBUG("Niri adapter initialized");
 
     return HYPRLAX_SUCCESS;
 }
@@ -365,13 +362,13 @@ static int niri_connect_ipc(const char *socket_path) {
         waitpid(pid, NULL, 0);
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
+    /* Avoid stdio buffering pitfalls with poll()+fgets() combo */
+    setvbuf(g_niri_data->event_stream, NULL, _IONBF, 0);
 
     g_niri_data->event_pid = pid;
     g_niri_data->connected = true;
 
-    if (g_niri_data->debug_enabled) {
-        fprintf(stderr, "[DEBUG] Connected to Niri event stream (PID %d)\n", pid);
-    }
+    LOG_DEBUG("Connected to Niri event stream (PID %d)", pid);
 
     return HYPRLAX_SUCCESS;
 }
@@ -394,22 +391,7 @@ static void niri_disconnect_ipc(void) {
     g_niri_data->connected = false;
 }
 
-/* Parse workspace position from Niri's scrollable model */
-static void parse_workspace_position(int workspace_id, int *x, int *y) {
-    /* Niri arranges workspaces in a scrollable grid */
-    /* This is a simplified model - actual implementation would need
-     * to query Niri for the exact layout */
-
-    /* Default to 3 columns layout */
-    const int columns = 3;
-    *x = workspace_id % columns;
-    *y = workspace_id / columns;
-
-    if (g_niri_data && g_niri_data->debug_enabled) {
-        fprintf(stderr, "[DEBUG] parse_workspace_position: ID %d -> (%d, %d)\n",
-                workspace_id, *x, *y);
-    }
-}
+/* (removed unused parse_workspace_position helper) */
 
 /* Poll for events */
 /* Poll for events from Niri */
@@ -422,20 +404,11 @@ static int niri_poll_events(compositor_event_t *event) {
         return HYPRLAX_ERROR_NO_DATA;
     }
 
-    /* Check if data is available */
-    int fd = fileno(g_niri_data->event_stream);
-    struct pollfd pfd = {
-        .fd = fd,
-        .events = POLLIN
-    };
-
-    if (poll(&pfd, 1, 0) <= 0) {
-        return HYPRLAX_ERROR_NO_DATA;
-    }
-
-    /* Read a line of JSON */
+    /* Read a line of JSON (non-blocking FD; may return NULL if no data) */
+    errno = 0;
     if (!fgets(g_niri_data->parse_buffer, sizeof(g_niri_data->parse_buffer),
                g_niri_data->event_stream)) {
+        clearerr(g_niri_data->event_stream); /* clear EAGAIN on non-blocking */
         return HYPRLAX_ERROR_NO_DATA;
     }
 
@@ -480,10 +453,8 @@ static int niri_poll_events(compositor_event_t *event) {
                     event->data.workspace.from_x = -1;  /* Unknown, let monitor handle */
                     event->data.workspace.from_y = -1;  /* Unknown, let monitor handle */
 
-                    if (g_niri_data->debug_enabled) {
-                        fprintf(stderr, "[DEBUG] Niri: Focus moved to window %d at column %d, row %d\n",
-                                new_window_id, column, row);
-                    }
+                    LOG_TRACE("Niri: Focus moved to window %d at column %d, row %d",
+                              new_window_id, column, row);
 
                     return HYPRLAX_SUCCESS;
                 }
@@ -509,7 +480,7 @@ static int niri_poll_events(compositor_event_t *event) {
 
                 /* Find pos_in_scrolling_layout for this window */
                 char *layout_str = strstr(window_ptr, "\"pos_in_scrolling_layout\":");
-                if (layout_str && layout_str < strstr(window_ptr, "},")) {
+                if (layout_str) {
                     layout_str += 26; /* Skip to value */
 
                     if (strncmp(layout_str, "null", 4) != 0) {
@@ -521,11 +492,8 @@ static int niri_poll_events(compositor_event_t *event) {
                             int row = comma ? atoi(comma + 1) : 1;
 
                             update_window_info(window_id, column, row);
-
-                            if (g_niri_data->debug_enabled) {
-                                fprintf(stderr, "[DEBUG] Niri: Window %d at column %d, row %d\n",
-                                        window_id, column, row);
-                            }
+                            LOG_TRACE("Niri: Window %d at column %d, row %d",
+                                      window_id, column, row);
                         }
                     }
                 }
@@ -557,11 +525,8 @@ static int niri_poll_events(compositor_event_t *event) {
                         int row = comma ? atoi(comma + 1) : 1;
 
                         update_window_info(window_id, column, row);
-
-                        if (g_niri_data->debug_enabled) {
-                            fprintf(stderr, "[DEBUG] Niri: Window %d updated at column %d, row %d\n",
-                                    window_id, column, row);
-                        }
+                        LOG_TRACE("Niri: Window %d updated at column %d, row %d",
+                                  window_id, column, row);
                     }
                 }
             }
@@ -577,9 +542,18 @@ static int niri_poll_events(compositor_event_t *event) {
             /* Report workspace change - let monitor handle "from" state */
             event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
 
-            /* We don't know the column, query current state */
+            /* We don't know the column; under tests we use a shim. */
+            int column = 0;
+#ifdef UNIT_TEST
+            extern int niri_test_get_current_column(void);
+            column = niri_test_get_current_column();
+            if (column < 0) {
+                column = 0;
+            }
+#else
             int current_encoded = niri_get_current_workspace();
-            int column = current_encoded % 1000;
+            column = current_encoded % 1000;
+#endif
 
             event->data.workspace.to_workspace = new_workspace_id * 1000 + column;
             event->data.workspace.from_workspace = -1; /* Unknown, let monitor handle */
@@ -591,10 +565,8 @@ static int niri_poll_events(compositor_event_t *event) {
                 event->data.workspace.from_x = -1;  /* Unknown, let monitor handle */
                 event->data.workspace.from_y = -1;  /* Unknown, let monitor handle */
 
-                if (g_niri_data->debug_enabled) {
-                    fprintf(stderr, "[DEBUG] Niri: Workspace activated %d at column %d\n",
-                            new_workspace_id, column);
-                }
+                LOG_DEBUG("Niri: Workspace activated %d at column %d",
+                          new_workspace_id, column);
 
                 return HYPRLAX_SUCCESS;
         }
@@ -677,6 +649,39 @@ static int niri_get_event_fd(void) {
     if (!g_niri_data || !g_niri_data->connected || !g_niri_data->event_stream) return -1;
     return fileno(g_niri_data->event_stream);
 }
+
+#ifdef UNIT_TEST
+/*
+ * Test helpers (compiled only for unit tests)
+ * Allow tests to inject a fake event stream so we can exercise
+ * niri_poll_events() without running a real Niri instance.
+ */
+static int s_test_current_column = -1;
+int niri_test_get_current_column(void) { return s_test_current_column; }
+void niri_test_set_current_column(int column) { s_test_current_column = column; }
+void niri_test_setup_stream(int read_fd) {
+    if (!g_niri_data) {
+        niri_init(NULL);
+    }
+    if (!g_niri_data) return;
+    /* Adopt caller-provided read FD as a FILE* stream */
+    int flags = fcntl(read_fd, F_GETFL, 0);
+    if (flags >= 0) {
+        fcntl(read_fd, F_SETFL, flags | O_NONBLOCK);
+    }
+    FILE *f = fdopen(read_fd, "r");
+    g_niri_data->event_stream = f;
+    g_niri_data->event_pid = 0;
+    g_niri_data->connected = true;
+    if (g_niri_data->event_stream) {
+        setvbuf(g_niri_data->event_stream, NULL, _IONBF, 0);
+    }
+}
+
+void niri_test_reset(void) {
+    niri_destroy();
+}
+#endif /* UNIT_TEST */
 
 /* Niri compositor operations */
 const compositor_ops_t compositor_niri_ops = {

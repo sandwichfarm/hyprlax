@@ -67,6 +67,22 @@ typedef struct hyprlax_context {
     float workspace_offset_x;
     float workspace_offset_y;
 
+    /* Cursor input state (for cursor/hybrid parallax) */
+    int cursor_event_fd;      /* provider event fd, -1 if none */
+    float cursor_norm_x;      /* normalized -1..1 after smoothing */
+    float cursor_norm_y;      /* normalized -1..1 after smoothing */
+    float cursor_eased_x;     /* normalized after easing animation */
+    float cursor_eased_y;
+    bool cursor_ease_initialized; /* eased values initialized */
+    float cursor_ema_x;       /* smoothing accumulator */
+    float cursor_ema_y;       /* smoothing accumulator */
+    double cursor_last_time;  /* last update time */
+    bool cursor_supported;    /* provider available */
+
+    /* Cursor easing animation state */
+    animation_state_t cursor_anim_x;
+    animation_state_t cursor_anim_y;
+
     /* IPC context (legacy, will be removed) */
     void *ipc_ctx;
 
@@ -114,5 +130,9 @@ void hyprlax_render_frame(hyprlax_context_t *ctx);
 
 /* Control interface */
 int hyprlax_ctl_main(int argc, char **argv);
+
+/* Runtime property control (IPC bridge) */
+int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, const char *value);
+int hyprlax_runtime_get_property(hyprlax_context_t *ctx, const char *property, char *out, size_t out_size);
 
 #endif /* HYPRLAX_H */

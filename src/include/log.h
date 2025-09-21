@@ -19,6 +19,8 @@ typedef enum {
 
 /* Initialize logging system */
 void log_init(bool debug, const char *log_file);
+/* Adjust minimum level for output (default LOG_WARN; LOG_DEBUG when debug=true) */
+void log_set_level(log_level_t level);
 
 /* Cleanup logging system */
 void log_cleanup(void);

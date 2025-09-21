@@ -30,6 +30,7 @@ typedef struct shader_program {
     int loc_u_blur_amount;
     int loc_u_resolution;
     int loc_u_offset;
+    int loc_u_mask_outside;
     bool cache_ready;
 } shader_program_t;
 

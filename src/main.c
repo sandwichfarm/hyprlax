@@ -137,8 +137,14 @@ int main(int argc, char **argv) {
         fflush(startup_log);
     }
     g_ctx = ctx;
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
+    /* Use sigaction without SA_RESTART so epoll_wait/nanosleep are interrupted */
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0; /* do not set SA_RESTART */
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
     signal(SIGPIPE, SIG_IGN);  /* Ignore SIGPIPE like bash does */
 
     /* Initialize application */

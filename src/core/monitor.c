@@ -104,8 +104,8 @@ void monitor_list_add(monitor_list_t *list, monitor_instance_t *monitor) {
     }
 
     list->count++;
-    fprintf(stderr, "Added monitor %s (id=%u, total=%d)\n",
-            monitor->name, monitor->id, list->count);
+    LOG_INFO("Monitor added: %s (id=%u, total=%d)",
+             monitor->name, monitor->id, list->count);
 }
 
 /* Remove monitor from list */
@@ -131,9 +131,9 @@ void monitor_list_remove(monitor_list_t *list, monitor_instance_t *monitor) {
                 }
             }
 
-            list->count--;
-            fprintf(stderr, "Removed monitor %s (id=%u, remaining=%d)\n",
-                    monitor->name, monitor->id, list->count);
+    list->count--;
+    LOG_INFO("Monitor removed: %s (id=%u, remaining=%d)",
+             monitor->name, monitor->id, list->count);
             break;
         }
         prev = current;
@@ -262,6 +262,18 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
         return;
     }
 
+    /* Cursor-only mode: update context for bookkeeping, but do not drive parallax
+       offsets or layer animations from workspace changes. Cursor input is the
+       sole parallax source in this mode. */
+    if (ctx && ctx->config.parallax_mode == PARALLAX_CURSOR) {
+        monitor->previous_context = monitor->current_context;
+        monitor->current_context = *new_context;
+        if (ctx->config.debug) {
+            fprintf(stderr, "[DEBUG] monitor_handle_workspace_context_change: cursor-only mode; skipping parallax update\n");
+        }
+        return;
+    }
+
     if (ctx && ctx->config.debug) {
         fprintf(stderr, "[DEBUG] monitor_handle_workspace_context_change:\n");
         fprintf(stderr, "[DEBUG]   Monitor: %s\n", monitor->name);
@@ -305,9 +317,8 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
         fprintf(stderr, "[DEBUG]   Offset: X=%.1f, Y=%.1f\n", offset_2d.x, offset_2d.y);
     }
 
-    /* Update context */
-    monitor->previous_context = monitor->current_context;
-    monitor->current_context = *new_context;
+    /* Keep a copy of the old context for correct delta calculations */
+    workspace_context_t old_context = monitor->current_context;
 
     /* Start animation if offset changed */
     if ((offset_2d.x != 0.0f || offset_2d.y != 0.0f) && ctx) {
@@ -336,15 +347,17 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
                         monitor->parallax_offset_x, monitor->parallax_offset_y);
             }
         } else {
-            /* For 1D models, calculate absolute position from workspace ID */
-            int target_workspace = new_context->data.workspace_id;
-            int base_workspace = 1;
-            absolute_target_x = (target_workspace - base_workspace) *
-                              (monitor->config ? monitor->config->shift_pixels : 200.0f);
+            /* For 1D models, accumulate delta from previous context (legacy behavior) */
+            int from_ws = old_context.data.workspace_id;
+            int to_ws = new_context->data.workspace_id;
+            int delta_ws = to_ws - from_ws;
+            float step = (monitor->config ? monitor->config->shift_pixels : 200.0f);
+            float base_x = monitor->animating ? monitor->animation_target_x : monitor->parallax_offset_x;
+            absolute_target_x = base_x + delta_ws * step;
             absolute_target_y = 0.0f;
             if (ctx && ctx->config.debug) {
-                fprintf(stderr, "[DEBUG]   1D absolute position: X=%.1f (workspace %d)\n",
-                        absolute_target_x, target_workspace);
+                fprintf(stderr, "[DEBUG]   1D accumulative: from %d to %d (delta=%d) base=%.1f -> X=%.1f\n",
+                        from_ws, to_ws, delta_ws, base_x, absolute_target_x);
             }
         }
 
@@ -359,20 +372,29 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
             int layer_count = 0;
 
             while (layer) {
-                /* Each layer moves at its own speed based on shift_multiplier */
-                float layer_target_x = absolute_target_x * layer->shift_multiplier;
+                parallax_layer_t *next_layer = layer->next; /* capture next to avoid surprises */
+                /* Each layer moves at its own speed based on per-axis multipliers */
+                float mx = layer->shift_multiplier_x;
+                float my = layer->shift_multiplier_y;
 
-                /* Y shift is proportional to maintain aspect ratio */
-                /* Until TOML config supports separate X/Y values, scale Y by aspect ratio */
-                float aspect_ratio = 1.0f;
-                if (layer->texture_width > 0 && layer->texture_height > 0) {
-                    aspect_ratio = (float)layer->texture_height / (float)layer->texture_width;
+                float layer_target_x = absolute_target_x * mx;
+
+                /* Preserve legacy aspect ratio scaling if per-axis not customized */
+                float layer_target_y;
+                float debug_aspect = 1.0f;
+                if (layer->shift_multiplier_x == layer->shift_multiplier &&
+                    layer->shift_multiplier_y == layer->shift_multiplier) {
+                    if (layer->texture_width > 0 && layer->texture_height > 0) {
+                        debug_aspect = (float)layer->texture_height / (float)layer->texture_width;
+                    }
+                    layer_target_y = absolute_target_y * my * debug_aspect;
+                } else {
+                    layer_target_y = absolute_target_y * my;
                 }
-                float layer_target_y = absolute_target_y * layer->shift_multiplier * aspect_ratio;
 
                 if (ctx && ctx->config.debug) {
                     fprintf(stderr, "[DEBUG]     Layer %d: multiplier=%.2f, aspect=%.2f, target=(%.1f, %.1f)\n",
-                            layer_count++, layer->shift_multiplier, aspect_ratio,
+                            layer_count++, layer->shift_multiplier, debug_aspect,
                             layer_target_x, layer_target_y);
                 }
 
@@ -380,7 +402,15 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
                                   monitor->config ? monitor->config->animation_duration : 1.0,
                                   monitor->config ? monitor->config->default_easing : EASE_CUBIC_OUT);
 
-                layer = layer->next;
+                if (ctx && ctx->config.debug) {
+                    fprintf(stderr, "[DEBUG]     Layer %d updated; next=%p\n", layer_count-1, (void*)next_layer);
+                }
+                if (next_layer == layer) {
+                    /* Prevent infinite loop on corrupted list */
+                    if (ctx && ctx->config.debug) fprintf(stderr, "[DEBUG]     Detected self-referential next; breaking.\n");
+                    break;
+                }
+                layer = next_layer;
             }
         } else {
             if (ctx && ctx->config.debug) {
@@ -392,6 +422,10 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
         float dominant_offset = fabs(offset_2d.x) > fabs(offset_2d.y) ? offset_2d.x : offset_2d.y;
         monitor_start_parallax_animation_offset(ctx, monitor, dominant_offset);
     }
+
+    /* Update context after computing offsets */
+    monitor->previous_context = old_context;
+    monitor->current_context = *new_context;
 }
 
 /* Start parallax animation for monitor (legacy - uses workspace delta) */
