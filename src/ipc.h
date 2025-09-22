@@ -13,6 +13,9 @@
 #define IPC_SOCKET_PATH_PREFIX "/tmp/hyprlax-"
 #define IPC_MAX_MESSAGE_SIZE 4096
 #define IPC_MAX_LAYERS 32
+/* Validation limits for IPC tokens */
+#define IPC_MAX_PROP_LEN   64
+#define IPC_MAX_VALUE_LEN  512
 
 typedef enum {
     IPC_CMD_ADD_LAYER,

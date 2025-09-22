@@ -243,7 +243,7 @@ ALL_TESTS = $(filter tests/test_%, $(wildcard tests/test_*.c))
 ALL_TEST_TARGETS = $(ALL_TESTS:.c=)
 
 # Individual test rules - updated for Check framework
-tests/test_integration: tests/test_integration.c src/ipc.c
+tests/test_integration: tests/test_integration.c src/ipc.c src/core/log.c
 	$(CC) $(TEST_CFLAGS) $^ $(TEST_LIBS) -lpthread -o $@
 
 tests/test_ctl: tests/test_ctl.c
@@ -252,7 +252,7 @@ tests/test_ctl: tests/test_ctl.c
 tests/test_renderer: tests/test_renderer.c
 	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
 
-tests/test_ipc: tests/test_ipc.c src/ipc.c
+tests/test_ipc: tests/test_ipc.c src/ipc.c src/core/log.c
 	$(CC) $(TEST_CFLAGS) $^ $(TEST_LIBS) -o $@
 
 tests/test_blur: tests/test_blur.c

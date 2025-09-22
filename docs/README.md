@@ -29,6 +29,7 @@ In-depth guides for specific features
 - [Cursor Tracking](guides/cursor-tracking.md) - Mouse-driven parallax
 - [Performance](guides/performance.md) - Optimization tips
 - [Troubleshooting](guides/troubleshooting.md) - Solve common issues
+- [IPC Overview](guides/ipc-overview.md) - Runtime control and workflows
 
 ### 🔧 [Development](development/)
 For contributors and developers

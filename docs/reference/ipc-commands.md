@@ -23,8 +23,8 @@ Optional keys:
 |-----|------|---------|-------|-------------|
 | `scale` | float | 1.0 | 0.1-5.0 | Scale factor |
 | `opacity` | float | 1.0 | 0.0-1.0 | Transparency |
-| `x` | float | 0.0 | any | X position offset (px) |
-| `y` | float | 0.0 | any | Y position offset (px) |
+| `x` | float | 0.0 | any | UV pan X offset (normalized; typical -0.10..0.10) |
+| `y` | float | 0.0 | any | UV pan Y offset (normalized; typical -0.10..0.10) |
 | `z` | int | next | 0-31 | Z-order (layer stack position) |
 
 **Example:**
@@ -55,10 +55,21 @@ hyprlax ctl modify <layer_id> <property> <value>
 |----------|------|-------|-------------|
 | `scale` | float | 0.1-5.0 | Scale factor |
 | `opacity` | float | 0.0-1.0 | Transparency |
-| `x` | int | any | X position offset |
-| `y` | int | any | Y position offset |
+| `x` | float | any | UV pan X offset (normalized; typical -0.10..0.10) |
+| `y` | float | any | UV pan Y offset (normalized; typical -0.10..0.10) |
 | `z` | int | 0-31 | Z-order (layer stack position) |
 | `visible` | bool | true/false, 1/0 | Visibility toggle |
+| `hidden` | bool | true/false | Dedicated visibility flag (preferred) |
+| `blur` | float | >=0 | Per-layer blur amount |
+| `fit` | string | stretch/cover/contain/fit_width/fit_height | Content fit mode |
+| `content_scale` | float | >0 | Content scale multiplier |
+| `align_x` | float | 0..1 | Horizontal alignment (0 left, 0.5 center, 1 right) |
+| `align_y` | float | 0..1 | Vertical alignment (0 top, 0.5 center, 1 bottom) |
+| `overflow` | string | inherit/repeat_edge/repeat/repeat_x/repeat_y/none | Overflow behavior |
+| `tile.x` | bool | true/false | Tiling on X |
+| `tile.y` | bool | true/false | Tiling on Y |
+| `margin.x` | float | px | Safe margin X (px) when overflow none |
+| `margin.y` | float | px | Safe margin Y (px) when overflow none |
 
 **Examples:**
 ```bash
@@ -71,14 +82,18 @@ hyprlax ctl modify 3 scale 1.2
 Show all active layers.
 
 ```bash
-hyprlax ctl list
+hyprlax ctl list [--long|-l] [--json|-j] [--filter <expr>]
 ```
 
-**Output format:**
-```
-ID: 1 | Path: image.jpg | Scale: 1.00 | Opacity: 1.00 | Position: (0.00, 0.00) | Z: 0 | Visible: yes
-ID: 2 | Path: overlay.png | Scale: 1.20 | Opacity: 0.90 | Position: (40.00, 20.00) | Z: 10 | Visible: yes
-```
+Formats:
+- Compact (default): one line per layer with id, z, opacity, shift, blur, hidden, path
+- Long (`--long`): detailed properties including UV, fit, align, content_scale, overflow, tile, margins
+- JSON (`--json`): machine-readable array of layer objects
+
+Filters:
+- `id=<id>`
+- `hidden=true|false`
+- `path~=substr`
 
 ### clear
 Remove all layers.
@@ -136,14 +151,12 @@ hyprlax ctl get easing
 Show hyprlax status information.
 
 ```bash
-hyprlax ctl status
+hyprlax ctl status [--json|-j]
 ```
 
 **Output includes:**
-- Process ID
-- Compositor type
-- Active layers count
-- Current FPS setting (if available)
+- Running state, layers count, target FPS, current FPS, parallax mode, compositor, socket, vsync, debug
+- With `--json`, also includes `monitors[]` objects (name, size, position, scale, refresh, capability flags)
 
 ### reload
 Reload configuration file.
@@ -152,7 +165,7 @@ Reload configuration file.
 hyprlax ctl reload
 ```
 
-Reloads the configuration file specified at startup.
+Reloads the configuration file specified at startup. If no TOML path is set, falls back to legacy config (`~/.config/hyprlax/parallax.conf`) when available.
 
 ## Quick Examples
 
@@ -213,9 +226,10 @@ fi
 
 ## Socket Information
 
-- **Location**: `/tmp/hyprlax-$USER.sock`
-- **Permissions**: `0600` (user read/write only)
-- **Protocol**: Unix domain socket
+- Location (preferred): `$XDG_RUNTIME_DIR/hyprlax-$USER-$HYPRLAND_INSTANCE_SIGNATURE.sock`
+- Location (fallback): `/tmp/hyprlax-$USER.sock`
+- Permissions: `0600` (user read/write only)
+- Protocol: Unix domain socket
 
 ## Error Codes
 

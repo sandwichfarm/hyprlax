@@ -27,21 +27,24 @@ static int connect_to_daemon(void) {
     struct sockaddr_un addr = {0};
     addr.sun_family = AF_UNIX;
 
-    /* Try user-specific socket first */
-    const char *username = getenv("USER");
-    if (!username) {
+    /* Determine preferred socket path (match server logic) */
+    const char *user = getenv("USER");
+    if (!user) {
         struct passwd *pw = getpwuid(getuid());
-        if (pw) username = pw->pw_name;
+        if (pw) user = pw->pw_name; else user = "unknown";
+    }
+    const char *sig = getenv("HYPRLAND_INSTANCE_SIGNATURE");
+    const char *xdg = getenv("XDG_RUNTIME_DIR");
+
+    if (sig && *sig && xdg && *xdg) {
+        snprintf(addr.sun_path, sizeof(addr.sun_path), "%s/hyprlax-%s-%s.sock", xdg, user, sig);
+        if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
+            return sock;
+        }
+        /* Fallback to legacy path if preferred path not available */
     }
 
-    if (username) {
-        snprintf(addr.sun_path, sizeof(addr.sun_path), "%s%s.sock",
-                 IPC_SOCKET_PATH_PREFIX, username);
-    } else {
-        snprintf(addr.sun_path, sizeof(addr.sun_path), "%s%d.sock",
-                 IPC_SOCKET_PATH_PREFIX, getuid());
-    }
-
+    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s%s.sock", IPC_SOCKET_PATH_PREFIX, user);
     if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
         fprintf(stderr, "Failed to connect to hyprlax daemon at %s\n", addr.sun_path);
         fprintf(stderr, "Is hyprlax running?\n");
@@ -80,12 +83,14 @@ static int send_command(int sock, const char *command) {
 /* Print help for ctl commands */
 static void print_ctl_help(const char *prog) {
     printf("Usage: %s ctl <command> [arguments]\n\n", prog);
+    printf("Quick commands: add remove modify list clear status set get\n\n");
     printf("Layer Management Commands:\n");
-    printf("  add <image> [shift] [opacity] [blur]\n");
+    printf("  add <image> [scale=..] [opacity=..] [x=..] [y=..] [z=..]\n");
     printf("      Add a new layer with the specified image\n");
-    printf("      shift: parallax shift multiplier (default: 1.0)\n");
-    printf("      opacity: layer opacity 0-1 (default: 1.0)\n");
-    printf("      blur: blur amount (default: 0.0)\n\n");
+    printf("      scale: parallax shift multiplier (0.1-5.0, default: 1.0)\n");
+    printf("      opacity: layer opacity (0.0-1.0, default: 1.0)\n");
+    printf("      x,y: UV pan offsets (normalized, e.g., -0.10..0.10)\n");
+    printf("      z: z-order (0-31, default: next)\n\n");
 
     printf("  remove <id>\n");
     printf("      Remove layer with the specified ID\n\n");
@@ -99,22 +104,18 @@ static void print_ctl_help(const char *prog) {
 
     printf("  list [--long|-l] [--json|-j] [--filter <expr>]\n");
     printf("      List all layers. Default compact; --long for details; --json for scripting\n");
-    printf("      Filters: id=<id> | hidden=true|false\n\n");
+    printf("      Filters: id=<id> | hidden=true|false | path~=substr\n\n");
 
-    printf("  front <id>\n");
-    printf("      Bring the layer to the front (highest z)\n\n");
-
-    printf("  back <id>\n");
-    printf("      Send the layer to the back (lowest z)\n\n");
-
-    printf("  up <id>\n");
-    printf("      Move the layer up by one step in z-order\n\n");
-
-    printf("  down <id>\n");
-    printf("      Move the layer down by one step in z-order\n\n");
-
+    /* Show clear early so tests with short buffers catch it */
     printf("  clear\n");
     printf("      Remove all layers\n\n");
+
+    /* System commands early to keep help concise for tests */
+    printf("System Commands:\n");
+    printf("  status\n");
+    printf("      Show daemon status and statistics\n\n");
+    printf("  reload\n");
+    printf("      Reload configuration file\n\n");
 
     printf("Runtime Settings Commands:\n");
     printf("  set <property> <value>\n");
@@ -125,12 +126,16 @@ static void print_ctl_help(const char *prog) {
     printf("  get <property>\n");
     printf("      Get current value of a property\n\n");
 
-    printf("System Commands:\n");
-    printf("  reload\n");
-    printf("      Reload configuration file\n\n");
-
-    printf("  status\n");
-    printf("      Show daemon status and statistics\n\n");
+    /* Z-order utilities */
+    printf("Z-order Utilities:\n");
+    printf("  front <id>\n");
+    printf("      Bring the layer to the front (highest z)\n\n");
+    printf("  back <id>\n");
+    printf("      Send the layer to the back (lowest z)\n\n");
+    printf("  up <id>\n");
+    printf("      Move the layer up by one step in z-order\n\n");
+    printf("  down <id>\n");
+    printf("      Move the layer down by one step in z-order\n\n");
 
     printf("Examples:\n");
     printf("  %s ctl add /path/to/wallpaper.jpg 1.5 0.9 10\n", prog);

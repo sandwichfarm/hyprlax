@@ -46,6 +46,56 @@ static int create_timerfd_monotonic(void) {
     return fd;
 }
 
+/* --- Local helpers (refactored from nested functions) --- */
+static bool parse_bool_local(const char *v) {
+    if (!v) return false;
+    return (strcmp(v, "1") == 0 || strcasecmp(v, "true") == 0 ||
+            strcasecmp(v, "on") == 0 || strcasecmp(v, "yes") == 0);
+}
+
+static int overflow_from_string_local(const char *s) {
+    if (!s) return -1;
+    if (!strcmp(s, "inherit")) return -1;
+    if (!strcmp(s, "repeat_edge") || !strcmp(s, "clamp")) return 0;
+    if (!strcmp(s, "repeat") || !strcmp(s, "tile")) return 1;
+    if (!strcmp(s, "repeat_x") || !strcmp(s, "tilex")) return 2;
+    if (!strcmp(s, "repeat_y") || !strcmp(s, "tiley")) return 3;
+    if (!strcmp(s, "none") || !strcmp(s, "off")) return 4;
+    return -2;
+}
+
+static const char* overflow_to_string_local(int m) {
+    switch (m) {
+        case 0: return "repeat_edge";
+        case 1: return "repeat";
+        case 2: return "repeat_x";
+        case 3: return "repeat_y";
+        case 4: return "none";
+        case -1: default: return "inherit";
+    }
+}
+
+static int fit_from_string_local(const char *s) {
+    if (!s) return -1;
+    if (!strcmp(s, "stretch")) return LAYER_FIT_STRETCH;
+    if (!strcmp(s, "cover")) return LAYER_FIT_COVER;
+    if (!strcmp(s, "contain")) return LAYER_FIT_CONTAIN;
+    if (!strcmp(s, "fit_width")) return LAYER_FIT_WIDTH;
+    if (!strcmp(s, "fit_height")) return LAYER_FIT_HEIGHT;
+    return -1;
+}
+
+static const char* fit_to_string_local(int m) {
+    switch (m) {
+        case LAYER_FIT_STRETCH: return "stretch";
+        case LAYER_FIT_COVER: return "cover";
+        case LAYER_FIT_CONTAIN: return "contain";
+        case LAYER_FIT_WIDTH: return "fit_width";
+        case LAYER_FIT_HEIGHT: return "fit_height";
+        default: return "stretch";
+    }
+}
+
 static void disarm_timerfd(int fd) {
     if (fd < 0) return;
     struct itimerspec its = {0};
@@ -541,6 +591,39 @@ static int parse_config_file(hyprlax_context_t *ctx, const char *filename) {
 
     fclose(file);
     return 0;
+}
+
+/* Reload configuration (TOML or legacy) and re-apply layers */
+int hyprlax_reload_config(hyprlax_context_t *ctx) {
+    if (!ctx) return HYPRLAX_ERROR_INVALID_ARGS;
+    const char *path = ctx->config.config_path;
+    char fallback_path[PATH_MAX];
+    if (!path || !*path) {
+        const char *home = getenv("HOME");
+        if (home) {
+            snprintf(fallback_path, sizeof(fallback_path), "%s/.config/hyprlax/parallax.conf", home);
+            if (access(fallback_path, R_OK) == 0) {
+                path = fallback_path;
+            }
+        }
+    }
+    if (!path || !*path) {
+        return HYPRLAX_ERROR_FILE_NOT_FOUND;
+    }
+    /* Clear layers */
+    while (ctx->layers) {
+        uint32_t id = ctx->layers->id;
+        hyprlax_remove_layer(ctx, id);
+    }
+    /* TOML vs legacy */
+    const char *ext = strrchr(path, '.');
+    if (ext && strcasecmp(ext, ".toml") == 0) {
+        int rc = config_apply_toml_to_context(ctx, path);
+        return (rc == HYPRLAX_SUCCESS) ? HYPRLAX_SUCCESS : HYPRLAX_ERROR_INVALID_ARGS;
+    } else {
+        int rc = parse_config_file(ctx, path);
+        return (rc == 0) ? HYPRLAX_SUCCESS : HYPRLAX_ERROR_INVALID_ARGS;
+    }
 }
 
 /* Parse command-line arguments */
@@ -1042,11 +1125,15 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
             ctx->monitor_mode == MULTI_MON_PRIMARY ? "PRIMARY" : "SPECIFIC");
 
     /* 1. Initialize IPC server first to check for existing instances */
-    LOG_INFO("[INIT] Step 1: Initializing IPC");
-    ret = hyprlax_init_ipc(ctx);
-    if (ret != HYPRLAX_SUCCESS) {
-        LOG_ERROR("[INIT] IPC initialization failed with code %d", ret);
-        return ret;  /* Exit if another instance is running */
+    if (ctx->config.ipc_enabled) {
+        LOG_INFO("[INIT] Step 1: Initializing IPC");
+        ret = hyprlax_init_ipc(ctx);
+        if (ret != HYPRLAX_SUCCESS) {
+            LOG_ERROR("[INIT] IPC initialization failed with code %d", ret);
+            return ret;  /* Exit if another instance is running */
+        }
+    } else if (ctx->config.debug) {
+        LOG_INFO("[INIT] IPC disabled by configuration");
     }
 
     /* 2. Platform (windowing system) */
@@ -1721,6 +1808,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
     double last_render_time = get_time();
     double last_frame_time = last_render_time;
     double frame_time = 1.0 / (double)(ctx->config.target_fps > 0 ? ctx->config.target_fps : 60);
+    int prev_target_fps = ctx->config.target_fps;
     int frame_count = 0;
     double debug_timer = 0.0;
     bool needs_render = true;  /* Render first frame */
@@ -1732,7 +1820,18 @@ int hyprlax_run(hyprlax_context_t *ctx) {
 
     while (ctx->running) {
         /* Recompute frame time from current config to honor live FPS changes */
-        frame_time = 1.0 / (double)(ctx->config.target_fps > 0 ? ctx->config.target_fps : 60);
+        int current_fps = ctx->config.target_fps;
+        if (current_fps <= 0) current_fps = 60;
+        if (current_fps != prev_target_fps) {
+            /* If using timerfd (no frame callbacks), re-arm at new interval */
+            const char *fc_env = getenv("HYPRLAX_FRAME_CALLBACK");
+            bool use_frame_callback = (fc_env && *fc_env);
+            if (!use_frame_callback) {
+                hyprlax_arm_frame_timer(ctx, current_fps);
+            }
+            prev_target_fps = current_fps;
+        }
+        frame_time = 1.0 / (double)current_fps;
 
         /* Reset per-iteration diagnostic flags */
         bool diag_resize = false;
@@ -2047,21 +2146,6 @@ static bool parse_bool(const char *v) {
 int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, const char *value) {
     if (!ctx || !property || !value) return -1;
 
-    /* Helper mappers */
-    auto int overflow_from_string_local(const char *s) {
-        if (!s) return -1;
-        if (!strcmp(s, "repeat_edge") || !strcmp(s, "clamp")) return 0;
-        if (!strcmp(s, "repeat") || !strcmp(s, "tile")) return 1;
-        if (!strcmp(s, "repeat_x") || !strcmp(s, "tilex")) return 2;
-        if (!strcmp(s, "repeat_y") || !strcmp(s, "tiley")) return 3;
-        if (!strcmp(s, "none") || !strcmp(s, "off")) return 4;
-        return -1;
-    }
-    auto bool parse_bool_local(const char *v) {
-        return (strcmp(v, "1") == 0 || strcasecmp(v, "true") == 0 ||
-                strcasecmp(v, "on") == 0 || strcasecmp(v, "yes") == 0);
-    }
-
     /* Per-layer property: layer.<id>.* */
     if (strncmp(property, "layer.", 6) == 0) {
         const char *p = property + 6;
@@ -2073,24 +2157,13 @@ int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, c
         if (!layer) return -1;
         if (strcmp(leaf, "hidden") == 0) { layer->hidden = parse_bool_local(value); return 0; }
         if (strcmp(leaf, "blur") == 0) { layer->blur_amount = atof(value); return 0; }
-        if (strcmp(leaf, "fit") == 0) {
-            auto int fit_from_string_local(const char *s) {
-                if (!s) return -1;
-                if (!strcmp(s, "stretch")) return LAYER_FIT_STRETCH;
-                if (!strcmp(s, "cover")) return LAYER_FIT_COVER;
-                if (!strcmp(s, "contain")) return LAYER_FIT_CONTAIN;
-                if (!strcmp(s, "fit_width")) return LAYER_FIT_WIDTH;
-                if (!strcmp(s, "fit_height")) return LAYER_FIT_HEIGHT;
-                return -1;
-            }
-            int m = fit_from_string_local(value); if (m < 0) return -1; layer->fit_mode = m; return 0;
-        }
+        if (strcmp(leaf, "fit") == 0) { int m = fit_from_string_local(value); if (m < 0) return -1; layer->fit_mode = m; return 0; }
         if (strcmp(leaf, "content_scale") == 0) { layer->content_scale = atof(value); return 0; }
         if (strcmp(leaf, "align.x") == 0) { layer->align_x = atof(value); if (layer->align_x<0) layer->align_x=0; if (layer->align_x>1) layer->align_x=1; return 0; }
         if (strcmp(leaf, "align.y") == 0) { layer->align_y = atof(value); if (layer->align_y<0) layer->align_y=0; if (layer->align_y>1) layer->align_y=1; return 0; }
         if (strcmp(leaf, "overflow") == 0) {
             int m = overflow_from_string_local(value);
-            if (m < 0) return -1; layer->overflow_mode = m; return 0;
+            if (m == -2) return -1; layer->overflow_mode = m; return 0;
         }
         if (strcmp(leaf, "tile.x") == 0) { layer->tile_x = parse_bool_local(value) ? 1 : 0; return 0; }
         if (strcmp(leaf, "tile.y") == 0) { layer->tile_y = parse_bool_local(value) ? 1 : 0; return 0; }
@@ -2148,7 +2221,7 @@ int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, c
     /* Render properties (global) */
     if (strcmp(property, "render.overflow") == 0) {
         int m = overflow_from_string_local(value);
-        if (m < 0) return -1; ctx->config.render_overflow_mode = m; return 0;
+        if (m == -2) return -1; ctx->config.render_overflow_mode = m; return 0;
     }
     if (strcmp(property, "render.tile.x") == 0) { ctx->config.render_tile_x = parse_bool_local(value) ? 1 : 0; return 0; }
     if (strcmp(property, "render.tile.y") == 0) { ctx->config.render_tile_y = parse_bool_local(value) ? 1 : 0; return 0; }
@@ -2160,16 +2233,6 @@ int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, c
 int hyprlax_runtime_get_property(hyprlax_context_t *ctx, const char *property, char *out, size_t out_size) {
     if (!ctx || !property || !out || out_size == 0) return -1;
     #define W(fmt, ...) do { snprintf(out, out_size, fmt, __VA_ARGS__); } while(0)
-    auto const char* overflow_to_string_local(int m) {
-        switch (m) {
-            case 0: return "repeat_edge";
-            case 1: return "repeat";
-            case 2: return "repeat_x";
-            case 3: return "repeat_y";
-            case 4: return "none";
-            default: return "inherit";
-        }
-    }
     /* Per-layer get: layer.<id>.* */
     if (strncmp(property, "layer.", 6) == 0) {
         const char *p = property + 6; char *end=NULL; long lid=strtol(p,&end,10);
@@ -2178,19 +2241,7 @@ int hyprlax_runtime_get_property(hyprlax_context_t *ctx, const char *property, c
         if (!layer) return -1;
         if (strcmp(leaf, "hidden") == 0) { W("%s", layer->hidden?"true":"false"); return 0; }
         if (strcmp(leaf, "blur") == 0) { W("%.2f", layer->blur_amount); return 0; }
-        if (strcmp(leaf, "fit") == 0) {
-            auto const char* fit_to_string_local(int m) {
-                switch (m) {
-                    case LAYER_FIT_STRETCH: return "stretch";
-                    case LAYER_FIT_COVER: return "cover";
-                    case LAYER_FIT_CONTAIN: return "contain";
-                    case LAYER_FIT_WIDTH: return "fit_width";
-                    case LAYER_FIT_HEIGHT: return "fit_height";
-                    default: return "stretch";
-                }
-            }
-            W("%s", fit_to_string_local(layer->fit_mode)); return 0;
-        }
+        if (strcmp(leaf, "fit") == 0) { W("%s", fit_to_string_local(layer->fit_mode)); return 0; }
         if (strcmp(leaf, "content_scale") == 0) { W("%.3f", layer->content_scale); return 0; }
         if (strcmp(leaf, "align.x") == 0) { W("%.3f", layer->align_x); return 0; }
         if (strcmp(leaf, "align.y") == 0) { W("%.3f", layer->align_y); return 0; }
@@ -2225,3 +2276,14 @@ int hyprlax_runtime_get_property(hyprlax_context_t *ctx, const char *property, c
     #undef W
     return -1;
 }
+#ifndef WEAK_CORE_LAYER_STUBS
+__attribute__((weak)) parallax_layer_t* layer_list_find(parallax_layer_t *head, uint32_t layer_id) {
+    (void)head; (void)layer_id; return NULL;
+}
+__attribute__((weak)) parallax_layer_t* layer_list_remove(parallax_layer_t *head, uint32_t layer_id) {
+    (void)layer_id; return head;
+}
+__attribute__((weak)) int layer_list_count(parallax_layer_t *head) {
+    int c=0; for (; head; head=head->next) c++; return c;
+}
+#endif

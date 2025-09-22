@@ -135,4 +135,7 @@ int hyprlax_ctl_main(int argc, char **argv);
 int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, const char *value);
 int hyprlax_runtime_get_property(hyprlax_context_t *ctx, const char *property, char *out, size_t out_size);
 
+/* Reload configuration (TOML or legacy). Clears and re-applies layers. */
+int hyprlax_reload_config(hyprlax_context_t *ctx);
+
 #endif /* HYPRLAX_H */

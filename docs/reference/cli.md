@@ -101,15 +101,15 @@ Runtime control via `hyprlax ctl`:
 |---------|-----------|-------------|
 | `add` | `<image> [scale=..] [opacity=..] [x=..] [y=..] [z=..]` | Add new layer (IPC overlay) |
 | `remove` | `<layer_id>` | Remove layer |
-| `modify` | `<layer_id> <property> <value>` | Modify layer property (`scale, opacity, x, y, z, visible`) |
-| `list` | - | List all layers |
+| `modify` | `<layer_id> <property> <value>` | Modify layer property (see IPC reference for full set) |
+| `list` | `[--long|-l] [--json|-j] [--filter <expr>]` | List layers; support filters id=, hidden=, path~= |
 | `clear` | - | Remove all layers |
 | `status` | - | Show status |
 | `set` | `<property> <value>` | Set runtime property |
 | `get` | `<property>` | Get runtime property |
 | `reload` | - | Reload configuration |
 
-See [IPC Commands](ipc-commands.md) for details.
+See [IPC Overview](../guides/ipc-overview.md) for workflows and [IPC Commands](ipc-commands.md) for the full reference.
 
 ## Examples
 

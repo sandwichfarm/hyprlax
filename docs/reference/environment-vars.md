@@ -124,7 +124,7 @@ $XDG_CONFIG_HOME/hyprlax/
 Runtime directory for sockets.
 
 **Default:** `/run/user/$UID`  
-**Used for:** IPC socket location (fallback)
+**Used for:** IPC socket location (preferred when available)
 
 ### HOME
 User home directory.
