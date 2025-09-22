@@ -482,6 +482,11 @@ bool ipc_process_commands(ipc_context_t* ctx) {
             } else if (strcmp(property, "opacity") == 0) {
                 float v = atof(value); if (v < 0.0f || v > 1.0f) { ipc_errorf(response, sizeof(response), 1251, "opacity out of range (0.0..1.0)\n"); break; }
                 layer->opacity = v; ok = true;
+            } else if (strcmp(property, "path") == 0) {
+                /* Delegate to runtime setter to handle GL reload safely */
+                char propbuf[64]; snprintf(propbuf, sizeof(propbuf), "layer.%u.path", id);
+                int rc = hyprlax_runtime_set_property(app, propbuf, value);
+                if (rc == 0) { ok = true; }
             } else if (strcmp(property, "x") == 0) {
                 layer->base_uv_x = atof(value); ok = true;
             } else if (strcmp(property, "y") == 0) {
@@ -928,6 +933,7 @@ bool ipc_modify_layer(ipc_context_t* ctx, uint32_t layer_id, const char* propert
         bool needs_sort = false;
         if (strcmp(property, "scale") == 0) { layer->scale = atof(value); }
         else if (strcmp(property, "opacity") == 0) { layer->opacity = atof(value); }
+        else if (strcmp(property, "path") == 0) { free(layer->image_path); layer->image_path = strdup(value); }
         else if (strcmp(property, "x") == 0) { layer->x_offset = atof(value); }
         else if (strcmp(property, "y") == 0) { layer->y_offset = atof(value); }
         else if (strcmp(property, "z") == 0) { layer->z_index = atoi(value); needs_sort = true; }

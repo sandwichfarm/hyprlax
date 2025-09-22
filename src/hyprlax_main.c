@@ -2164,6 +2164,34 @@ int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, c
         parallax_layer_t *layer = layer_list_find(ctx->layers, (uint32_t)lid);
         if (!layer) return -1;
         if (strcmp(leaf, "hidden") == 0) { layer->hidden = parse_bool_local(value); return 0; }
+        if (strcmp(leaf, "path") == 0) {
+            /* Update image path and reload texture if renderer is active */
+            char *newpath = strdup(value);
+            if (!newpath) return -1;
+            /* Attempt to load texture first to avoid losing old path on failure */
+            GLuint new_tex = 0; int w=0, h=0;
+            if (ctx->renderer && ctx->renderer->initialized) {
+                extern GLuint load_texture(const char *path, int *width, int *height); /* forward decl */
+                new_tex = load_texture(newpath, &w, &h);
+                if (new_tex == 0) { free(newpath); return -1; }
+            }
+            /* Replace path */
+            if (layer->image_path) free(layer->image_path);
+            layer->image_path = newpath;
+            /* Swap texture */
+            if (ctx->renderer && ctx->renderer->initialized) {
+                if (layer->texture_id) {
+                    GLuint tid = (GLuint)layer->texture_id;
+                    glDeleteTextures(1, &tid);
+                }
+                layer->texture_id = new_tex;
+                layer->width = w;
+                layer->height = h;
+                layer->texture_width = w;
+                layer->texture_height = h;
+            }
+            return 0;
+        }
         if (strcmp(leaf, "blur") == 0) { layer->blur_amount = atof(value); return 0; }
         if (strcmp(leaf, "fit") == 0) { int m = fit_from_string_local(value); if (m < 0) return -1; layer->fit_mode = m; return 0; }
         if (strcmp(leaf, "content_scale") == 0) { layer->content_scale = atof(value); return 0; }

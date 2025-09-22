@@ -70,6 +70,7 @@ hyprlax ctl modify <layer_id> <property> <value>
 | `tile.y` | bool | true/false | Tiling on Y |
 | `margin.x` | float | px | Safe margin X (px) when overflow none |
 | `margin.y` | float | px | Safe margin Y (px) when overflow none |
+| `path` | string | file path | Image path; reloads texture |
 
 **Examples:**
 ```bash
