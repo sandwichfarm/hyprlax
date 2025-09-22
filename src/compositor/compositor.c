@@ -5,6 +5,7 @@
  */
 
 #include <stdio.h>
+#include "../include/log.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
@@ -49,8 +50,7 @@ int compositor_connect_socket_with_retry(const char *socket_path,
         if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
             /* Success */
             if (!first_attempt && compositor_name) {
-                fprintf(stderr, "Connected to %s after %d retries\n",
-                        compositor_name, i);
+                LOG_INFO("Connected to %s after %d retries", compositor_name, i);
             }
             return fd;
         }
@@ -59,7 +59,7 @@ int compositor_connect_socket_with_retry(const char *socket_path,
         close(fd);
 
         if (first_attempt && compositor_name) {
-            fprintf(stderr, "Waiting for %s to be ready...\n", compositor_name);
+            LOG_INFO("Waiting for %s to be ready...", compositor_name);
             first_attempt = false;
         }
 
@@ -126,7 +126,7 @@ compositor_type_t compositor_detect(void) {
     }
 #endif
 
-    fprintf(stderr, "Warning: Could not detect compositor type\n");
+    LOG_WARN("Could not detect compositor type");
 #ifdef ENABLE_GENERIC_WAYLAND
     return COMPOSITOR_GENERIC_WAYLAND;
 #else
@@ -195,7 +195,7 @@ int compositor_create(compositor_adapter_t **out_adapter, compositor_type_t type
 #endif
 
         default:
-            fprintf(stderr, "Error: Compositor type %d not available in this build\n", type);
+            LOG_ERROR("Compositor type %d not available in this build", type);
             free(adapter);
             return HYPRLAX_ERROR_INVALID_ARGS;
     }

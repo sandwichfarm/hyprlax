@@ -5,6 +5,7 @@
  */
 
 #include <stdio.h>
+#include "../include/log.h"
 #include <stdlib.h>
 #include <string.h>
 #include <getopt.h>
@@ -97,7 +98,7 @@ int config_parse_args(config_t *cfg, int argc, char **argv) {
             case 'f':
                 cfg->target_fps = atoi(optarg);
                 if (cfg->target_fps <= 0 || cfg->target_fps > 240) {
-                    fprintf(stderr, "Invalid FPS value: %s\n", optarg);
+                    LOG_WARN("Invalid FPS value: %s", optarg);
                     return HYPRLAX_ERROR_INVALID_ARGS;
                 }
                 break;
@@ -105,7 +106,7 @@ int config_parse_args(config_t *cfg, int argc, char **argv) {
             case 's':
                 cfg->shift_pixels = atof(optarg);
                 if (cfg->shift_pixels < 0) {
-                    fprintf(stderr, "Invalid shift value: %s\n", optarg);
+                    LOG_WARN("Invalid shift value: %s", optarg);
                     return HYPRLAX_ERROR_INVALID_ARGS;
                 }
                 break;
@@ -113,7 +114,7 @@ int config_parse_args(config_t *cfg, int argc, char **argv) {
             case 'd':
                 cfg->animation_duration = atof(optarg);
                 if (cfg->animation_duration <= 0) {
-                    fprintf(stderr, "Invalid duration value: %s\n", optarg);
+                    LOG_WARN("Invalid duration value: %s", optarg);
                     return HYPRLAX_ERROR_INVALID_ARGS;
                 }
                 break;

@@ -6,6 +6,7 @@
  */
 
 #include <stdio.h>
+#include "../include/log.h"
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -229,9 +230,7 @@ static void river_load_config(river_data_t *data) {
             data->tag_policy = TAG_POLICY_NO_PARALLAX;
         }
         
-        if (getenv("HYPRLAX_DEBUG")) {
-            fprintf(stderr, "[DEBUG] River tag policy set to: %s\n", tag_policy);
-        }
+        LOG_DEBUG("River tag policy set to: %s", tag_policy);
     }
     
     /* Check if animation should be disabled for multi-tag */
@@ -759,9 +758,7 @@ static void seat_status_focused_output(void *data,
     /* Store focused output for workspace events */
     river->output = output;
     
-    if (getenv("HYPRLAX_DEBUG")) {
-        fprintf(stderr, "[DEBUG] River: Focused output changed\n");
-    }
+    LOG_DEBUG("River: Focused output changed");
 }
 
 static void seat_status_unfocused_output(void *data,
@@ -803,10 +800,7 @@ static void output_status_focused_tags(void *data,
         river->tags_changed = true;
         river->new_focused_tags = tags;
         
-        if (getenv("HYPRLAX_DEBUG")) {
-            fprintf(stderr, "[DEBUG] River: Tags changed from 0x%x to 0x%x\n",
-                    river->focused_tags, tags);
-        }
+        LOG_DEBUG("River: Tags changed from 0x%x to 0x%x", river->focused_tags, tags);
     }
 }
 
@@ -858,9 +852,7 @@ static void registry_global(void *data, struct wl_registry *registry,
         river->status_manager = wl_registry_bind(registry, name,
                                                 &zriver_status_manager_v1_interface,
                                                 version < 4 ? version : 4);
-        if (getenv("HYPRLAX_DEBUG")) {
-            fprintf(stderr, "[DEBUG] River: Found river-status protocol v%d\n", version);
-        }
+        LOG_DEBUG("River: Found river-status protocol v%d", version);
     } else if (strcmp(interface, "wl_seat") == 0) {
         river->seat = wl_registry_bind(registry, name, &wl_seat_interface, 1);
     } else if (strcmp(interface, "wl_output") == 0) {

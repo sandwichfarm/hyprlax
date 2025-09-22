@@ -10,18 +10,19 @@ from datetime import datetime
 import argparse
 
 # Configuration
-FONT_SIZE = 120  # Default font size (easily adjustable)
+FONT_SIZE = 120  # Base font size (pre-scale)
+FONT_SCALE = 5.0  # Default scale multiplier (~5x larger)
 FONT_COLOR = (255, 255, 255, 255)  # Pure white
 SHADOW_COLOR = (0, 0, 0, 200)  # Darker shadow for readability
 SHADOW_OFFSET = 4
 UPDATE_INTERVAL = 30  # Update every 30 seconds
 
 # Layer configuration
-LAYER_Z = 5  # Position between bg (default 0) and fg (higher z)
+LAYER_Z = 15  # Position between bg (default 0) and fg (higher z)
 LAYER_OPACITY = 1.0
 LAYER_SCALE = 1.0
 
-def create_time_image(font_size=FONT_SIZE, position='bottom-right'):
+def create_time_image(font_size=FONT_SIZE, position='center', scale=FONT_SCALE):
     """Generate transparent PNG with current time"""
     current_time = datetime.now().strftime("%H:%M")
     
@@ -30,6 +31,12 @@ def create_time_image(font_size=FONT_SIZE, position='bottom-right'):
     img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     
+    # Apply scale to requested font size
+    try:
+        effective_font_size = max(1, int(font_size * float(scale)))
+    except Exception:
+        effective_font_size = max(1, int(font_size))
+
     # Try to use a nice font, fallback to default if not available
     font = None
     try:
@@ -44,13 +51,22 @@ def create_time_image(font_size=FONT_SIZE, position='bottom-right'):
         ]
         for path in font_paths:
             if os.path.exists(path):
-                font = ImageFont.truetype(path, font_size)
+                font = ImageFont.truetype(path, effective_font_size)
+                font = ImageFont.truetype(path, effective_font_size)
                 print(f"Using font: {path}")
                 break
         if not font:
             # Try to use Pillow's default but with size
-            font = ImageFont.load_default(size=max(font_size//4, 20))
-            print(f"Warning: Using default font with size {max(font_size//4, 20)}")
+            # Note: load_default ignores size on some Pillow versions
+            font = ImageFont.load_default()
+            print(
+                f"Warning: Using default font (requested size {effective_font_size})"
+            )
+            # Note: load_default ignores size on some Pillow versions
+            font = ImageFont.load_default()
+            print(
+                f"Warning: Using default font (requested size {effective_font_size})"
+            )
     except Exception as e:
         print(f"Font error: {e}")
         font = ImageFont.load_default()
@@ -61,7 +77,8 @@ def create_time_image(font_size=FONT_SIZE, position='bottom-right'):
     text_height = bbox[3] - bbox[1]
     
     # Position the text
-    margin = 150  # Increased margin
+    margin = 150  # Increased margin (unused for center)
+    margin = 150  # Increased margin (unused for center)
     
     if position == 'bottom-right':
         x = width - text_width - margin
@@ -149,24 +166,80 @@ def main():
     parser = argparse.ArgumentParser(description='Add time overlay to hyprlax')
     parser.add_argument('--font-size', type=int, default=FONT_SIZE,
                        help=f'Font size for the time display (default: {FONT_SIZE})')
-    parser.add_argument('--position', type=str, default='bottom-right',
+    parser.add_argument('--position', type=str, default='center',
                        choices=['bottom-right', 'top-right', 'center', 'bottom-left'],
-                       help='Position of the time display (default: bottom-right)')
+                       help='Position of the time display (default: center)')
+    parser.add_argument('--scale', type=float, default=FONT_SCALE,
+                       help='Scale multiplier applied to --font-size '
+                            '(default: 5.0)')
+    parser.add_argument('--position', type=str, default='center',
+                       choices=['bottom-right', 'top-right', 'center', 'bottom-left'],
+                       help='Position of the time display (default: center)')
+    parser.add_argument('--scale', type=float, default=FONT_SCALE,
+                       help='Scale multiplier applied to --font-size '
+                            '(default: 5.0)')
     parser.add_argument('--once', action='store_true',
                        help='Run once and exit (for cron)')
     parser.add_argument('--interval', type=int, default=UPDATE_INTERVAL,
                        help=f'Update interval in seconds (default: {UPDATE_INTERVAL})')
     parser.add_argument('--verbose', '-v', action='store_true',
                        help='Verbose output')
+    parser.add_argument('--out-dir', type=str, default=None,
+                       help='Directory to write the overlay image. '
+                            'If omitted, uses a persistent ./tmp when --once, '
+                            'or a temporary directory otherwise.')
     args = parser.parse_args()
     
-    # Create temporary directory for our time images
-    temp_dir = tempfile.mkdtemp(prefix='hyprlax_time_')
-    image_path = os.path.join(temp_dir, 'time_overlay.png')
+    # Decide output directory behavior
+    # - If --out-dir provided: use it (absolute or relative to this script)
+    # - Else if --once: use persistent ./tmp next to this script
+    # - Else: use a temporary directory that will be cleaned up
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    cleanup = False
+
+    if args.out_dir:
+        out_dir = args.out_dir
+        if not os.path.isabs(out_dir):
+            out_dir = os.path.join(script_dir, out_dir)
+        os.makedirs(out_dir, exist_ok=True)
+    elif args.once:
+        out_dir = os.path.join(script_dir, 'tmp')
+        os.makedirs(out_dir, exist_ok=True)
+    else:
+        out_dir = tempfile.mkdtemp(prefix='hyprlax_time_')
+        cleanup = True
+
+    image_path = os.path.join(out_dir, 'time_overlay.png')
     
     if args.verbose:
         print(f"Starting time overlay with font size {args.font_size}")
-        print(f"Temporary image: {image_path}")
+        print(f"Overlay image path: {image_path}")
+    args = parser.parse_args()
+    
+    # Decide output directory behavior
+    # - If --out-dir provided: use it (absolute or relative to this script)
+    # - Else if --once: use persistent ./tmp next to this script
+    # - Else: use a temporary directory that will be cleaned up
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    cleanup = False
+
+    if args.out_dir:
+        out_dir = args.out_dir
+        if not os.path.isabs(out_dir):
+            out_dir = os.path.join(script_dir, out_dir)
+        os.makedirs(out_dir, exist_ok=True)
+    elif args.once:
+        out_dir = os.path.join(script_dir, 'tmp')
+        os.makedirs(out_dir, exist_ok=True)
+    else:
+        out_dir = tempfile.mkdtemp(prefix='hyprlax_time_')
+        cleanup = True
+
+    image_path = os.path.join(out_dir, 'time_overlay.png')
+    
+    if args.verbose:
+        print(f"Starting time overlay with font size {args.font_size}")
+        print(f"Overlay image path: {image_path}")
     
     try:
         layer_id = None
@@ -175,7 +248,7 @@ def main():
         while True:
             # Generate new time image
             current_time = datetime.now().strftime("%H:%M")
-            img = create_time_image(args.font_size, args.position)
+            img = create_time_image(args.font_size, args.position, args.scale)
             img.save(image_path)
             
             if args.verbose or (iteration == 0 and args.once):
@@ -210,11 +283,18 @@ def main():
         if layer_id:
             subprocess.run(["hyprlax", "ctl", "remove", str(layer_id)])
     finally:
-        # Cleanup
-        if os.path.exists(image_path):
-            os.remove(image_path)
-        if os.path.exists(temp_dir):
-            os.rmdir(temp_dir)
+        # Cleanup only when using a temporary directory (looping mode)
+        if cleanup:
+            try:
+                if os.path.exists(image_path):
+                    os.remove(image_path)
+            except Exception:
+                pass
+            try:
+                if os.path.exists(out_dir):
+                    os.rmdir(out_dir)
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     main()

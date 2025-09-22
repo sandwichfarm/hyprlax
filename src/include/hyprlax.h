@@ -97,6 +97,9 @@ typedef struct hyprlax_context {
     bool debounce_pending;     /* debounce timer armed */
     compositor_event_t pending_event; /* last compositor event to apply after debounce */
 
+    /* Internal: request an immediate retry render (e.g., pending texture load) */
+    bool deferred_render_needed;
+
 } hyprlax_context_t;
 
 /* Main application functions */
@@ -134,5 +137,8 @@ int hyprlax_ctl_main(int argc, char **argv);
 /* Runtime property control (IPC bridge) */
 int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, const char *value);
 int hyprlax_runtime_get_property(hyprlax_context_t *ctx, const char *property, char *out, size_t out_size);
+
+/* Reload configuration (TOML or legacy). Clears and re-applies layers. */
+int hyprlax_reload_config(hyprlax_context_t *ctx);
 
 #endif /* HYPRLAX_H */

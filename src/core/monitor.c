@@ -23,7 +23,7 @@ static double get_time(void) {
 monitor_list_t* monitor_list_create(void) {
     monitor_list_t *list = calloc(1, sizeof(monitor_list_t));
     if (!list) {
-        fprintf(stderr, "Failed to allocate monitor list\n");
+        LOG_ERROR("Failed to allocate monitor list");
         return NULL;
     }
     list->next_id = 1;
@@ -48,7 +48,7 @@ void monitor_list_destroy(monitor_list_t *list) {
 monitor_instance_t* monitor_instance_create(const char *name) {
     monitor_instance_t *monitor = calloc(1, sizeof(monitor_instance_t));
     if (!monitor) {
-        fprintf(stderr, "Failed to allocate monitor instance\n");
+        LOG_ERROR("Failed to allocate monitor instance");
         return NULL;
     }
 
@@ -332,8 +332,7 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
             float base_y = monitor->animating ? monitor->animation_target_y : monitor->parallax_offset_y;
 
             if (ctx && ctx->config.debug) {
-                fprintf(stderr, "[DEBUG]   Base position: X=%.1f, Y=%.1f (animating=%d)\n",
-                        base_x, base_y, monitor->animating);
+                LOG_DEBUG("  Base position: X=%.1f, Y=%.1f (animating=%d)", base_x, base_y, monitor->animating);
             }
 
             absolute_target_x = base_x + offset_2d.x;
@@ -343,8 +342,7 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
             monitor->parallax_offset_x = absolute_target_x;
             monitor->parallax_offset_y = absolute_target_y;
             if (ctx && ctx->config.debug) {
-                fprintf(stderr, "[DEBUG]   2D accumulative offset: X=%.1f, Y=%.1f\n",
-                        monitor->parallax_offset_x, monitor->parallax_offset_y);
+                LOG_DEBUG("  2D accumulative offset: X=%.1f, Y=%.1f", monitor->parallax_offset_x, monitor->parallax_offset_y);
             }
         } else {
             /* For 1D models, accumulate delta from previous context (legacy behavior) */
@@ -356,16 +354,15 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
             absolute_target_x = base_x + delta_ws * step;
             absolute_target_y = 0.0f;
             if (ctx && ctx->config.debug) {
-                fprintf(stderr, "[DEBUG]   1D accumulative: from %d to %d (delta=%d) base=%.1f -> X=%.1f\n",
-                        from_ws, to_ws, delta_ws, base_x, absolute_target_x);
+                LOG_DEBUG("  1D accumulative: from %d to %d (delta=%d) base=%.1f -> X=%.1f",
+                          from_ws, to_ws, delta_ws, base_x, absolute_target_x);
             }
         }
 
         /* Update all layers with their absolute target positions */
         if (ctx->layers) {
             if (ctx && ctx->config.debug) {
-                fprintf(stderr, "[DEBUG]   Updating layers with target: X=%.1f, Y=%.1f\n",
-                        absolute_target_x, absolute_target_y);
+                LOG_DEBUG("  Updating layers with target: X=%.1f, Y=%.1f", absolute_target_x, absolute_target_y);
             }
 
             parallax_layer_t *layer = ctx->layers;
@@ -562,8 +559,8 @@ void monitor_update_geometry(monitor_instance_t *monitor,
     /* Update target frame time */
     monitor->target_frame_time = 1000.0 / refresh_rate;
 
-    fprintf(stderr, "Monitor %s geometry: %dx%d@%dHz scale=%d\n",
-            monitor->name, width, height, refresh_rate, scale);
+    LOG_INFO("Monitor %s geometry: %dx%d@%dHz scale=%d",
+             monitor->name, width, height, refresh_rate, scale);
 }
 
 /* Set global position */

@@ -290,17 +290,13 @@ workspace_offset_t workspace_calculate_offset_2d(const workspace_context_t *from
     workspace_offset_t offset = {0.0f, 0.0f};
 
     if (!from || !to || from->model != to->model) {
-        if (getenv("HYPRLAX_DEBUG")) {
-            fprintf(stderr, "[DEBUG] workspace_calculate_offset_2d: Invalid params or model mismatch\n");
-        }
+        LOG_DEBUG("workspace_calculate_offset_2d: Invalid params or model mismatch");
         return offset;
     }
 
-    if (getenv("HYPRLAX_DEBUG")) {
-        fprintf(stderr, "[DEBUG] workspace_calculate_offset_2d:\n");
-        fprintf(stderr, "[DEBUG]   Model: %s\n", workspace_model_to_string(from->model));
-        fprintf(stderr, "[DEBUG]   Shift pixels: %.1f\n", shift_pixels);
-    }
+    LOG_DEBUG("workspace_calculate_offset_2d:");
+    LOG_DEBUG("  Model: %s", workspace_model_to_string(from->model));
+    LOG_DEBUG("  Shift pixels: %.1f", shift_pixels);
 
     switch (from->model) {
         case WS_MODEL_SET_BASED:
@@ -316,10 +312,8 @@ workspace_offset_t workspace_calculate_offset_2d(const workspace_context_t *from
                 offset.x = (to_x - from_x) * shift_pixels;
                 offset.y = (to_y - from_y) * shift_pixels;
 
-                if (getenv("HYPRLAX_DEBUG")) {
-                    fprintf(stderr, "[DEBUG]   Wayfire set %d: (%d,%d) -> (%d,%d)\n",
-                            from->data.wayfire_set.set_id, from_x, from_y, to_x, to_y);
-                }
+                LOG_DEBUG("  Wayfire set %d: (%d,%d) -> (%d,%d)",
+                          from->data.wayfire_set.set_id, from_x, from_y, to_x, to_y);
             }
             break;
 
@@ -339,29 +333,21 @@ workspace_offset_t workspace_calculate_offset_2d(const workspace_context_t *from
             /* This is temporary until TOML config supports separate X/Y values */
             offset.y = (to_y - from_y) * shift_pixels;
 
-            if (1) { /* Always debug for now */
-                fprintf(stderr, "[DEBUG]   Niri workspace ID %d->%d decoded as:\n",
-                        from->data.workspace_id, to->data.workspace_id);
-                fprintf(stderr, "[DEBUG]     Position: (%d,%d) -> (%d,%d)\n",
-                        from_x, from_y, to_x, to_y);
-                fprintf(stderr, "[DEBUG]     Delta: X=%d, Y=%d\n",
-                        to_x - from_x, to_y - from_y);
-            }
+            LOG_DEBUG("  Niri workspace ID %d->%d decoded as:",
+                      from->data.workspace_id, to->data.workspace_id);
+            LOG_DEBUG("    Position: (%d,%d) -> (%d,%d)", from_x, from_y, to_x, to_y);
+            LOG_DEBUG("    Delta: X=%d, Y=%d", to_x - from_x, to_y - from_y);
             break;
 
         default:
             /* For 1D models, just use X axis */
             offset.x = workspace_calculate_offset(from, to, shift_pixels, policy);
             offset.y = 0.0f;
-            if (getenv("HYPRLAX_DEBUG")) {
-                fprintf(stderr, "[DEBUG]   1D model, using X-only offset\n");
-            }
+            LOG_DEBUG("  1D model, using X-only offset");
             break;
     }
 
-    if (getenv("HYPRLAX_DEBUG")) {
-        fprintf(stderr, "[DEBUG]   Calculated offset: X=%.1f, Y=%.1f\n", offset.x, offset.y);
-    }
+    LOG_DEBUG("  Calculated offset: X=%.1f, Y=%.1f", offset.x, offset.y);
 
     return offset;
 }

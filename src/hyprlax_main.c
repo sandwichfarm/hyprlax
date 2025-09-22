@@ -46,6 +46,56 @@ static int create_timerfd_monotonic(void) {
     return fd;
 }
 
+/* --- Local helpers (refactored from nested functions) --- */
+static bool parse_bool_local(const char *v) {
+    if (!v) return false;
+    return (strcmp(v, "1") == 0 || strcasecmp(v, "true") == 0 ||
+            strcasecmp(v, "on") == 0 || strcasecmp(v, "yes") == 0);
+}
+
+static int overflow_from_string_local(const char *s) {
+    if (!s) return -1;
+    if (!strcmp(s, "inherit")) return -1;
+    if (!strcmp(s, "repeat_edge") || !strcmp(s, "clamp")) return 0;
+    if (!strcmp(s, "repeat") || !strcmp(s, "tile")) return 1;
+    if (!strcmp(s, "repeat_x") || !strcmp(s, "tilex")) return 2;
+    if (!strcmp(s, "repeat_y") || !strcmp(s, "tiley")) return 3;
+    if (!strcmp(s, "none") || !strcmp(s, "off")) return 4;
+    return -2;
+}
+
+static const char* overflow_to_string_local(int m) {
+    switch (m) {
+        case 0: return "repeat_edge";
+        case 1: return "repeat";
+        case 2: return "repeat_x";
+        case 3: return "repeat_y";
+        case 4: return "none";
+        case -1: default: return "inherit";
+    }
+}
+
+static int fit_from_string_local(const char *s) {
+    if (!s) return -1;
+    if (!strcmp(s, "stretch")) return LAYER_FIT_STRETCH;
+    if (!strcmp(s, "cover")) return LAYER_FIT_COVER;
+    if (!strcmp(s, "contain")) return LAYER_FIT_CONTAIN;
+    if (!strcmp(s, "fit_width")) return LAYER_FIT_WIDTH;
+    if (!strcmp(s, "fit_height")) return LAYER_FIT_HEIGHT;
+    return -1;
+}
+
+static const char* fit_to_string_local(int m) {
+    switch (m) {
+        case LAYER_FIT_STRETCH: return "stretch";
+        case LAYER_FIT_COVER: return "cover";
+        case LAYER_FIT_CONTAIN: return "contain";
+        case LAYER_FIT_WIDTH: return "fit_width";
+        case LAYER_FIT_HEIGHT: return "fit_height";
+        default: return "stretch";
+    }
+}
+
 static void disarm_timerfd(int fd) {
     if (fd < 0) return;
     struct itimerspec its = {0};
@@ -543,6 +593,39 @@ static int parse_config_file(hyprlax_context_t *ctx, const char *filename) {
     return 0;
 }
 
+/* Reload configuration (TOML or legacy) and re-apply layers */
+int hyprlax_reload_config(hyprlax_context_t *ctx) {
+    if (!ctx) return HYPRLAX_ERROR_INVALID_ARGS;
+    const char *path = ctx->config.config_path;
+    char fallback_path[PATH_MAX];
+    if (!path || !*path) {
+        const char *home = getenv("HOME");
+        if (home) {
+            snprintf(fallback_path, sizeof(fallback_path), "%s/.config/hyprlax/parallax.conf", home);
+            if (access(fallback_path, R_OK) == 0) {
+                path = fallback_path;
+            }
+        }
+    }
+    if (!path || !*path) {
+        return HYPRLAX_ERROR_FILE_NOT_FOUND;
+    }
+    /* Clear layers */
+    while (ctx->layers) {
+        uint32_t id = ctx->layers->id;
+        hyprlax_remove_layer(ctx, id);
+    }
+    /* TOML vs legacy */
+    const char *ext = strrchr(path, '.');
+    if (ext && strcasecmp(ext, ".toml") == 0) {
+        int rc = config_apply_toml_to_context(ctx, path);
+        return (rc == HYPRLAX_SUCCESS) ? HYPRLAX_SUCCESS : HYPRLAX_ERROR_INVALID_ARGS;
+    } else {
+        int rc = parse_config_file(ctx, path);
+        return (rc == 0) ? HYPRLAX_SUCCESS : HYPRLAX_ERROR_INVALID_ARGS;
+    }
+}
+
 /* Parse command-line arguments */
 static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
     /* Honor environment variables for log levels */
@@ -980,6 +1063,11 @@ int hyprlax_init_renderer(hyprlax_context_t *ctx) {
         return ret;
     }
 
+    /* Mark renderer as initialized so runtime paths (IPC add, lazy loads)
+     * can create textures. Previously this flag was never set, which
+     * prevented textures for IPC-added layers from being loaded. */
+    ctx->renderer->initialized = true;
+
     LOG_DEBUG("Renderer: %s", ctx->renderer->ops->get_name());
 
     return HYPRLAX_SUCCESS;
@@ -1042,11 +1130,15 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
             ctx->monitor_mode == MULTI_MON_PRIMARY ? "PRIMARY" : "SPECIFIC");
 
     /* 1. Initialize IPC server first to check for existing instances */
-    LOG_INFO("[INIT] Step 1: Initializing IPC");
-    ret = hyprlax_init_ipc(ctx);
-    if (ret != HYPRLAX_SUCCESS) {
-        LOG_ERROR("[INIT] IPC initialization failed with code %d", ret);
-        return ret;  /* Exit if another instance is running */
+    if (ctx->config.ipc_enabled) {
+        LOG_INFO("[INIT] Step 1: Initializing IPC");
+        ret = hyprlax_init_ipc(ctx);
+        if (ret != HYPRLAX_SUCCESS) {
+            LOG_ERROR("[INIT] IPC initialization failed with code %d", ret);
+            return ret;  /* Exit if another instance is running */
+        }
+    } else if (ctx->config.debug) {
+        LOG_INFO("[INIT] IPC disabled by configuration");
     }
 
     /* 2. Platform (windowing system) */
@@ -1159,6 +1251,7 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
 }
 
 /* Load texture from file */
+static inline int is_pow2(int v) { return v > 0 && (v & (v - 1)) == 0; }
 static GLuint load_texture(const char *path, int *width, int *height) {
     int channels;
     unsigned char *data = stbi_load(path, width, height, &channels, 4);
@@ -1172,9 +1265,13 @@ static GLuint load_texture(const char *path, int *width, int *height) {
     glBindTexture(GL_TEXTURE_2D, texture);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, *width, *height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
 
-    /* Use trilinear filtering for smoother animation */
-    glGenerateMipmap(GL_TEXTURE_2D);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    /* NPOT safety for GLES2: only generate mipmaps if both dimensions are powers of two */
+    if (is_pow2(*width) && is_pow2(*height)) {
+        glGenerateMipmap(GL_TEXTURE_2D);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    } else {
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    }
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -1207,6 +1304,16 @@ int hyprlax_add_layer(hyprlax_context_t *ctx, const char *image_path,
     }
     new_layer->blur_amount = blur;
 
+    /* Assign default z-index if not explicitly set elsewhere:
+     * - First layer gets z=0
+     * - Subsequent layers get max_z + 10
+     * IPC 'add' with explicit z will override this immediately after. */
+    int maxz = INT_MIN;
+    for (parallax_layer_t *it = ctx->layers; it; it = it->next) {
+        if (it->z_index > maxz) maxz = it->z_index;
+    }
+    if (maxz == INT_MIN) new_layer->z_index = 0; else new_layer->z_index = maxz + 10;
+
     ctx->layers = layer_list_add(ctx->layers, new_layer);
     ctx->layer_count = layer_list_count(ctx->layers);
 
@@ -1214,6 +1321,21 @@ int hyprlax_add_layer(hyprlax_context_t *ctx, const char *image_path,
                 image_path, shift_multiplier, opacity, blur);
 
     return HYPRLAX_SUCCESS;
+}
+
+/* Remove a layer by ID */
+void hyprlax_remove_layer(hyprlax_context_t *ctx, uint32_t layer_id) {
+    if (!ctx) return;
+    /* Find layer to allow GL cleanup */
+    parallax_layer_t *layer = layer_list_find(ctx->layers, layer_id);
+    if (layer && layer->texture_id != 0) {
+        GLuint tid = (GLuint)layer->texture_id;
+        glDeleteTextures(1, &tid);
+        layer->texture_id = 0;
+    }
+    /* Remove from linked list and update count */
+    ctx->layers = layer_list_remove(ctx->layers, layer_id);
+    ctx->layer_count = layer_list_count(ctx->layers);
 }
 
 /* Load textures for all layers (called after GL init) */
@@ -1272,8 +1394,7 @@ void hyprlax_handle_monitor_workspace_change(hyprlax_context_t *ctx,
     monitor_handle_workspace_change(ctx, monitor, new_workspace);
 
     if (ctx->config.debug) {
-        fprintf(stderr, "[DEBUG] Monitor %s: workspace changed to %d\n",
-                monitor->name, new_workspace);
+        LOG_DEBUG("Monitor %s: workspace changed to %d", monitor->name, new_workspace);
     }
 }
 
@@ -1284,8 +1405,7 @@ void hyprlax_handle_workspace_change(hyprlax_context_t *ctx, int new_workspace) 
     int delta = new_workspace - ctx->current_workspace;
 
     if (ctx->config.debug) {
-        fprintf(stderr, "[DEBUG] Workspace change: %d -> %d (delta=%d)\n",
-                ctx->current_workspace, new_workspace, delta);
+        LOG_DEBUG("Workspace change: %d -> %d (delta=%d)", ctx->current_workspace, new_workspace, delta);
     }
 
     ctx->current_workspace = new_workspace;
@@ -1329,8 +1449,8 @@ void hyprlax_handle_workspace_change_2d(hyprlax_context_t *ctx,
     int delta_y = to_y - from_y;
 
     if (ctx->config.debug) {
-        fprintf(stderr, "[DEBUG] 2D Workspace change: (%d,%d) -> (%d,%d) (delta=%d,%d)\n",
-               from_x, from_y, to_x, to_y, delta_x, delta_y);
+        LOG_DEBUG("2D Workspace change: (%d,%d) -> (%d,%d) (delta=%d,%d)",
+                  from_x, from_y, to_x, to_y, delta_x, delta_y);
     }
 
     /* Calculate target offset for both axes */
@@ -1456,7 +1576,25 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
     /* Layer count debug - commented out for performance
     LOG_TRACE("Rendering %d layers for monitor %s", ctx->layer_count, monitor->name); */
     while (layer) {
-        if (layer->texture_id == 0) {
+        /* Attempt lazy texture load once we hit the layer in draw path */
+        if (layer->texture_id == 0 && layer->image_path && ctx->renderer && ctx->renderer->initialized) {
+            int lw = 0, lh = 0;
+            GLuint tid = load_texture(layer->image_path, &lw, &lh);
+            if (tid != 0) {
+                layer->texture_id = tid;
+                layer->width = lw;
+                layer->height = lh;
+                layer->texture_width = lw;
+                layer->texture_height = lh;
+                LOG_DEBUG("[LAZY] Loaded texture for layer %u (%s): %dx%d tex=%u",
+                          layer->id, layer->image_path, lw, lh, tid);
+            } else {
+                LOG_WARN("[LAZY] Failed to load texture for layer %u: %s", layer->id, layer->image_path);
+                ctx->deferred_render_needed = true; /* request another frame to retry */
+            }
+        }
+
+        if (layer->hidden || layer->texture_id == 0) {
             layer = layer->next;
             continue;
         }
@@ -1705,7 +1843,8 @@ int hyprlax_run(hyprlax_context_t *ctx) {
 
     double last_render_time = get_time();
     double last_frame_time = last_render_time;
-    double frame_time = 1.0 / ctx->config.target_fps;
+    double frame_time = 1.0 / (double)(ctx->config.target_fps > 0 ? ctx->config.target_fps : 60);
+    int prev_target_fps = ctx->config.target_fps;
     int frame_count = 0;
     double debug_timer = 0.0;
     bool needs_render = true;  /* Render first frame */
@@ -1716,6 +1855,20 @@ int hyprlax_run(hyprlax_context_t *ctx) {
     }
 
     while (ctx->running) {
+        /* Recompute frame time from current config to honor live FPS changes */
+        int current_fps = ctx->config.target_fps;
+        if (current_fps <= 0) current_fps = 60;
+        if (current_fps != prev_target_fps) {
+            /* If using timerfd (no frame callbacks), re-arm at new interval */
+            const char *fc_env = getenv("HYPRLAX_FRAME_CALLBACK");
+            bool use_frame_callback = (fc_env && *fc_env);
+            if (!use_frame_callback) {
+                hyprlax_arm_frame_timer(ctx, current_fps);
+            }
+            prev_target_fps = current_fps;
+        }
+        frame_time = 1.0 / (double)current_fps;
+
         /* Reset per-iteration diagnostic flags */
         bool diag_resize = false;
         bool diag_ipc = false;
@@ -1854,13 +2007,14 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                           time_since_render, frame_time, ctx->layer_count,
                           first_x, first_y);
             }
-            hyprlax_render_frame(ctx);
-            ctx->fps = 1.0 / time_since_render;
-            last_render_time = current_time;
-            frame_count++;
+    hyprlax_render_frame(ctx);
+    ctx->fps = 1.0 / time_since_render;
+    last_render_time = current_time;
+    frame_count++;
             
-            /* Clear needs_render flag - it will be set again if needed */
-            needs_render = false;
+    /* Clear needs_render flag; request another frame if deferred work pending */
+    needs_render = ctx->deferred_render_needed;
+    ctx->deferred_render_needed = false;
 
             /* Print FPS every second in debug mode */
             if (ctx->config.debug) {
@@ -2029,21 +2183,6 @@ static bool parse_bool(const char *v) {
 int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, const char *value) {
     if (!ctx || !property || !value) return -1;
 
-    /* Helper mappers */
-    auto int overflow_from_string_local(const char *s) {
-        if (!s) return -1;
-        if (!strcmp(s, "repeat_edge") || !strcmp(s, "clamp")) return 0;
-        if (!strcmp(s, "repeat") || !strcmp(s, "tile")) return 1;
-        if (!strcmp(s, "repeat_x") || !strcmp(s, "tilex")) return 2;
-        if (!strcmp(s, "repeat_y") || !strcmp(s, "tiley")) return 3;
-        if (!strcmp(s, "none") || !strcmp(s, "off")) return 4;
-        return -1;
-    }
-    auto bool parse_bool_local(const char *v) {
-        return (strcmp(v, "1") == 0 || strcasecmp(v, "true") == 0 ||
-                strcasecmp(v, "on") == 0 || strcasecmp(v, "yes") == 0);
-    }
-
     /* Per-layer property: layer.<id>.* */
     if (strncmp(property, "layer.", 6) == 0) {
         const char *p = property + 6;
@@ -2053,9 +2192,43 @@ int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, c
         const char *leaf = endptr + 1;
         parallax_layer_t *layer = layer_list_find(ctx->layers, (uint32_t)lid);
         if (!layer) return -1;
+        if (strcmp(leaf, "hidden") == 0) { layer->hidden = parse_bool_local(value); return 0; }
+        if (strcmp(leaf, "path") == 0) {
+            /* Update image path and reload texture if renderer is active */
+            char *newpath = strdup(value);
+            if (!newpath) return -1;
+            /* Attempt to load texture first to avoid losing old path on failure */
+            GLuint new_tex = 0; int w=0, h=0;
+            if (ctx->renderer && ctx->renderer->initialized) {
+                extern GLuint load_texture(const char *path, int *width, int *height); /* forward decl */
+                new_tex = load_texture(newpath, &w, &h);
+                if (new_tex == 0) { free(newpath); return -1; }
+            }
+            /* Replace path */
+            if (layer->image_path) free(layer->image_path);
+            layer->image_path = newpath;
+            /* Swap texture */
+            if (ctx->renderer && ctx->renderer->initialized) {
+                if (layer->texture_id) {
+                    GLuint tid = (GLuint)layer->texture_id;
+                    glDeleteTextures(1, &tid);
+                }
+                layer->texture_id = new_tex;
+                layer->width = w;
+                layer->height = h;
+                layer->texture_width = w;
+                layer->texture_height = h;
+            }
+            return 0;
+        }
+        if (strcmp(leaf, "blur") == 0) { layer->blur_amount = atof(value); return 0; }
+        if (strcmp(leaf, "fit") == 0) { int m = fit_from_string_local(value); if (m < 0) return -1; layer->fit_mode = m; return 0; }
+        if (strcmp(leaf, "content_scale") == 0) { layer->content_scale = atof(value); return 0; }
+        if (strcmp(leaf, "align.x") == 0) { layer->align_x = atof(value); if (layer->align_x<0) layer->align_x=0; if (layer->align_x>1) layer->align_x=1; return 0; }
+        if (strcmp(leaf, "align.y") == 0) { layer->align_y = atof(value); if (layer->align_y<0) layer->align_y=0; if (layer->align_y>1) layer->align_y=1; return 0; }
         if (strcmp(leaf, "overflow") == 0) {
             int m = overflow_from_string_local(value);
-            if (m < 0) return -1; layer->overflow_mode = m; return 0;
+            if (m == -2) return -1; layer->overflow_mode = m; return 0;
         }
         if (strcmp(leaf, "tile.x") == 0) { layer->tile_x = parse_bool_local(value) ? 1 : 0; return 0; }
         if (strcmp(leaf, "tile.y") == 0) { layer->tile_y = parse_bool_local(value) ? 1 : 0; return 0; }
@@ -2113,7 +2286,7 @@ int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, c
     /* Render properties (global) */
     if (strcmp(property, "render.overflow") == 0) {
         int m = overflow_from_string_local(value);
-        if (m < 0) return -1; ctx->config.render_overflow_mode = m; return 0;
+        if (m == -2) return -1; ctx->config.render_overflow_mode = m; return 0;
     }
     if (strcmp(property, "render.tile.x") == 0) { ctx->config.render_tile_x = parse_bool_local(value) ? 1 : 0; return 0; }
     if (strcmp(property, "render.tile.y") == 0) { ctx->config.render_tile_y = parse_bool_local(value) ? 1 : 0; return 0; }
@@ -2125,22 +2298,18 @@ int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, c
 int hyprlax_runtime_get_property(hyprlax_context_t *ctx, const char *property, char *out, size_t out_size) {
     if (!ctx || !property || !out || out_size == 0) return -1;
     #define W(fmt, ...) do { snprintf(out, out_size, fmt, __VA_ARGS__); } while(0)
-    auto const char* overflow_to_string_local(int m) {
-        switch (m) {
-            case 0: return "repeat_edge";
-            case 1: return "repeat";
-            case 2: return "repeat_x";
-            case 3: return "repeat_y";
-            case 4: return "none";
-            default: return "inherit";
-        }
-    }
     /* Per-layer get: layer.<id>.* */
     if (strncmp(property, "layer.", 6) == 0) {
         const char *p = property + 6; char *end=NULL; long lid=strtol(p,&end,10);
         if (lid <= 0 || !end || *end != '.') return -1; const char *leaf = end+1;
         parallax_layer_t *layer = layer_list_find(ctx->layers, (uint32_t)lid);
         if (!layer) return -1;
+        if (strcmp(leaf, "hidden") == 0) { W("%s", layer->hidden?"true":"false"); return 0; }
+        if (strcmp(leaf, "blur") == 0) { W("%.2f", layer->blur_amount); return 0; }
+        if (strcmp(leaf, "fit") == 0) { W("%s", fit_to_string_local(layer->fit_mode)); return 0; }
+        if (strcmp(leaf, "content_scale") == 0) { W("%.3f", layer->content_scale); return 0; }
+        if (strcmp(leaf, "align.x") == 0) { W("%.3f", layer->align_x); return 0; }
+        if (strcmp(leaf, "align.y") == 0) { W("%.3f", layer->align_y); return 0; }
         if (strcmp(leaf, "overflow") == 0) {
             int eff = (layer->overflow_mode >= 0) ? layer->overflow_mode : ctx->config.render_overflow_mode;
             W("%s", overflow_to_string_local(eff)); return 0;
@@ -2172,3 +2341,14 @@ int hyprlax_runtime_get_property(hyprlax_context_t *ctx, const char *property, c
     #undef W
     return -1;
 }
+#ifndef WEAK_CORE_LAYER_STUBS
+__attribute__((weak)) parallax_layer_t* layer_list_find(parallax_layer_t *head, uint32_t layer_id) {
+    (void)head; (void)layer_id; return NULL;
+}
+__attribute__((weak)) parallax_layer_t* layer_list_remove(parallax_layer_t *head, uint32_t layer_id) {
+    (void)layer_id; return head;
+}
+__attribute__((weak)) int layer_list_count(parallax_layer_t *head) {
+    int c=0; for (; head; head=head->next) c++; return c;
+}
+#endif

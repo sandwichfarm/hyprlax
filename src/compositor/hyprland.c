@@ -99,9 +99,7 @@ static bool detect_split_monitor_plugin(void) {
     if (hyprland_send_command("j/plugins", response, sizeof(response)) == HYPRLAX_SUCCESS) {
         /* Simple check for plugin name in JSON response */
         if (strstr(response, "split-monitor-workspaces") != NULL) {
-            if (getenv("HYPRLAX_DEBUG")) {
-                fprintf(stderr, "[DEBUG] Detected split-monitor-workspaces plugin\n");
-            }
+            LOG_DEBUG("Detected split-monitor-workspaces plugin");
             return true;
         }
     }
@@ -443,11 +441,9 @@ static int hyprland_poll_events(compositor_event_t *event) {
                     event->data.workspace.monitor_name[0] = '\0';
                 }
                 g_hyprland_data->current_workspace = new_workspace;
-                if (getenv("HYPRLAX_DEBUG")) {
-                    fprintf(stderr, "[DEBUG] Workspace change detected: %d -> %d\n",
-                            event->data.workspace.from_workspace,
-                            event->data.workspace.to_workspace);
-                }
+                LOG_DEBUG("Workspace change detected: %d -> %d",
+                          event->data.workspace.from_workspace,
+                          event->data.workspace.to_workspace);
                 return HYPRLAX_SUCCESS;
             }
         } else if (strncmp(line, "focusedmon>>", 12) == 0) {
@@ -464,10 +460,8 @@ static int hyprland_poll_events(compositor_event_t *event) {
                     int focused_workspace = atoi(comma + 1);
                     update_workspace_owner(focused_workspace, g_hyprland_data->current_monitor_name);
 
-                    if (getenv("HYPRLAX_DEBUG")) {
-                        fprintf(stderr, "[DEBUG] Monitor focus changed to %s (ws %d)\n",
-                                g_hyprland_data->current_monitor_name, focused_workspace);
-                    }
+                    LOG_DEBUG("Monitor focus changed to %s (ws %d)",
+                              g_hyprland_data->current_monitor_name, focused_workspace);
                 }
             }
         }
@@ -503,9 +497,7 @@ static int hyprland_send_command(const char *command, char *response,
         ssize_t n = write(cmd_fd, cptr + wrote, clen - (size_t)wrote);
         if (n < 0) {
             if (errno == EINTR) continue;
-            if (getenv("HYPRLAX_DEBUG")) {
-                fprintf(stderr, "[DEBUG] Hyprland IPC write failed: %s\n", strerror(errno));
-            }
+            LOG_DEBUG("Hyprland IPC write failed: %s", strerror(errno));
             close(cmd_fd);
             return HYPRLAX_ERROR_INVALID_ARGS;
         }
@@ -530,9 +522,7 @@ static int hyprland_send_command(const char *command, char *response,
             if (total > 0) break;
         }
         response[total] = '\0';
-        if (getenv("HYPRLAX_DEBUG")) {
-            fprintf(stderr, "[DEBUG] Hyprland IPC response: %.*s\n", (int)total, response);
-        }
+        LOG_DEBUG("Hyprland IPC response: %.*s", (int)total, response);
     }
 
     close(cmd_fd);

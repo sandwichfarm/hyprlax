@@ -124,7 +124,22 @@ $XDG_CONFIG_HOME/hyprlax/
 Runtime directory for sockets.
 
 **Default:** `/run/user/$UID`  
-**Used for:** IPC socket location (fallback)
+**Used for:** IPC socket location (preferred when available)
+
+### HYPRLAX_SOCKET_SUFFIX
+Append a suffix to the IPC socket filename for isolation (useful for tests, parallel runs, or multiple instances).
+
+- Values: any short string with letters/digits/`-`/`_`
+- Preferred path: `$XDG_RUNTIME_DIR/hyprlax-$USER-$HYPRLAND_INSTANCE_SIGNATURE-$SUFFIX.sock`
+- Fallback path: `/tmp/hyprlax-$USER-$SUFFIX.sock`
+
+Example:
+```bash
+export HYPRLAX_SOCKET_SUFFIX=tests
+make test
+```
+
+Alias: HYPRLAX_TEST_SUFFIX is still accepted but considered deprecated; HYPRLAX_SOCKET_SUFFIX takes precedence when both are set.
 
 ### HOME
 User home directory.
