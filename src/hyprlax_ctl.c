@@ -36,15 +36,31 @@ static int connect_to_daemon(void) {
     const char *sig = getenv("HYPRLAND_INSTANCE_SIGNATURE");
     const char *xdg = getenv("XDG_RUNTIME_DIR");
 
+    /* Optional socket suffix for isolation (prefer generic var, fallback to legacy test var) */
+    char suffix[64] = {0};
+    const char *ts = getenv("HYPRLAX_SOCKET_SUFFIX");
+    if (!ts || !*ts) ts = getenv("HYPRLAX_TEST_SUFFIX");
+    if (ts && *ts) {
+        size_t o = 0; suffix[o++] = '-';
+        for (size_t i = 0; ts[i] && o < sizeof(suffix) - 1; i++) {
+            unsigned char c = (unsigned char)ts[i];
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                (c >= '0' && c <= '9') || c == '-' || c == '_' ) {
+                suffix[o++] = (char)c;
+            }
+        }
+        suffix[o] = '\0';
+    }
+
     if (sig && *sig && xdg && *xdg) {
-        snprintf(addr.sun_path, sizeof(addr.sun_path), "%s/hyprlax-%s-%s.sock", xdg, user, sig);
+        snprintf(addr.sun_path, sizeof(addr.sun_path), "%s/hyprlax-%s-%s%s.sock", xdg, user, sig, suffix);
         if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
             return sock;
         }
         /* Fallback to legacy path if preferred path not available */
     }
 
-    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s%s.sock", IPC_SOCKET_PATH_PREFIX, user);
+    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s%s%s.sock", IPC_SOCKET_PATH_PREFIX, user, suffix);
     if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
         fprintf(stderr, "Failed to connect to hyprlax daemon at %s\n", addr.sun_path);
         fprintf(stderr, "Is hyprlax running?\n");

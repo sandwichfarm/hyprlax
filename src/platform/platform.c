@@ -5,6 +5,7 @@
  */
 
 #include <stdio.h>
+#include "include/log.h"
 #include <stdlib.h>
 #include <string.h>
 #include "../include/platform.h"
@@ -37,10 +38,10 @@ platform_type_t platform_detect(void) {
 
     /* Default to first available platform */
 #ifdef ENABLE_WAYLAND
-    fprintf(stderr, "Warning: Could not detect platform, defaulting to Wayland\n");
+    LOG_WARN("Could not detect platform, defaulting to Wayland");
     return PLATFORM_WAYLAND;
 #else
-    fprintf(stderr, "Error: No platform backends enabled at compile time\n");
+    LOG_ERROR("No platform backends enabled at compile time");
     return PLATFORM_AUTO; /* Will fail in platform_create */
 #endif
 }
@@ -71,7 +72,7 @@ int platform_create(platform_t **out_platform, platform_type_t type) {
 #endif
 
         default:
-            fprintf(stderr, "Error: Platform type %d not available in this build\n", type);
+            LOG_ERROR("Platform type %d not available in this build", type);
             free(platform);
             return HYPRLAX_ERROR_INVALID_ARGS;
     }

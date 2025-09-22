@@ -313,7 +313,7 @@ test: $(ALL_TEST_TARGETS)
 	for test in $(ALL_TEST_TARGETS); do \
 		if [ -x $$test ]; then \
 			echo "\n--- Running $$test ---"; \
-			if ! $$test; then \
+			if ! HYPRLAX_SOCKET_SUFFIX=tests $$test; then \
 				echo "✗ $$test FAILED"; \
 				failed=$$((failed + 1)); \
 			else \
@@ -344,7 +344,7 @@ memcheck: $(ALL_TEST_TARGETS)
 		if [ -x $$test ]; then \
 			total=$$((total + 1)); \
 			echo "\n--- Memory check: $$test ---"; \
-			if ! $(VALGRIND) $(VALGRIND_FLAGS) --log-file=$$test.valgrind.log $$test > /dev/null 2>&1; then \
+			if ! HYPRLAX_SOCKET_SUFFIX=tests $(VALGRIND) $(VALGRIND_FLAGS) --log-file=$$test.valgrind.log $$test > /dev/null 2>&1; then \
 				echo "✗ $$test MEMORY ISSUES DETECTED"; \
 				cat $$test.valgrind.log; \
 				failed=$$((failed + 1)); \

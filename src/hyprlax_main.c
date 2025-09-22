@@ -1294,6 +1294,16 @@ int hyprlax_add_layer(hyprlax_context_t *ctx, const char *image_path,
     }
     new_layer->blur_amount = blur;
 
+    /* Assign default z-index if not explicitly set elsewhere:
+     * - First layer gets z=0
+     * - Subsequent layers get max_z + 10
+     * IPC 'add' with explicit z will override this immediately after. */
+    int maxz = INT_MIN;
+    for (parallax_layer_t *it = ctx->layers; it; it = it->next) {
+        if (it->z_index > maxz) maxz = it->z_index;
+    }
+    if (maxz == INT_MIN) new_layer->z_index = 0; else new_layer->z_index = maxz + 10;
+
     ctx->layers = layer_list_add(ctx->layers, new_layer);
     ctx->layer_count = layer_list_count(ctx->layers);
 
@@ -1374,8 +1384,7 @@ void hyprlax_handle_monitor_workspace_change(hyprlax_context_t *ctx,
     monitor_handle_workspace_change(ctx, monitor, new_workspace);
 
     if (ctx->config.debug) {
-        fprintf(stderr, "[DEBUG] Monitor %s: workspace changed to %d\n",
-                monitor->name, new_workspace);
+        LOG_DEBUG("Monitor %s: workspace changed to %d", monitor->name, new_workspace);
     }
 }
 
@@ -1386,8 +1395,7 @@ void hyprlax_handle_workspace_change(hyprlax_context_t *ctx, int new_workspace) 
     int delta = new_workspace - ctx->current_workspace;
 
     if (ctx->config.debug) {
-        fprintf(stderr, "[DEBUG] Workspace change: %d -> %d (delta=%d)\n",
-                ctx->current_workspace, new_workspace, delta);
+        LOG_DEBUG("Workspace change: %d -> %d (delta=%d)", ctx->current_workspace, new_workspace, delta);
     }
 
     ctx->current_workspace = new_workspace;
@@ -1431,8 +1439,8 @@ void hyprlax_handle_workspace_change_2d(hyprlax_context_t *ctx,
     int delta_y = to_y - from_y;
 
     if (ctx->config.debug) {
-        fprintf(stderr, "[DEBUG] 2D Workspace change: (%d,%d) -> (%d,%d) (delta=%d,%d)\n",
-               from_x, from_y, to_x, to_y, delta_x, delta_y);
+        LOG_DEBUG("2D Workspace change: (%d,%d) -> (%d,%d) (delta=%d,%d)",
+                  from_x, from_y, to_x, to_y, delta_x, delta_y);
     }
 
     /* Calculate target offset for both axes */

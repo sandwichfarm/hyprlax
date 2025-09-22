@@ -6,6 +6,7 @@
  */
 
 #include <stdio.h>
+#include "../include/log.h"
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -373,11 +374,9 @@ static int wayfire_poll_events(compositor_event_t *event) {
             g_wayfire_data->current_x = new_x;
             g_wayfire_data->current_y = new_y;
 
-            if (getenv("HYPRLAX_DEBUG")) {
-                fprintf(stderr, "[DEBUG] Wayfire workspace change: (%d,%d) -> (%d,%d)\n",
-                        event->data.workspace.from_x, event->data.workspace.from_y,
-                        event->data.workspace.to_x, event->data.workspace.to_y);
-            }
+            LOG_DEBUG("Wayfire workspace change: (%d,%d) -> (%d,%d)",
+                      event->data.workspace.from_x, event->data.workspace.from_y,
+                      event->data.workspace.to_x, event->data.workspace.to_y);
 
             return HYPRLAX_SUCCESS;
         }

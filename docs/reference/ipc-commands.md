@@ -231,16 +231,51 @@ fi
 - Permissions: `0600` (user read/write only)
 - Protocol: Unix domain socket
 
-## Error Codes
+## IPC Error Codes (optional)
+
+- Enable structured codes with `HYPRLAX_IPC_ERROR_CODES=1`. When disabled (default), errors are plain strings starting with `Error:`.
+- Codes are stable within a major release and grouped by area.
 
 | Code | Meaning |
 |------|---------|
-| 0 | Success |
-| 1 | Command failed |
-| 2 | Invalid arguments |
-| 3 | Layer not found |
-| 4 | Property not found |
-| 5 | Connection error |
+| 1000 | No command specified |
+| 1002 | Unknown command |
+| 1003 | Token too long (e.g., property/value/filter) |
+| 1100 | Image path required (add) |
+| 1101 | Invalid or missing layer ID |
+| 1102 | Layer not found |
+| 1110 | Failed to add layer |
+| 1200 | modify usage: requires `<id> <property> <value>` |
+| 1201 | Invalid property (or layer not found/invalid property) |
+| 1202 | set usage: requires `<property> <value>` |
+| 1203 | get usage: requires `<property>` |
+| 1210 | Invalid fps |
+| 1211 | fps out of range (30..240) |
+| 1212 | Invalid shift |
+| 1213 | shift out of range (0..1000) |
+| 1214 | Invalid duration |
+| 1215 | duration out of range (0.1..10.0) |
+| 1216 | Unknown/invalid property (set) |
+| 1217 | Unknown property (get) |
+| 1250 | scale out of range (0.1..5.0) |
+| 1251 | opacity out of range (0.0..1.0) |
+| 1253 | content_scale must be > 0 |
+| 1254 | invalid fit value |
+| 1255 | invalid overflow value |
+| 1256 | margin.x must be >= 0 |
+| 1257 | margin.y must be >= 0 |
+| 1258 | blur must be >= 0 |
+| 1260 | invalid z |
+| 1261 | z out of range (0..31) |
+| 1300 | Runtime context/settings unavailable |
+| 1400 | No configuration path set |
+| 1401 | Failed to reload configuration |
+
+Example
+```bash
+HYPRLAX_IPC_ERROR_CODES=1 hyprlax ctl modify 1 opacity 2.0
+# Error(1251): opacity out of range (0.0..1.0)
+```
 
 ## Troubleshooting
 

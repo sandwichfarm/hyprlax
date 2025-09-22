@@ -16,6 +16,7 @@
 #include <poll.h>
 #include "../include/compositor.h"
 #include "../include/hyprlax_internal.h"
+#include "../include/log.h"
 
 /* Sway IPC message types (i3-compatible) */
 #define SWAY_IPC_COMMAND        0
@@ -567,11 +568,9 @@ static int sway_poll_events(compositor_event_t *event) {
                         event->data.workspace.to_y = 0;
                         g_sway_data->current_workspace = new_workspace;
 
-                        if (getenv("HYPRLAX_DEBUG")) {
-                            fprintf(stderr, "[DEBUG] Sway workspace change: %d -> %d\n",
-                                    event->data.workspace.from_workspace,
-                                    event->data.workspace.to_workspace);
-                        }
+                        LOG_DEBUG("Sway workspace change: %d -> %d",
+                                  event->data.workspace.from_workspace,
+                                  event->data.workspace.to_workspace);
 
                         free(payload);
                         return HYPRLAX_SUCCESS;

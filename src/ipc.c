@@ -21,6 +21,7 @@
 #include <pwd.h>
 #include <time.h>
 #include <limits.h>
+#include <stdarg.h>
 #include <math.h>
 
 /* Forward decls */
@@ -41,13 +42,37 @@ static void sanitize_line(char *s) {
     }
 }
 
+/* Optional error code formatting. Enable with HYPRLAX_IPC_ERROR_CODES=1 */
+static int ipc_error_codes_enabled(void) {
+    const char *v = getenv("HYPRLAX_IPC_ERROR_CODES");
+    if (!v || !*v) return 0;
+    if (!strcmp(v, "0") || !strcasecmp(v, "false")) return 0;
+    return 1;
+}
+
+static void ipc_errorf(char *out, size_t out_sz, int code, const char *fmt, ...) {
+    if (!out || out_sz == 0) return;
+    va_list ap;
+    va_start(ap, fmt);
+    if (ipc_error_codes_enabled()) {
+        int w = snprintf(out, out_sz, "Error(%d): ", code);
+        if (w < 0 || (size_t)w >= out_sz) { va_end(ap); return; }
+        vsnprintf(out + w, out_sz - (size_t)w, fmt, ap);
+    } else {
+        int w = snprintf(out, out_sz, "Error: ");
+        if (w < 0 || (size_t)w >= out_sz) { va_end(ap); return; }
+        vsnprintf(out + w, out_sz - (size_t)w, fmt, ap);
+    }
+    va_end(ap);
+}
+
 /* Validate token length; writes error to response on failure */
 static int token_check_len(const char *tok, size_t maxlen, const char *name,
                            char *response, size_t response_sz) {
     if (!tok) return 0;
     size_t n = strlen(tok);
     if (n > maxlen) {
-        snprintf(response, response_sz, "Error: %s too long (max %zu)\n", name, maxlen);
+        ipc_errorf(response, response_sz, 1003, "%s too long (max %zu)\n", name, maxlen);
         return 1;
     }
     return 0;
@@ -136,13 +161,28 @@ static void get_socket_path(char* buffer, size_t size) {
     }
     const char *sig = getenv("HYPRLAND_INSTANCE_SIGNATURE");
     const char *xdg = getenv("XDG_RUNTIME_DIR");
+    /* Optional socket suffix for isolation (prefer generic var, fallback to legacy test var) */
+    char suffix[64] = {0};
+    const char *ts = getenv("HYPRLAX_SOCKET_SUFFIX");
+    if (!ts || !*ts) ts = getenv("HYPRLAX_TEST_SUFFIX");
+    if (ts && *ts) {
+        size_t o = 0; suffix[o++] = '-';
+        for (size_t i = 0; ts[i] && o < sizeof(suffix) - 1; i++) {
+            unsigned char c = (unsigned char)ts[i];
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                (c >= '0' && c <= '9') || c == '-' || c == '_' ) {
+                suffix[o++] = (char)c;
+            }
+        }
+        suffix[o] = '\0';
+    }
     if (sig && *sig && xdg && *xdg) {
         /* Prefer runtime dir + signature to avoid session collisions */
-        snprintf(buffer, size, "%s/hyprlax-%s-%s.sock", xdg, user, sig);
+        snprintf(buffer, size, "%s/hyprlax-%s-%s%s.sock", xdg, user, sig, suffix);
         return;
     }
     /* Fallback to /tmp for compatibility */
-    snprintf(buffer, size, "%s%s.sock", IPC_SOCKET_PATH_PREFIX, user);
+    snprintf(buffer, size, "%s%s%s.sock", IPC_SOCKET_PATH_PREFIX, user, suffix);
 }
 
 static ipc_command_t parse_command(const char* cmd) {
@@ -286,7 +326,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
     // Parse and execute command
     char* cmd = strtok(buffer, " \n");
     if (!cmd) {
-        const char* error = "Error: No command specified\n";
+        const char* error = ipc_error_codes_enabled()?"Error(1000): No command specified\n":"Error: No command specified\n";
         send(client_fd, error, strlen(error), 0);
         close(client_fd);
         return false;
@@ -307,13 +347,13 @@ bool ipc_process_commands(ipc_context_t* ctx) {
         case IPC_CMD_ADD_LAYER: {
             char* path = strtok(NULL, " \n");
             if (!path) {
-                snprintf(response, sizeof(response), "Error: Image path required\n");
+                ipc_errorf(response, sizeof(response), 1100, "Image path required\n");
                 break;
             }
 
             // Parse optional parameters with validation
             float scale = 1.0f, opacity = 1.0f, x_offset = 0.0f, y_offset = 0.0f;
-            int z_index = 0; int parse_err = 0;
+            int z_index = INT_MIN; int parse_err = 0;
 
             char* param;
             while ((param = strtok(NULL, " \n"))) {
@@ -340,7 +380,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
             /* Bridge to application context */
             hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
             if (!app) {
-                snprintf(response, sizeof(response), "Error: Runtime context unavailable\n");
+                ipc_errorf(response, sizeof(response), 1300, "Runtime context unavailable\n");
                 break;
             }
             /* Capture previous max id */
@@ -362,14 +402,14 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                     new_layer->opacity = opacity;
                     new_layer->base_uv_x = x_offset;
                     new_layer->base_uv_y = y_offset;
-                    new_layer->z_index = z_index;
+                    if (z_index != INT_MIN) new_layer->z_index = z_index;
                 }
                 /* Maintain draw order by z */
                 app->layers = layer_list_sort_by_z(app->layers);
                 snprintf(response, sizeof(response), new_layer ? "Layer added with ID: %u\n" : "Layer added\n", new_id);
                 success = true;
             } else {
-                snprintf(response, sizeof(response), "Error: Failed to add layer\n");
+                ipc_errorf(response, sizeof(response), 1110, "Failed to add layer\n");
             }
             break;
         }
@@ -377,13 +417,13 @@ bool ipc_process_commands(ipc_context_t* ctx) {
         case IPC_CMD_REMOVE_LAYER: {
             char* id_str = strtok(NULL, " \n");
             if (!id_str) {
-                snprintf(response, sizeof(response), "Error: Layer ID required\n");
+                ipc_errorf(response, sizeof(response), 1101, "Layer ID required\n");
                 break;
             }
 
             uint32_t id = 0;
             if (!parse_u32(id_str, &id)) {
-                snprintf(response, sizeof(response), "Error: Invalid layer ID\n");
+                ipc_errorf(response, sizeof(response), 1101, "Invalid layer ID\n");
                 break;
             }
             hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
@@ -392,7 +432,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 snprintf(response, sizeof(response), "Layer %u removed\n", id);
                 success = true;
             } else {
-                snprintf(response, sizeof(response), "Error: Layer %u not found\n", id);
+                ipc_errorf(response, sizeof(response), 1102, "Layer %u not found\n", id);
             }
             break;
         }
@@ -403,7 +443,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
             char* value = strtok(NULL, " \n");
 
             if (!id_str || !property || !value) {
-                snprintf(response, sizeof(response), "Error: Usage: modify <id> <property> <value>\n");
+                ipc_errorf(response, sizeof(response), 1200, "Usage: modify <id> <property> <value>\n");
                 break;
             }
 
@@ -412,13 +452,13 @@ bool ipc_process_commands(ipc_context_t* ctx) {
 
             uint32_t id = 0;
             if (!parse_u32(id_str, &id)) {
-                snprintf(response, sizeof(response), "Error: Invalid layer ID\n");
+                ipc_errorf(response, sizeof(response), 1101, "Invalid layer ID\n");
                 break;
             }
             hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
             parallax_layer_t *layer = app ? layer_list_find(app->layers, id) : NULL;
             if (!layer) {
-                snprintf(response, sizeof(response), "Error: Failed to modify layer %u\n", id);
+                ipc_errorf(response, sizeof(response), 1102, "Failed to modify layer %u\n", id);
                 break;
             }
             bool ok = false;
@@ -437,10 +477,10 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 return -2;
             }
             if (strcmp(property, "scale") == 0) {
-                float v = atof(value); if (v < 0.1f || v > 5.0f) { snprintf(response, sizeof(response), "Error: scale out of range (0.1..5.0)\n"); break; }
+                float v = atof(value); if (v < 0.1f || v > 5.0f) { ipc_errorf(response, sizeof(response), 1250, "scale out of range (0.1..5.0)\n"); break; }
                 layer->shift_multiplier = v; layer->shift_multiplier_x = v; layer->shift_multiplier_y = v; ok = true;
             } else if (strcmp(property, "opacity") == 0) {
-                float v = atof(value); if (v < 0.0f || v > 1.0f) { snprintf(response, sizeof(response), "Error: opacity out of range (0.0..1.0)\n"); break; }
+                float v = atof(value); if (v < 0.0f || v > 1.0f) { ipc_errorf(response, sizeof(response), 1251, "opacity out of range (0.0..1.0)\n"); break; }
                 layer->opacity = v; ok = true;
             } else if (strcmp(property, "x") == 0) {
                 layer->base_uv_x = atof(value); ok = true;
@@ -448,34 +488,34 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 layer->base_uv_y = atof(value); ok = true;
             } else if (strcmp(property, "overflow") == 0) {
                 int m = overflow_from_string(value);
-                if (m == -2) { snprintf(response, sizeof(response), "Error: invalid overflow value\n"); break; }
+                if (m == -2) { ipc_errorf(response, sizeof(response), 1255, "invalid overflow value\n"); break; }
                 layer->overflow_mode = m; ok = true;
             } else if (strcmp(property, "tile.x") == 0) {
                 layer->tile_x = parse_bool_str(value) ? 1 : 0; ok = true;
             } else if (strcmp(property, "tile.y") == 0) {
                 layer->tile_y = parse_bool_str(value) ? 1 : 0; ok = true;
             } else if (strcmp(property, "margin.x") == 0 || strcmp(property, "margin_px.x") == 0) {
-                float v = atof(value); if (v < 0.0f) { snprintf(response, sizeof(response), "Error: margin.x must be >= 0\n"); break; } layer->margin_px_x = v; ok = true;
+                float v = atof(value); if (v < 0.0f) { ipc_errorf(response, sizeof(response), 1256, "margin.x must be >= 0\n"); break; } layer->margin_px_x = v; ok = true;
             } else if (strcmp(property, "margin.y") == 0 || strcmp(property, "margin_px.y") == 0) {
-                float v = atof(value); if (v < 0.0f) { snprintf(response, sizeof(response), "Error: margin.y must be >= 0\n"); break; } layer->margin_px_y = v; ok = true;
+                float v = atof(value); if (v < 0.0f) { ipc_errorf(response, sizeof(response), 1257, "margin.y must be >= 0\n"); break; } layer->margin_px_y = v; ok = true;
             } else if (strcmp(property, "blur") == 0) {
-                float v = atof(value); if (v < 0.0f) { snprintf(response, sizeof(response), "Error: blur must be >= 0\n"); break; } layer->blur_amount = v; ok = true;
+                float v = atof(value); if (v < 0.0f) { ipc_errorf(response, sizeof(response), 1258, "blur must be >= 0\n"); break; } layer->blur_amount = v; ok = true;
             } else if (strcmp(property, "fit") == 0) {
                 if (!strcmp(value, "stretch")) layer->fit_mode = LAYER_FIT_STRETCH, ok = true;
                 else if (!strcmp(value, "cover")) layer->fit_mode = LAYER_FIT_COVER, ok = true;
                 else if (!strcmp(value, "contain")) layer->fit_mode = LAYER_FIT_CONTAIN, ok = true;
                 else if (!strcmp(value, "fit_width")) layer->fit_mode = LAYER_FIT_WIDTH, ok = true;
                 else if (!strcmp(value, "fit_height")) layer->fit_mode = LAYER_FIT_HEIGHT, ok = true;
-                else { snprintf(response, sizeof(response), "Error: invalid fit value\n"); break; }
+                else { ipc_errorf(response, sizeof(response), 1254, "invalid fit value\n"); break; }
             } else if (strcmp(property, "content_scale") == 0) {
-                float v = atof(value); if (v <= 0.0f) { snprintf(response, sizeof(response), "Error: content_scale must be > 0\n"); break; } layer->content_scale = v; ok = true;
+                float v = atof(value); if (v <= 0.0f) { ipc_errorf(response, sizeof(response), 1253, "content_scale must be > 0\n"); break; } layer->content_scale = v; ok = true;
             } else if (strcmp(property, "align_x") == 0) {
                 layer->align_x = atof(value); if (layer->align_x < 0.0f) layer->align_x = 0.0f; if (layer->align_x > 1.0f) layer->align_x = 1.0f; ok = true;
             } else if (strcmp(property, "align_y") == 0) {
                 layer->align_y = atof(value); if (layer->align_y < 0.0f) layer->align_y = 0.0f; if (layer->align_y > 1.0f) layer->align_y = 1.0f; ok = true;
             } else if (strcmp(property, "z") == 0) {
                 int zv = 0; int rc = parse_int_range(value, 0, 31, &zv);
-                if (rc <= 0) { snprintf(response, sizeof(response), rc==0?"Error: invalid z\n":"Error: z out of range (0..31)\n"); break; }
+                if (rc <= 0) { ipc_errorf(response, sizeof(response), rc==0?1260:1261, rc==0?"invalid z\n":"z out of range (0..31)\n"); break; }
                 layer->z_index = zv; ok = true;
                 /* Re-sort list by z */
                 app->layers = layer_list_sort_by_z(app->layers);
@@ -487,7 +527,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 layer->hidden = !vis; ok = true;
             }
             if (ok) { snprintf(response, sizeof(response), "Layer %u modified\n", id); success = true; }
-            else { snprintf(response, sizeof(response), "Error: Invalid property '%s'\n", property); }
+            else { ipc_errorf(response, sizeof(response), 1201, "Invalid property '%s'\n", property); }
             break;
         }
 
@@ -741,10 +781,10 @@ bool ipc_process_commands(ipc_context_t* ctx) {
 
         case IPC_CMD_RELOAD_CONFIG: {
             hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
-            if (!app) { snprintf(response, sizeof(response), "Error: No configuration path set\n"); success=false; break; }
+            if (!app) { ipc_errorf(response, sizeof(response), 1400, "No configuration path set\n"); success=false; break; }
             int rc = hyprlax_reload_config(app);
             if (rc == 0) { snprintf(response, sizeof(response), "Configuration reloaded\n"); success = true; }
-            else { snprintf(response, sizeof(response), "Error: Failed to reload configuration\n"); success=false; }
+            else { ipc_errorf(response, sizeof(response), 1401, "Failed to reload configuration\n"); success=false; }
             break;
         }
 
@@ -753,7 +793,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
             char* value = strtok(NULL, " \n");
 
             if (!property || !value) {
-                snprintf(response, sizeof(response), "Error: Usage: set <property> <value>\n");
+                ipc_errorf(response, sizeof(response), 1202, "Usage: set <property> <value>\n");
                 break;
             }
 
@@ -761,28 +801,28 @@ bool ipc_process_commands(ipc_context_t* ctx) {
             if (token_check_len(value, IPC_MAX_VALUE_LEN, "value", response, sizeof(response))) break;
 
             hyprlax_context_t *app_set = (hyprlax_context_t*)ctx->app_context;
-            if (!app_set) { snprintf(response, sizeof(response), "Error: Runtime settings not available\n"); break; }
+            if (!app_set) { ipc_errorf(response, sizeof(response), 1300, "Runtime settings not available\n"); break; }
             bool handled = false;
             if (strcmp(property, "fps") == 0) {
                 int iv = 0; int rc = parse_int_range(value, 30, 240, &iv);
-                if (rc <= 0) { snprintf(response, sizeof(response), rc==0?"Error: invalid fps\n":"Error: fps out of range (30..240)\n"); break; }
+                if (rc <= 0) { ipc_errorf(response, sizeof(response), rc==0?1210:1211, rc==0?"invalid fps\n":"fps out of range (30..240)\n"); break; }
                 app_set->config.target_fps = iv; handled = true;
             }
             else if (strcmp(property, "shift") == 0) {
                 double dv = 0.0; int rc = parse_double_range(value, 0.0, 1000.0, &dv);
-                if (rc <= 0) { snprintf(response, sizeof(response), rc==0?"Error: invalid shift\n":"Error: shift out of range (0..1000)\n"); break; }
+                if (rc <= 0) { ipc_errorf(response, sizeof(response), rc==0?1212:1213, rc==0?"invalid shift\n":"shift out of range (0..1000)\n"); break; }
                 app_set->config.shift_pixels = (float)dv; handled = true;
             }
             else if (strcmp(property, "duration") == 0) {
                 double dv = 0.0; int rc = parse_double_range(value, 0.1, 10.0, &dv);
-                if (rc <= 0) { snprintf(response, sizeof(response), rc==0?"Error: invalid duration\n":"Error: duration out of range (0.1..10.0)\n"); break; }
+                if (rc <= 0) { ipc_errorf(response, sizeof(response), rc==0?1214:1215, rc==0?"invalid duration\n":"duration out of range (0.1..10.0)\n"); break; }
                 app_set->config.animation_duration = (float)dv; handled = true;
             }
             else if (strcmp(property, "easing") == 0) { app_set->config.default_easing = easing_from_string(value); handled = true; }
             if (!handled) {
                 int rc = hyprlax_runtime_set_property(app_set, property, value);
                 if (rc == 0) { snprintf(response, sizeof(response), "OK\n"); success = true; break; }
-                snprintf(response, sizeof(response), "Error: Unknown/invalid property '%s'\n", property);
+                ipc_errorf(response, sizeof(response), 1216, "Unknown/invalid property '%s'\n", property);
                 break;
             }
             snprintf(response, sizeof(response), "OK\n");
@@ -794,14 +834,14 @@ bool ipc_process_commands(ipc_context_t* ctx) {
             char* property = strtok(NULL, " \n");
 
             if (!property) {
-                snprintf(response, sizeof(response), "Error: Usage: get <property>\n");
+                ipc_errorf(response, sizeof(response), 1203, "Usage: get <property>\n");
                 break;
             }
 
             if (token_check_len(property, IPC_MAX_PROP_LEN, "property", response, sizeof(response))) break;
 
             hyprlax_context_t *app_get = (hyprlax_context_t*)ctx->app_context;
-            if (!app_get) { snprintf(response, sizeof(response), "Error: Runtime settings not available\n"); break; }
+            if (!app_get) { ipc_errorf(response, sizeof(response), 1300, "Runtime settings not available\n"); break; }
             if (strcmp(property, "fps") == 0) { snprintf(response, sizeof(response), "%d\n", app_get->config.target_fps); success = true; break; }
             if (strcmp(property, "shift") == 0) { snprintf(response, sizeof(response), "%.1f\n", app_get->config.shift_pixels); success = true; break; }
             if (strcmp(property, "duration") == 0) { snprintf(response, sizeof(response), "%.3f\n", app_get->config.animation_duration); success = true; break; }
@@ -810,13 +850,13 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 size_t len = strlen(response); if (len < sizeof(response) - 1) response[len++] = '\n', response[len] = '\0';
                 success = true;
             } else {
-                snprintf(response, sizeof(response), "Error: Unknown property '%s'\n", property);
+                ipc_errorf(response, sizeof(response), 1217, "Unknown property '%s'\n", property);
             }
             break;
         }
 
         default:
-            snprintf(response, sizeof(response), "Error: Unknown command '%s'\n", cmd);
+            ipc_errorf(response, sizeof(response), 1002, "Unknown command '%s'\n", cmd);
             break;
     }
 
@@ -1000,7 +1040,8 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
         float scale = 1.0f, opacity = 1.0f, blur = 0.0f;
         int count = sscanf(args, "%255s %f %f %f", path, &scale, &opacity, &blur);
         if (count < 1) {
-            snprintf(response, response_size, "Error: ADD requires at least an image path");
+            if (ipc_error_codes_enabled()) snprintf(response, response_size, "Error(1100): ADD requires at least an image path");
+            else snprintf(response, response_size, "Error: ADD requires at least an image path");
             return -1;
         }
 
@@ -1009,7 +1050,8 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
             snprintf(response, response_size, "Layer added with ID: %u", id);
             return 0;
         } else {
-            snprintf(response, response_size, "Error: Failed to add layer");
+            if (ipc_error_codes_enabled()) snprintf(response, response_size, "Error(1110): Failed to add layer");
+            else snprintf(response, response_size, "Error: Failed to add layer");
             return -1;
         }
     }
@@ -1018,7 +1060,8 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
     else if (strcmp(cmd, "REMOVE") == 0) {
         uint32_t id = 0;
         if (sscanf(args, "%u", &id) != 1) {
-            snprintf(response, response_size, "Error: REMOVE requires a layer ID");
+            if (ipc_error_codes_enabled()) snprintf(response, response_size, "Error(1101): REMOVE requires a layer ID");
+            else snprintf(response, response_size, "Error: REMOVE requires a layer ID");
             return -1;
         }
 
@@ -1026,7 +1069,8 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
             snprintf(response, response_size, "Layer %u removed", id);
             return 0;
         } else {
-            snprintf(response, response_size, "Error: Layer %u not found", id);
+            if (ipc_error_codes_enabled()) snprintf(response, response_size, "Error(1102): Layer %u not found", id);
+            else snprintf(response, response_size, "Error: Layer %u not found", id);
             return -1;
         }
     }
@@ -1036,7 +1080,8 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
         uint32_t id = 0;
         char property[64], value[64];
         if (sscanf(args, "%u %63s %63s", &id, property, value) != 3) {
-            snprintf(response, response_size, "Error: MODIFY requires ID, property, and value");
+            if (ipc_error_codes_enabled()) snprintf(response, response_size, "Error(1200): MODIFY requires ID, property, and value");
+            else snprintf(response, response_size, "Error: MODIFY requires ID, property, and value");
             return -1;
         }
 
@@ -1044,7 +1089,8 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
             snprintf(response, response_size, "Layer %u modified", id);
             return 0;
         } else {
-            snprintf(response, response_size, "Error: Layer %u not found or invalid property", id);
+            if (ipc_error_codes_enabled()) snprintf(response, response_size, "Error(1201): Layer %u not found or invalid property", id);
+            else snprintf(response, response_size, "Error: Layer %u not found or invalid property", id);
             return -1;
         }
     }
@@ -1089,9 +1135,9 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
         if (app && app->config.config_path) {
             int rc = config_apply_toml_to_context(app, app->config.config_path);
             if (rc == 0) { snprintf(response, response_size, "Configuration reloaded"); return 0; }
-            snprintf(response, response_size, "Error: Failed to reload configuration"); return -1;
+            if (ipc_error_codes_enabled()) snprintf(response, response_size, "Error(1401): Failed to reload configuration"); else snprintf(response, response_size, "Error: Failed to reload configuration"); return -1;
         } else {
-            snprintf(response, response_size, "Error: No configuration path set");
+            if (ipc_error_codes_enabled()) snprintf(response, response_size, "Error(1400): No configuration path set"); else snprintf(response, response_size, "Error: No configuration path set");
             return -1;
         }
     }
@@ -1100,7 +1146,8 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
     else if (strcmp(cmd, "SET_PROPERTY") == 0) {
         char property[64], value[64];
         if (sscanf(args, "%63s %63s", property, value) != 2) {
-            snprintf(response, response_size, "Error: SET_PROPERTY requires property and value");
+            if (ipc_error_codes_enabled()) snprintf(response, response_size, "Error(1202): SET_PROPERTY requires property and value");
+            else snprintf(response, response_size, "Error: SET_PROPERTY requires property and value");
             return -1;
         }
         hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
@@ -1109,7 +1156,7 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
                 strcmp(property, "duration") == 0 || strcmp(property, "easing") == 0) {
                 snprintf(response, response_size, "OK"); return 0; /* accept in fallback */
             }
-            snprintf(response, response_size, "Error: Unknown/invalid property '%s'", property); return -1;
+            if (ipc_error_codes_enabled()) snprintf(response, response_size, "Error(1216): Unknown/invalid property '%s'", property); else snprintf(response, response_size, "Error: Unknown/invalid property '%s'", property); return -1;
         }
         if (strcmp(property, "fps") == 0) { app->config.target_fps = atoi(value); snprintf(response, response_size, "OK"); return 0; }
         if (strcmp(property, "shift") == 0) { app->config.shift_pixels = atof(value); snprintf(response, response_size, "OK"); return 0; }
@@ -1126,7 +1173,8 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
     else if (strcmp(cmd, "GET_PROPERTY") == 0) {
         char property[64];
         if (sscanf(args, "%63s", property) != 1) {
-            snprintf(response, response_size, "Error: GET_PROPERTY requires property name");
+            if (ipc_error_codes_enabled()) snprintf(response, response_size, "Error(1203): GET_PROPERTY requires property name");
+            else snprintf(response, response_size, "Error: GET_PROPERTY requires property name");
             return -1;
         }
         hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
@@ -1135,7 +1183,7 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
             if (strcmp(property, "shift") == 0) { snprintf(response, response_size, "200"); return 0; }
             if (strcmp(property, "duration") == 0) { snprintf(response, response_size, "1.000"); return 0; }
             if (strcmp(property, "easing") == 0) { snprintf(response, response_size, "cubic"); return 0; }
-            snprintf(response, response_size, "Error: Unknown property '%s'", property); return -1;
+            if (ipc_error_codes_enabled()) snprintf(response, response_size, "Error(1217): Unknown property '%s'", property); else snprintf(response, response_size, "Error: Unknown property '%s'", property); return -1;
         }
         if (strcmp(property, "fps") == 0) { snprintf(response, response_size, "%d", app->config.target_fps); return 0; }
         if (strcmp(property, "shift") == 0) { snprintf(response, response_size, "%.1f", app->config.shift_pixels); return 0; }
@@ -1150,7 +1198,7 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
 
     // Unknown command
     else {
-        snprintf(response, response_size, "Error: Unknown command '%s'", cmd);
+        if (ipc_error_codes_enabled()) snprintf(response, response_size, "Error(1002): Unknown command '%s'", cmd); else snprintf(response, response_size, "Error: Unknown command '%s'", cmd);
         return -1;
     }
 }
