@@ -157,7 +157,11 @@ Control layers and settings at runtime using the integrated `ctl` subcommand:
 hyprlax ctl add /path/to/image.png 1.5 0.8 10
 
 # Modify layer properties
+# Note: x and y are UV pan offsets (normalized texture coordinates)
+# Typical range is -0.10 .. 0.10 (1.00 = full texture width/height)
 hyprlax ctl modify 1 opacity 0.5
+hyprlax ctl modify 1 x 0.05
+hyprlax ctl modify 1 y -0.02
 
 # Remove a layer
 hyprlax ctl remove 1

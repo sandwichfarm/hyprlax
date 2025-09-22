@@ -92,10 +92,26 @@ static void print_ctl_help(const char *prog) {
 
     printf("  modify <id> <property> <value>\n");
     printf("      Modify a layer property\n");
-    printf("      Properties: scale, opacity, x, y, z, visible\n\n");
+    printf("      Properties: scale, opacity, x, y, z, visible, hidden, blur,\n");
+    printf("                  fit, content_scale, align_x, align_y, overflow, tile.x, tile.y, margin.x, margin.y\n");
+    printf("        - x, y are UV pan offsets (normalized),\n");
+    printf("          typical range: -0.10 .. 0.10 (1.00 = full texture width/height)\n\n");
 
-    printf("  list\n");
-    printf("      List all layers and their properties\n\n");
+    printf("  list [--long|-l] [--json|-j] [--filter <expr>]\n");
+    printf("      List all layers. Default compact; --long for details; --json for scripting\n");
+    printf("      Filters: id=<id> | hidden=true|false\n\n");
+
+    printf("  front <id>\n");
+    printf("      Bring the layer to the front (highest z)\n\n");
+
+    printf("  back <id>\n");
+    printf("      Send the layer to the back (lowest z)\n\n");
+
+    printf("  up <id>\n");
+    printf("      Move the layer up by one step in z-order\n\n");
+
+    printf("  down <id>\n");
+    printf("      Move the layer down by one step in z-order\n\n");
 
     printf("  clear\n");
     printf("      Remove all layers\n\n");
@@ -118,6 +134,10 @@ static void print_ctl_help(const char *prog) {
 
     printf("Examples:\n");
     printf("  %s ctl add /path/to/wallpaper.jpg 1.5 0.9 10\n", prog);
+    printf("  %s ctl modify 1 x 0.05\n", prog);
+    printf("  %s ctl modify 1 y -0.02\n", prog);
+    printf("  %s ctl front 1\n", prog);
+    printf("  %s ctl back 2\n", prog);
     printf("  %s ctl remove 2\n", prog);
     printf("  %s ctl modify 1 opacity 0.5\n", prog);
     printf("  %s ctl set fps 120\n", prog);

@@ -4,6 +4,9 @@
  */
 
 #include "ipc.h"
+#include "include/hyprlax.h"
+#include "include/core.h"
+#include "include/config_toml.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,14 +18,18 @@
 #include <errno.h>
 #include <pwd.h>
 #include <time.h>
+#include <limits.h>
+
+/* Forward decl for JSON escaping used in list output */
+static void json_escape(const char *in, char *out, size_t out_sz);
 
 /* Weak runtime bridge stubs. If the application provides real implementations,
- * the linker will bind to those instead. */
-__attribute__((weak)) int hyprlax_runtime_set_property(void *app_ctx, const char *property, const char *value) {
-    (void)app_ctx; (void)property; (void)value; return -1;
+ * the linker will bind to those instead. Signatures match hyprlax.h. */
+__attribute__((weak)) int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, const char *value) {
+    (void)ctx; (void)property; (void)value; return -1;
 }
-__attribute__((weak)) int hyprlax_runtime_get_property(void *app_ctx, const char *property, char *out, size_t out_size) {
-    (void)app_ctx; (void)property; (void)out; (void)out_size; return -1;
+__attribute__((weak)) int hyprlax_runtime_get_property(hyprlax_context_t *ctx, const char *property, char *out, size_t out_size) {
+    (void)ctx; (void)property; (void)out; (void)out_size; return -1;
 }
 
 static void get_socket_path(char* buffer, size_t size) {
@@ -38,6 +45,10 @@ static ipc_command_t parse_command(const char* cmd) {
     if (strcmp(cmd, "add") == 0) return IPC_CMD_ADD_LAYER;
     if (strcmp(cmd, "remove") == 0 || strcmp(cmd, "rm") == 0) return IPC_CMD_REMOVE_LAYER;
     if (strcmp(cmd, "modify") == 0 || strcmp(cmd, "mod") == 0) return IPC_CMD_MODIFY_LAYER;
+    if (strcmp(cmd, "front") == 0 || strcmp(cmd, "raise") == 0) return IPC_CMD_LAYER_FRONT;
+    if (strcmp(cmd, "back") == 0 || strcmp(cmd, "lower") == 0) return IPC_CMD_LAYER_BACK;
+    if (strcmp(cmd, "up") == 0 || strcmp(cmd, "forward") == 0) return IPC_CMD_LAYER_UP;
+    if (strcmp(cmd, "down") == 0 || strcmp(cmd, "backward") == 0) return IPC_CMD_LAYER_DOWN;
     if (strcmp(cmd, "list") == 0 || strcmp(cmd, "ls") == 0) return IPC_CMD_LIST_LAYERS;
     if (strcmp(cmd, "clear") == 0) return IPC_CMD_CLEAR_LAYERS;
     if (strcmp(cmd, "reload") == 0) return IPC_CMD_RELOAD_CONFIG;
@@ -195,6 +206,13 @@ bool ipc_process_commands(ipc_context_t* ctx) {
     char response[IPC_MAX_MESSAGE_SIZE];
     bool success = false;
 
+    /* Helper to renormalize z_index after reordering */
+    auto void renorm_z(hyprlax_context_t *app) {
+        if (!app) return;
+        app->layers = layer_list_sort_by_z(app->layers);
+        int zi = 0; for (parallax_layer_t *it = app->layers; it; it = it->next) it->z_index = zi++;
+    }
+
     switch (command) {
         case IPC_CMD_ADD_LAYER: {
             char* path = strtok(NULL, " \n");
@@ -205,7 +223,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
 
             // Parse optional parameters
             float scale = 1.0f, opacity = 1.0f, x_offset = 0.0f, y_offset = 0.0f;
-            int z_index = ctx->layer_count;
+            int z_index = 0;
 
             char* param;
             while ((param = strtok(NULL, " \n"))) {
@@ -222,9 +240,36 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 }
             }
 
-            uint32_t id = ipc_add_layer(ctx, path, scale, opacity, x_offset, y_offset, z_index);
-            if (id > 0) {
-                snprintf(response, sizeof(response), "Layer added with ID: %u\n", id);
+            /* Bridge to application context */
+            hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+            if (!app) {
+                snprintf(response, sizeof(response), "Error: Runtime context unavailable\n");
+                break;
+            }
+            /* Capture previous max id */
+            uint32_t prev_max_id = 0;
+            for (parallax_layer_t *it = app->layers; it; it = it->next) {
+                if (it->id > prev_max_id) prev_max_id = it->id;
+            }
+            int rc_add = hyprlax_add_layer(app, path, scale, opacity, 0.0f);
+            if (rc_add == 0) {
+                /* Find the new layer and apply initial params */
+                uint32_t new_id = 0; parallax_layer_t *new_layer = NULL;
+                for (parallax_layer_t *it = app->layers; it; it = it->next) {
+                    if (it->id > prev_max_id) { new_id = it->id; new_layer = it; }
+                }
+                if (new_layer) {
+                    new_layer->shift_multiplier = scale;
+                    new_layer->shift_multiplier_x = scale;
+                    new_layer->shift_multiplier_y = scale;
+                    new_layer->opacity = opacity;
+                    new_layer->base_uv_x = x_offset;
+                    new_layer->base_uv_y = y_offset;
+                    new_layer->z_index = z_index;
+                }
+                /* Maintain draw order by z */
+                app->layers = layer_list_sort_by_z(app->layers);
+                snprintf(response, sizeof(response), new_layer ? "Layer added with ID: %u\n" : "Layer added\n", new_id);
                 success = true;
             } else {
                 snprintf(response, sizeof(response), "Error: Failed to add layer\n");
@@ -239,8 +284,10 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 break;
             }
 
-            uint32_t id = atoi(id_str);
-            if (ipc_remove_layer(ctx, id)) {
+            uint32_t id = (uint32_t)atoi(id_str);
+            hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+            if (app && layer_list_find(app->layers, id)) {
+                hyprlax_remove_layer(app, id);
                 snprintf(response, sizeof(response), "Layer %u removed\n", id);
                 success = true;
             } else {
@@ -259,42 +306,287 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 break;
             }
 
-            uint32_t id = atoi(id_str);
-            if (ipc_modify_layer(ctx, id, property, value)) {
-                snprintf(response, sizeof(response), "Layer %u modified\n", id);
-                success = true;
-            } else {
+            uint32_t id = (uint32_t)atoi(id_str);
+            hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+            parallax_layer_t *layer = app ? layer_list_find(app->layers, id) : NULL;
+            if (!layer) {
                 snprintf(response, sizeof(response), "Error: Failed to modify layer %u\n", id);
+                break;
             }
+            bool ok = false;
+            auto int parse_bool_str(const char *v) {
+                if (!v) return 0;
+                return (!strcmp(v, "1") || !strcasecmp(v, "true") || !strcasecmp(v, "on") || !strcasecmp(v, "yes")) ? 1 : 0;
+            }
+            auto int overflow_from_string(const char *s) {
+                if (!s) return -2;
+                if (!strcmp(s, "inherit")) return -1;
+                if (!strcmp(s, "repeat_edge") || !strcmp(s, "clamp")) return 0;
+                if (!strcmp(s, "repeat") || !strcmp(s, "tile")) return 1;
+                if (!strcmp(s, "repeat_x") || !strcmp(s, "tilex")) return 2;
+                if (!strcmp(s, "repeat_y") || !strcmp(s, "tiley")) return 3;
+                if (!strcmp(s, "none") || !strcmp(s, "off")) return 4;
+                return -2;
+            }
+            if (strcmp(property, "scale") == 0) {
+                float v = atof(value); layer->shift_multiplier = v; layer->shift_multiplier_x = v; layer->shift_multiplier_y = v; ok = true;
+            } else if (strcmp(property, "opacity") == 0) {
+                layer->opacity = atof(value); ok = true;
+            } else if (strcmp(property, "x") == 0) {
+                layer->base_uv_x = atof(value); ok = true;
+            } else if (strcmp(property, "y") == 0) {
+                layer->base_uv_y = atof(value); ok = true;
+            } else if (strcmp(property, "overflow") == 0) {
+                int m = overflow_from_string(value); if (m == -2) { ok = false; } else { layer->overflow_mode = m; ok = true; }
+            } else if (strcmp(property, "tile.x") == 0) {
+                layer->tile_x = parse_bool_str(value) ? 1 : 0; ok = true;
+            } else if (strcmp(property, "tile.y") == 0) {
+                layer->tile_y = parse_bool_str(value) ? 1 : 0; ok = true;
+            } else if (strcmp(property, "margin.x") == 0 || strcmp(property, "margin_px.x") == 0) {
+                layer->margin_px_x = atof(value); ok = true;
+            } else if (strcmp(property, "margin.y") == 0 || strcmp(property, "margin_px.y") == 0) {
+                layer->margin_px_y = atof(value); ok = true;
+            } else if (strcmp(property, "blur") == 0) {
+                layer->blur_amount = atof(value); ok = true;
+            } else if (strcmp(property, "fit") == 0) {
+                if (!strcmp(value, "stretch")) layer->fit_mode = LAYER_FIT_STRETCH, ok = true;
+                else if (!strcmp(value, "cover")) layer->fit_mode = LAYER_FIT_COVER, ok = true;
+                else if (!strcmp(value, "contain")) layer->fit_mode = LAYER_FIT_CONTAIN, ok = true;
+                else if (!strcmp(value, "fit_width")) layer->fit_mode = LAYER_FIT_WIDTH, ok = true;
+                else if (!strcmp(value, "fit_height")) layer->fit_mode = LAYER_FIT_HEIGHT, ok = true;
+            } else if (strcmp(property, "content_scale") == 0) {
+                layer->content_scale = atof(value); ok = true;
+            } else if (strcmp(property, "align_x") == 0) {
+                layer->align_x = atof(value); if (layer->align_x < 0.0f) layer->align_x = 0.0f; if (layer->align_x > 1.0f) layer->align_x = 1.0f; ok = true;
+            } else if (strcmp(property, "align_y") == 0) {
+                layer->align_y = atof(value); if (layer->align_y < 0.0f) layer->align_y = 0.0f; if (layer->align_y > 1.0f) layer->align_y = 1.0f; ok = true;
+            } else if (strcmp(property, "z") == 0) {
+                layer->z_index = atoi(value); ok = true;
+                /* Re-sort list by z */
+                app->layers = layer_list_sort_by_z(app->layers);
+            } else if (strcmp(property, "visible") == 0) {
+                bool vis = (strcmp(value, "true") == 0 || strcmp(value, "1") == 0); if (!vis) layer->opacity = 0.0f; ok = true;
+            }
+            else if (strcmp(property, "hidden") == 0) {
+                bool hide = (strcmp(value, "true") == 0 || strcmp(value, "1") == 0);
+                layer->hidden = hide; ok = true;
+            } else if (strcmp(property, "visible") == 0) {
+                bool vis = (strcmp(value, "true") == 0 || strcmp(value, "1") == 0);
+                layer->hidden = !vis; ok = true;
+            }
+            if (ok) { snprintf(response, sizeof(response), "Layer %u modified\n", id); success = true; }
+            else { snprintf(response, sizeof(response), "Error: Invalid property '%s'\n", property); }
             break;
         }
 
         case IPC_CMD_LIST_LAYERS: {
-            char* list = ipc_list_layers(ctx);
-            if (list) {
-                strncpy(response, list, sizeof(response) - 1);
-                response[sizeof(response) - 1] = '\0';
-                free(list);
+            hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+            if (!app || !app->layers) { snprintf(response, sizeof(response), "No layers\n"); success = true; break; }
+
+            /* Parse optional flags: --json, --long, --filter expr */
+            bool json = false, longf = false;
+            int filter_id = -1; int filter_hidden = -1;
+            char *opt;
+            while ((opt = strtok(NULL, " \n"))) {
+                if (strcmp(opt, "--json") == 0 || strcmp(opt, "-j") == 0) json = true;
+                else if (strcmp(opt, "--long") == 0 || strcmp(opt, "-l") == 0) longf = true;
+                else if (strcmp(opt, "--filter") == 0 || strcmp(opt, "-f") == 0) {
+                    char *expr = strtok(NULL, " \n");
+                    if (expr) {
+                        if (!strncmp(expr, "id=", 3)) { filter_id = atoi(expr+3); }
+                        else if (!strncmp(expr, "hidden=", 7)) {
+                            const char *v = expr+7; filter_hidden = (!strcmp(v,"1")||!strcasecmp(v,"true")||!strcasecmp(v,"yes"))?1:0;
+                        }
+                    }
+                }
+            }
+
+            size_t off = 0; response[0] = '\0';
+            if (json) {
+                off += snprintf(response + off, sizeof(response) - off, "[");
+                bool first = true;
+                for (parallax_layer_t *it = app->layers; it; it = it->next) {
+                    if (filter_id >= 0 && (int)it->id != filter_id) continue;
+                    if (filter_hidden >= 0 && (it->hidden ? 1 : 0) != filter_hidden) continue;
+                    if (!first) { if (off + 1 < sizeof(response)) response[off++] = ','; }
+                    first = false;
+                    int eff_over = (it->overflow_mode >= 0) ? it->overflow_mode : app->config.render_overflow_mode;
+                    const char *over_s = (eff_over==0?"repeat_edge": eff_over==1?"repeat": eff_over==2?"repeat_x": eff_over==3?"repeat_y": eff_over==4?"none":"inherit");
+                    int eff_tile_x = (it->tile_x >= 0) ? it->tile_x : app->config.render_tile_x;
+                    int eff_tile_y = (it->tile_y >= 0) ? it->tile_y : app->config.render_tile_y;
+                    float eff_mx = (it->margin_px_x != 0.0f || it->margin_px_y != 0.0f) ? it->margin_px_x : app->config.render_margin_px_x;
+                    float eff_my = (it->margin_px_x != 0.0f || it->margin_px_y != 0.0f) ? it->margin_px_y : app->config.render_margin_px_y;
+                    const char *fit_s = (it->fit_mode==LAYER_FIT_STRETCH?"stretch": it->fit_mode==LAYER_FIT_COVER?"cover": it->fit_mode==LAYER_FIT_CONTAIN?"contain": it->fit_mode==LAYER_FIT_WIDTH?"fit_width":"fit_height");
+                    char esc[512]; json_escape(it->image_path ? it->image_path : "<memory>", esc, sizeof(esc));
+                    int w = snprintf(response + off, sizeof(response) - off,
+                        "{\"id\":%u,\"path\":\"%s\",\"shift\":%.3f,\"opacity\":%.3f,\"z\":%d,\"uv\":[%.4f,%.4f],\"fit\":\"%s\",\"align\":[%.3f,%.3f],\"content_scale\":%.3f,\"blur\":%.3f,\"overflow\":\"%s\",\"tile\":[%s,%s],\"margin\":[%.1f,%.1f],\"hidden\":%s}",
+                        it->id, esc, it->shift_multiplier, it->opacity, it->z_index,
+                        it->base_uv_x, it->base_uv_y, fit_s, it->align_x, it->align_y, it->content_scale, it->blur_amount,
+                        over_s, eff_tile_x?"true":"false", eff_tile_y?"true":"false", eff_mx, eff_my, it->hidden?"true":"false");
+                    if (w < 0 || off + (size_t)w >= sizeof(response)) break; off += (size_t)w;
+                }
+                if (off + 2 < sizeof(response)) { response[off++] = ']'; response[off++]='\n'; response[off]='\0'; }
+                success = true;
+            } else if (longf) {
+                for (parallax_layer_t *it = app->layers; it; it = it->next) {
+                    if (filter_id >= 0 && (int)it->id != filter_id) continue;
+                    if (filter_hidden >= 0 && (it->hidden ? 1 : 0) != filter_hidden) continue;
+                    int eff_over = (it->overflow_mode >= 0) ? it->overflow_mode : app->config.render_overflow_mode;
+                    const char *over_s = (eff_over==0?"repeat_edge": eff_over==1?"repeat": eff_over==2?"repeat_x": eff_over==3?"repeat_y": eff_over==4?"none":"inherit");
+                    int eff_tile_x = (it->tile_x >= 0) ? it->tile_x : app->config.render_tile_x;
+                    int eff_tile_y = (it->tile_y >= 0) ? it->tile_y : app->config.render_tile_y;
+                    float eff_mx = (it->margin_px_x != 0.0f || it->margin_px_y != 0.0f) ? it->margin_px_x : app->config.render_margin_px_x;
+                    float eff_my = (it->margin_px_x != 0.0f || it->margin_px_y != 0.0f) ? it->margin_px_y : app->config.render_margin_px_y;
+                    const char *fit_s = (it->fit_mode==LAYER_FIT_STRETCH?"stretch": it->fit_mode==LAYER_FIT_COVER?"cover": it->fit_mode==LAYER_FIT_CONTAIN?"contain": it->fit_mode==LAYER_FIT_WIDTH?"fit_width":"fit_height");
+                    int w = snprintf(response + off, sizeof(response) - off,
+                                     "ID: %u | Path: %s | Shift: %.2f | Opacity: %.2f | Z: %d | UV: %.3f,%.3f | Fit: %s | Align: %.2f,%.2f | CScale: %.2f | Blur: %.2f | Overflow: %s | Tile: %s/%s | Margin: %.1f,%.1f | Hidden: %s\n",
+                                     it->id, it->image_path ? it->image_path : "<memory>",
+                                     it->shift_multiplier, it->opacity, it->z_index,
+                                     it->base_uv_x, it->base_uv_y,
+                                     fit_s, it->align_x, it->align_y, it->content_scale,
+                                     it->blur_amount,
+                                     over_s,
+                                     eff_tile_x?"true":"false", eff_tile_y?"true":"false",
+                                     eff_mx, eff_my,
+                                     it->hidden?"yes":"no");
+                    if (w < 0 || off + (size_t)w >= sizeof(response)) break; off += (size_t)w;
+                }
                 success = true;
             } else {
-                snprintf(response, sizeof(response), "No layers\n");
+                /* Compact */
+                for (parallax_layer_t *it = app->layers; it; it = it->next) {
+                    if (filter_id >= 0 && (int)it->id != filter_id) continue;
+                    if (filter_hidden >= 0 && (it->hidden ? 1 : 0) != filter_hidden) continue;
+                    int w = snprintf(response + off, sizeof(response) - off,
+                                     "%u z=%d op=%.2f shift=%.2f blur=%.2f hid=%s path=%s\n",
+                                     it->id, it->z_index, it->opacity, it->shift_multiplier, it->blur_amount,
+                                     it->hidden?"y":"n", it->image_path ? it->image_path : "<memory>");
+                    if (w < 0 || off + (size_t)w >= sizeof(response)) break; off += (size_t)w;
+                }
                 success = true;
             }
             break;
         }
 
-        case IPC_CMD_CLEAR_LAYERS:
-            ipc_clear_layers(ctx);
-            snprintf(response, sizeof(response), "All layers cleared\n");
+        case IPC_CMD_LAYER_FRONT: {
+            char* id_str = strtok(NULL, " \n");
+            if (!id_str) { snprintf(response, sizeof(response), "Error: Layer ID required\n"); break; }
+            uint32_t id = (uint32_t)atoi(id_str);
+            hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+            parallax_layer_t *layer = app ? layer_list_find(app->layers, id) : NULL;
+            if (!layer) { snprintf(response, sizeof(response), "Error: Layer %u not found\n", id); break; }
+            /* Find current max z */
+            int maxz = layer->z_index;
+            for (parallax_layer_t *it = app->layers; it; it = it->next)
+                if (it->z_index > maxz) maxz = it->z_index;
+            layer->z_index = maxz + 1;
+            renorm_z(app);
+            snprintf(response, sizeof(response), "Layer %u brought to front\n", id);
             success = true;
             break;
+        }
+
+        case IPC_CMD_LAYER_BACK: {
+            char* id_str = strtok(NULL, " \n");
+            if (!id_str) { snprintf(response, sizeof(response), "Error: Layer ID required\n"); break; }
+            uint32_t id = (uint32_t)atoi(id_str);
+            hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+            parallax_layer_t *layer = app ? layer_list_find(app->layers, id) : NULL;
+            if (!layer) { snprintf(response, sizeof(response), "Error: Layer %u not found\n", id); break; }
+            /* Find current min z */
+            int minz = layer->z_index;
+            for (parallax_layer_t *it = app->layers; it; it = it->next)
+                if (it->z_index < minz) minz = it->z_index;
+            layer->z_index = minz - 1;
+            renorm_z(app);
+            snprintf(response, sizeof(response), "Layer %u sent to back\n", id);
+            success = true;
+            break;
+        }
+
+        case IPC_CMD_LAYER_UP: {
+            char* id_str = strtok(NULL, " \n");
+            if (!id_str) { snprintf(response, sizeof(response), "Error: Layer ID required\n"); break; }
+            uint32_t id = (uint32_t)atoi(id_str);
+            hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+            parallax_layer_t *layer = app ? layer_list_find(app->layers, id) : NULL;
+            if (!layer) { snprintf(response, sizeof(response), "Error: Layer %u not found\n", id); break; }
+            /* Find next higher z neighbor */
+            parallax_layer_t *neighbor = NULL;
+            int min_higher = INT_MAX;
+            for (parallax_layer_t *it = app->layers; it; it = it->next) {
+                if (it->z_index > layer->z_index && it->z_index < min_higher) { neighbor = it; min_higher = it->z_index; }
+            }
+            if (!neighbor) { snprintf(response, sizeof(response), "Layer %u already at front\n", id); success = true; break; }
+            int tmp = layer->z_index; layer->z_index = neighbor->z_index; neighbor->z_index = tmp;
+            renorm_z(app);
+            snprintf(response, sizeof(response), "Layer %u moved up\n", id);
+            success = true;
+            break;
+        }
+
+        case IPC_CMD_LAYER_DOWN: {
+            char* id_str = strtok(NULL, " \n");
+            if (!id_str) { snprintf(response, sizeof(response), "Error: Layer ID required\n"); break; }
+            uint32_t id = (uint32_t)atoi(id_str);
+            hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+            parallax_layer_t *layer = app ? layer_list_find(app->layers, id) : NULL;
+            if (!layer) { snprintf(response, sizeof(response), "Error: Layer %u not found\n", id); break; }
+            /* Find next lower z neighbor */
+            parallax_layer_t *neighbor = NULL;
+            int max_lower = INT_MIN;
+            for (parallax_layer_t *it = app->layers; it; it = it->next) {
+                if (it->z_index < layer->z_index && it->z_index > max_lower) { neighbor = it; max_lower = it->z_index; }
+            }
+            if (!neighbor) { snprintf(response, sizeof(response), "Layer %u already at back\n", id); success = true; break; }
+            int tmp = layer->z_index; layer->z_index = neighbor->z_index; neighbor->z_index = tmp;
+            renorm_z(app);
+            snprintf(response, sizeof(response), "Layer %u moved down\n", id);
+            success = true;
+            break;
+        }
+
+        case IPC_CMD_CLEAR_LAYERS:
+            {
+                hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+                if (!app) { snprintf(response, sizeof(response), "Error: Runtime context unavailable\n"); break; }
+                while (app->layers) { uint32_t id = app->layers->id; hyprlax_remove_layer(app, id); }
+                snprintf(response, sizeof(response), "All layers cleared\n");
+                success = true;
+                break;
+            }
 
         case IPC_CMD_GET_STATUS:
-            snprintf(response, sizeof(response),
-                "Status: Active\nLayers: %d/%d\nSocket: %s\n",
-                ctx->layer_count, IPC_MAX_LAYERS, ctx->socket_path);
-            success = true;
-            break;
+            {
+                /* Parse optional --json */
+                bool json = false;
+                char *opt;
+                while ((opt = strtok(NULL, " \n"))) {
+                    if (strcmp(opt, "--json") == 0 || strcmp(opt, "-j") == 0) json = true;
+                }
+
+                hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+                int layers = app ? app->layer_count : 0;
+                const char *comp = (app && app->compositor && app->compositor->ops && app->compositor->ops->get_name) ? app->compositor->ops->get_name() : "unknown";
+                const char *mode = app ? parallax_mode_to_string(app->config.parallax_mode) : "unknown";
+                int monitors = (app && app->monitors) ? app->monitors->count : 0;
+                int target_fps = app ? app->config.target_fps : 0;
+                double fps = app ? app->fps : 0.0;
+                bool vsync = app ? app->config.vsync : false;
+                bool debug = app ? app->config.debug : false;
+                if (json) {
+                    int w = snprintf(response, sizeof(response),
+                        "{\"running\":true,\"layers\":%d,\"target_fps\":%d,\"fps\":%.2f,\"parallax\":\"%s\",\"monitors\":%d,\"compositor\":\"%s\",\"socket\":\"%s\",\"vsync\":%s,\"debug\":%s}\n",
+                        layers, target_fps, fps, mode, monitors, comp, ctx->socket_path, vsync?"true":"false", debug?"true":"false");
+                    (void)w;
+                } else {
+                    snprintf(response, sizeof(response),
+                             "hyprlax running\nLayers: %d\nTarget FPS: %d\nFPS: %.1f\nParallax: %s\nMonitors: %d\nCompositor: %s\nSocket: %s\n",
+                             layers, target_fps, fps, mode, monitors, comp, ctx->socket_path);
+                }
+                success = true;
+                break;
+            }
 
         case IPC_CMD_SET_PROPERTY: {
             char* property = strtok(NULL, " \n");
@@ -305,30 +597,21 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 break;
             }
 
-            /* Handle property setting via callback to main context */
-            if (ctx->app_context) {
-                int rc = hyprlax_runtime_set_property(ctx->app_context, property, value);
-                if (rc == 0) {
-                    snprintf(response, sizeof(response), "OK\n");
-                    success = true;
-                    break;
-                }
-                /* Fallback to legacy-known properties */
-                if (strcmp(property, "fps") == 0 ||
-                    strcmp(property, "shift") == 0 ||
-                    strcmp(property, "duration") == 0 ||
-                    strcmp(property, "easing") == 0 ||
-                    strcmp(property, "blur_passes") == 0 ||
-                    strcmp(property, "blur_size") == 0 ||
-                    strcmp(property, "debug") == 0) {
-                    snprintf(response, sizeof(response), "Property '%s' set to '%s'\n", property, value);
-                    success = true;
-                } else {
-                    snprintf(response, sizeof(response), "Error: Unknown/invalid property '%s'\n", property);
-                }
-            } else {
-                snprintf(response, sizeof(response), "Error: Runtime settings not available\n");
+            hyprlax_context_t *app_set = (hyprlax_context_t*)ctx->app_context;
+            if (!app_set) { snprintf(response, sizeof(response), "Error: Runtime settings not available\n"); break; }
+            bool handled = false;
+            if (strcmp(property, "fps") == 0) { app_set->config.target_fps = atoi(value); handled = true; }
+            else if (strcmp(property, "shift") == 0) { app_set->config.shift_pixels = atof(value); handled = true; }
+            else if (strcmp(property, "duration") == 0) { app_set->config.animation_duration = atof(value); handled = true; }
+            else if (strcmp(property, "easing") == 0) { app_set->config.default_easing = easing_from_string(value); handled = true; }
+            if (!handled) {
+                int rc = hyprlax_runtime_set_property(app_set, property, value);
+                if (rc == 0) { snprintf(response, sizeof(response), "OK\n"); success = true; break; }
+                snprintf(response, sizeof(response), "Error: Unknown/invalid property '%s'\n", property);
+                break;
             }
+            snprintf(response, sizeof(response), "OK\n");
+            success = true;
             break;
         }
 
@@ -340,33 +623,17 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 break;
             }
 
-            /* Handle property getting via callback to main context */
-            if (ctx->app_context) {
-                int rc = hyprlax_runtime_get_property(ctx->app_context, property, response, sizeof(response));
-                if (rc == 0) {
-                    size_t len = strlen(response);
-                    if (len < sizeof(response) - 1) response[len++] = '\n', response[len] = '\0';
-                    success = true;
-                } else {
-                    /* Fallback to legacy-known properties */
-                    if (strcmp(property, "fps") == 0) {
-                        snprintf(response, sizeof(response), "60\n");
-                        success = true;
-                    } else if (strcmp(property, "shift") == 0) {
-                        snprintf(response, sizeof(response), "200\n");
-                        success = true;
-                    } else if (strcmp(property, "duration") == 0) {
-                        snprintf(response, sizeof(response), "1.0\n");
-                        success = true;
-                    } else if (strcmp(property, "easing") == 0) {
-                        snprintf(response, sizeof(response), "cubic\n");
-                        success = true;
-                    } else {
-                        snprintf(response, sizeof(response), "Error: Unknown property '%s'\n", property);
-                    }
-                }
+            hyprlax_context_t *app_get = (hyprlax_context_t*)ctx->app_context;
+            if (!app_get) { snprintf(response, sizeof(response), "Error: Runtime settings not available\n"); break; }
+            if (strcmp(property, "fps") == 0) { snprintf(response, sizeof(response), "%d\n", app_get->config.target_fps); success = true; break; }
+            if (strcmp(property, "shift") == 0) { snprintf(response, sizeof(response), "%.1f\n", app_get->config.shift_pixels); success = true; break; }
+            if (strcmp(property, "duration") == 0) { snprintf(response, sizeof(response), "%.3f\n", app_get->config.animation_duration); success = true; break; }
+            if (strcmp(property, "easing") == 0) { snprintf(response, sizeof(response), "%s\n", easing_to_string(app_get->config.default_easing)); success = true; break; }
+            if (hyprlax_runtime_get_property(app_get, property, response, sizeof(response)) == 0) {
+                size_t len = strlen(response); if (len < sizeof(response) - 1) response[len++] = '\n', response[len] = '\0';
+                success = true;
             } else {
-                snprintf(response, sizeof(response), "Error: Runtime settings not available\n");
+                snprintf(response, sizeof(response), "Error: Unknown property '%s'\n", property);
             }
             break;
         }
@@ -384,145 +651,90 @@ bool ipc_process_commands(ipc_context_t* ctx) {
 }
 
 uint32_t ipc_add_layer(ipc_context_t* ctx, const char* image_path, float scale, float opacity, float x_offset, float y_offset, int z_index) {
-    if (!ctx || !image_path || ctx->layer_count >= IPC_MAX_LAYERS) {
+    (void)x_offset; (void)y_offset; (void)z_index;
+    if (!ctx || !image_path || !ctx->app_context) {
         return 0;
     }
-
-    // Check if file exists
     if (access(image_path, R_OK) != 0) {
         fprintf(stderr, "Image file not found or not readable: %s\n", image_path);
         return 0;
     }
-
-    layer_t* layer = calloc(1, sizeof(layer_t));
-    if (!layer) return 0;
-
-    layer->image_path = strdup(image_path);
-    layer->scale = scale;
-    layer->opacity = opacity;
-    layer->x_offset = x_offset;
-    layer->y_offset = y_offset;
-    layer->z_index = z_index;
-    layer->visible = true;
-    layer->id = ctx->next_layer_id++;
-
-    ctx->layers[ctx->layer_count++] = layer;
-    ipc_sort_layers(ctx);
-
-    return layer->id;
+    hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+    uint32_t prev_max_id = 0;
+    for (parallax_layer_t *it = app->layers; it; it = it->next) {
+        if (it->id > prev_max_id) prev_max_id = it->id;
+    }
+    if (hyprlax_add_layer(app, image_path, scale, opacity, 0.0f) != 0) {
+        return 0;
+    }
+    uint32_t new_id = 0;
+    for (parallax_layer_t *it = app->layers; it; it = it->next) {
+        if (it->id > prev_max_id) new_id = it->id;
+    }
+    return new_id;
 }
 
 bool ipc_remove_layer(ipc_context_t* ctx, uint32_t layer_id) {
-    if (!ctx) return false;
-
-    for (int i = 0; i < ctx->layer_count; i++) {
-        if (ctx->layers[i]->id == layer_id) {
-            // Free layer resources
-            free(ctx->layers[i]->image_path);
-            free(ctx->layers[i]);
-
-            // Shift remaining layers
-            for (int j = i; j < ctx->layer_count - 1; j++) {
-                ctx->layers[j] = ctx->layers[j + 1];
-            }
-            ctx->layers[--ctx->layer_count] = NULL;
-
-            return true;
-        }
-    }
-
-    return false;
-}
-
-bool ipc_modify_layer(ipc_context_t* ctx, uint32_t layer_id, const char* property, const char* value) {
-    if (!ctx || !property || !value) return false;
-
-    layer_t* layer = ipc_find_layer(ctx, layer_id);
-    if (!layer) return false;
-
-    bool needs_sort = false;
-
-    if (strcmp(property, "scale") == 0) {
-        layer->scale = atof(value);
-    } else if (strcmp(property, "opacity") == 0) {
-        layer->opacity = atof(value);
-    } else if (strcmp(property, "x") == 0) {
-        layer->x_offset = atof(value);
-    } else if (strcmp(property, "y") == 0) {
-        layer->y_offset = atof(value);
-    } else if (strcmp(property, "z") == 0) {
-        layer->z_index = atoi(value);
-        needs_sort = true;
-    } else if (strcmp(property, "visible") == 0) {
-        layer->visible = (strcmp(value, "true") == 0 || strcmp(value, "1") == 0);
-    } else {
-        return false;
-    }
-
-    if (needs_sort) {
-        ipc_sort_layers(ctx);
-    }
-
+    if (!ctx || !ctx->app_context) return false;
+    hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+    if (!layer_list_find(app->layers, layer_id)) return false;
+    hyprlax_remove_layer(app, layer_id);
     return true;
 }
 
-char* ipc_list_layers(ipc_context_t* ctx) {
-    if (!ctx || ctx->layer_count == 0) return NULL;
-
-    char* result = malloc(IPC_MAX_MESSAGE_SIZE);
-    if (!result) return NULL;
-
-    int offset = 0;
-    for (int i = 0; i < ctx->layer_count; i++) {
-        layer_t* layer = ctx->layers[i];
-        int written = snprintf(result + offset, IPC_MAX_MESSAGE_SIZE - offset,
-            "ID: %u | Path: %s | Scale: %.2f | Opacity: %.2f | Position: (%.2f, %.2f) | Z: %d | Visible: %s\n",
-            layer->id, layer->image_path, layer->scale, layer->opacity,
-            layer->x_offset, layer->y_offset, layer->z_index,
-            layer->visible ? "yes" : "no");
-
-        if (written < 0 || offset + written >= IPC_MAX_MESSAGE_SIZE) break;
-        offset += written;
+bool ipc_modify_layer(ipc_context_t* ctx, uint32_t layer_id, const char* property, const char* value) {
+    if (!ctx || !ctx->app_context || !property || !value) return false;
+    hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+    parallax_layer_t *layer = layer_list_find(app->layers, layer_id);
+    if (!layer) return false;
+    if (strcmp(property, "scale") == 0) {
+        float v = atof(value); layer->shift_multiplier = v; layer->shift_multiplier_x = v; layer->shift_multiplier_y = v; return true;
+    } else if (strcmp(property, "opacity") == 0) {
+        layer->opacity = atof(value); return true;
+    } else if (strcmp(property, "x") == 0) {
+        layer->base_uv_x = atof(value); return true;
+    } else if (strcmp(property, "y") == 0) {
+        layer->base_uv_y = atof(value); return true;
+    } else if (strcmp(property, "z") == 0) {
+        layer->z_index = atoi(value); return true;
+    } else if (strcmp(property, "visible") == 0) {
+        bool vis = (strcmp(value, "true") == 0 || strcmp(value, "1") == 0); if (!vis) layer->opacity = 0.0f; return true;
     }
+    return false;
+}
 
-    return result;
+char* ipc_list_layers(ipc_context_t* ctx) {
+    if (!ctx || !ctx->app_context) return NULL;
+    hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+    if (!app->layers) return NULL;
+    char *out = malloc(IPC_MAX_MESSAGE_SIZE); if (!out) return NULL; out[0] = '\0'; size_t off = 0;
+    for (parallax_layer_t *it = app->layers; it; it = it->next) {
+        int w = snprintf(out + off, IPC_MAX_MESSAGE_SIZE - off,
+                         "ID: %u | Path: %s | Shift: %.2f | Opacity: %.2f | Z: %d\n",
+                         it->id, it->image_path ? it->image_path : "<memory>", it->shift_multiplier, it->opacity, it->z_index);
+        if (w < 0 || off + (size_t)w >= IPC_MAX_MESSAGE_SIZE)
+            break;
+        off += (size_t)w;
+    }
+    return out;
 }
 
 void ipc_clear_layers(ipc_context_t* ctx) {
-    if (!ctx) return;
-
-    for (int i = 0; i < ctx->layer_count; i++) {
-        if (ctx->layers[i]) {
-            free(ctx->layers[i]->image_path);
-            free(ctx->layers[i]);
-            ctx->layers[i] = NULL;
-        }
+    if (!ctx || !ctx->app_context) return;
+    hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+    while (app->layers) {
+        uint32_t id = app->layers->id;
+        hyprlax_remove_layer(app, id);
     }
-    ctx->layer_count = 0;
 }
 
 layer_t* ipc_find_layer(ipc_context_t* ctx, uint32_t layer_id) {
-    if (!ctx) return NULL;
-
-    for (int i = 0; i < ctx->layer_count; i++) {
-        if (ctx->layers[i]->id == layer_id) {
-            return ctx->layers[i];
-        }
-    }
-
-    return NULL;
+    (void)ctx; (void)layer_id; return NULL; /* unused in bridged mode */
 }
 
-static int layer_compare(const void* a, const void* b) {
-    layer_t* layer_a = *(layer_t**)a;
-    layer_t* layer_b = *(layer_t**)b;
-    return layer_a->z_index - layer_b->z_index;
-}
+/* Legacy comparator removed in bridged mode */
 
-void ipc_sort_layers(ipc_context_t* ctx) {
-    if (!ctx || ctx->layer_count < 2) return;
-    qsort(ctx->layers, ctx->layer_count, sizeof(layer_t*), layer_compare);
-}
+void ipc_sort_layers(ipc_context_t* ctx) { (void)ctx; }
 
 // Request handling function for tests and IPC processing
 int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, size_t response_size) {
@@ -617,19 +829,29 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
 
     // Handle STATUS command
     else if (strcmp(cmd, "STATUS") == 0) {
-        const char* compositor = getenv("HYPRLAX_COMPOSITOR");
-        if (!compositor) compositor = "auto";
-
+        hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+        int layers = app ? app->layer_count : 0;
+        const char *comp = (app && app->compositor && app->compositor->ops && app->compositor->ops->get_name) ? app->compositor->ops->get_name() : "unknown";
+        int target_fps = app ? app->config.target_fps : 0;
+        double fps = app ? app->fps : 0.0;
+        const char *mode = app ? parallax_mode_to_string(app->config.parallax_mode) : "unknown";
         snprintf(response, response_size,
-                 "hyprlax running\nLayers: %d\nFPS: 60\nCompositor: %s",
-                 ctx->layer_count, compositor);
+                 "hyprlax running\nLayers: %d\nTarget FPS: %d\nFPS: %.1f\nParallax: %s\nCompositor: %s",
+                 layers, target_fps, fps, mode, comp);
         return 0;
     }
 
     // Handle RELOAD command
     else if (strcmp(cmd, "RELOAD") == 0) {
-        snprintf(response, response_size, "Configuration reloaded");
-        return 0;
+        hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+        if (app && app->config.config_path) {
+            int rc = config_apply_toml_to_context(app, app->config.config_path);
+            if (rc == 0) { snprintf(response, response_size, "Configuration reloaded"); return 0; }
+            snprintf(response, response_size, "Error: Failed to reload configuration"); return -1;
+        } else {
+            snprintf(response, response_size, "Error: No configuration path set");
+            return -1;
+        }
     }
 
     // Handle SET_PROPERTY command
@@ -639,17 +861,17 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
             snprintf(response, response_size, "Error: SET_PROPERTY requires property and value");
             return -1;
         }
-        int rc = hyprlax_runtime_set_property(ctx->app_context, property, value);
-        if (rc == 0) { snprintf(response, response_size, "OK"); return 0; }
-        if (strcmp(property, "fps") == 0 || strcmp(property, "shift") == 0 ||
-            strcmp(property, "duration") == 0 || strcmp(property, "easing") == 0 ||
-            strcmp(property, "blur_passes") == 0 || strcmp(property, "blur_size") == 0 ||
-            strcmp(property, "debug") == 0) {
-            snprintf(response, response_size, "Property '%s' set to '%s'", property, value);
-            return 0;
+        hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+        if (!app) { snprintf(response, response_size, "Error: Runtime settings not available"); return -1; }
+        if (strcmp(property, "fps") == 0) { app->config.target_fps = atoi(value); snprintf(response, response_size, "OK"); return 0; }
+        if (strcmp(property, "shift") == 0) { app->config.shift_pixels = atof(value); snprintf(response, response_size, "OK"); return 0; }
+        if (strcmp(property, "duration") == 0) { app->config.animation_duration = atof(value); snprintf(response, response_size, "OK"); return 0; }
+        if (strcmp(property, "easing") == 0) { app->config.default_easing = easing_from_string(value); snprintf(response, response_size, "OK"); return 0; }
+        {
+            int rc = hyprlax_runtime_set_property(app, property, value);
+            if (rc == 0) { snprintf(response, response_size, "OK"); return 0; }
         }
-        snprintf(response, response_size, "Error: Unknown/invalid property '%s'", property);
-        return -1;
+        snprintf(response, response_size, "Error: Unknown/invalid property '%s'", property); return -1;
     }
 
     // Handle GET_PROPERTY command
@@ -659,14 +881,17 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
             snprintf(response, response_size, "Error: GET_PROPERTY requires property name");
             return -1;
         }
-        int rc = hyprlax_runtime_get_property(ctx->app_context, property, response, response_size);
-        if (rc == 0) return 0;
-        if (strcmp(property, "fps") == 0) { snprintf(response, response_size, "60"); return 0; }
-        if (strcmp(property, "shift") == 0) { snprintf(response, response_size, "200"); return 0; }
-        if (strcmp(property, "duration") == 0) { snprintf(response, response_size, "1.0"); return 0; }
-        if (strcmp(property, "easing") == 0) { snprintf(response, response_size, "cubic"); return 0; }
-        snprintf(response, response_size, "Error: Unknown property '%s'", property);
-        return -1;
+        hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+        if (!app) { snprintf(response, response_size, "Error: Runtime settings not available"); return -1; }
+        if (strcmp(property, "fps") == 0) { snprintf(response, response_size, "%d", app->config.target_fps); return 0; }
+        if (strcmp(property, "shift") == 0) { snprintf(response, response_size, "%.1f", app->config.shift_pixels); return 0; }
+        if (strcmp(property, "duration") == 0) { snprintf(response, response_size, "%.3f", app->config.animation_duration); return 0; }
+        if (strcmp(property, "easing") == 0) { snprintf(response, response_size, "%s", easing_to_string(app->config.default_easing)); return 0; }
+        {
+            int rc = hyprlax_runtime_get_property(app, property, response, response_size);
+            if (rc == 0) return 0;
+        }
+        snprintf(response, response_size, "Error: Unknown property '%s'", property); return -1;
     }
 
     // Unknown command
@@ -674,4 +899,24 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
         snprintf(response, response_size, "Error: Unknown command '%s'", cmd);
         return -1;
     }
+}
+/* JSON escape helper */
+static void json_escape(const char *in, char *out, size_t out_sz) {
+    if (!in || !out || out_sz == 0) return;
+    size_t o = 0;
+    for (size_t i = 0; in[i] && o + 2 < out_sz; i++) {
+        unsigned char c = (unsigned char)in[i];
+        if (c == '"' || c == '\\') {
+            if (o + 2 >= out_sz) break;
+            out[o++] = '\\'; out[o++] = (char)c;
+        } else if (c < 0x20) {
+            if (o + 6 >= out_sz) break;
+            out[o++] = '\\'; out[o++] = 'u'; out[o++] = '0'; out[o++] = '0';
+            const char hex[] = "0123456789abcdef";
+            out[o++] = hex[(c >> 4) & 0xF]; out[o++] = hex[c & 0xF];
+        } else {
+            out[o++] = (char)c;
+        }
+    }
+    out[o] = '\0';
 }

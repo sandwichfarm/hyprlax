@@ -9,7 +9,7 @@ easing = "expo"
 tile = { x = true, y = false }
 
 [global.parallax]
-mode = "workspace"
+mode = "hybrid"
 
 [[global.layers]]
 path = "./1.png"

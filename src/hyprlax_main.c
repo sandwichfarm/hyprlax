@@ -1216,6 +1216,21 @@ int hyprlax_add_layer(hyprlax_context_t *ctx, const char *image_path,
     return HYPRLAX_SUCCESS;
 }
 
+/* Remove a layer by ID */
+void hyprlax_remove_layer(hyprlax_context_t *ctx, uint32_t layer_id) {
+    if (!ctx) return;
+    /* Find layer to allow GL cleanup */
+    parallax_layer_t *layer = layer_list_find(ctx->layers, layer_id);
+    if (layer && layer->texture_id != 0) {
+        GLuint tid = (GLuint)layer->texture_id;
+        glDeleteTextures(1, &tid);
+        layer->texture_id = 0;
+    }
+    /* Remove from linked list and update count */
+    ctx->layers = layer_list_remove(ctx->layers, layer_id);
+    ctx->layer_count = layer_list_count(ctx->layers);
+}
+
 /* Load textures for all layers (called after GL init) */
 static int hyprlax_load_layer_textures(hyprlax_context_t *ctx) {
     if (!ctx) return HYPRLAX_ERROR_INVALID_ARGS;
@@ -1456,7 +1471,7 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
     /* Layer count debug - commented out for performance
     LOG_TRACE("Rendering %d layers for monitor %s", ctx->layer_count, monitor->name); */
     while (layer) {
-        if (layer->texture_id == 0) {
+        if (layer->hidden || layer->texture_id == 0) {
             layer = layer->next;
             continue;
         }
@@ -1705,7 +1720,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
 
     double last_render_time = get_time();
     double last_frame_time = last_render_time;
-    double frame_time = 1.0 / ctx->config.target_fps;
+    double frame_time = 1.0 / (double)(ctx->config.target_fps > 0 ? ctx->config.target_fps : 60);
     int frame_count = 0;
     double debug_timer = 0.0;
     bool needs_render = true;  /* Render first frame */
@@ -1716,6 +1731,9 @@ int hyprlax_run(hyprlax_context_t *ctx) {
     }
 
     while (ctx->running) {
+        /* Recompute frame time from current config to honor live FPS changes */
+        frame_time = 1.0 / (double)(ctx->config.target_fps > 0 ? ctx->config.target_fps : 60);
+
         /* Reset per-iteration diagnostic flags */
         bool diag_resize = false;
         bool diag_ipc = false;
@@ -2053,6 +2071,23 @@ int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, c
         const char *leaf = endptr + 1;
         parallax_layer_t *layer = layer_list_find(ctx->layers, (uint32_t)lid);
         if (!layer) return -1;
+        if (strcmp(leaf, "hidden") == 0) { layer->hidden = parse_bool_local(value); return 0; }
+        if (strcmp(leaf, "blur") == 0) { layer->blur_amount = atof(value); return 0; }
+        if (strcmp(leaf, "fit") == 0) {
+            auto int fit_from_string_local(const char *s) {
+                if (!s) return -1;
+                if (!strcmp(s, "stretch")) return LAYER_FIT_STRETCH;
+                if (!strcmp(s, "cover")) return LAYER_FIT_COVER;
+                if (!strcmp(s, "contain")) return LAYER_FIT_CONTAIN;
+                if (!strcmp(s, "fit_width")) return LAYER_FIT_WIDTH;
+                if (!strcmp(s, "fit_height")) return LAYER_FIT_HEIGHT;
+                return -1;
+            }
+            int m = fit_from_string_local(value); if (m < 0) return -1; layer->fit_mode = m; return 0;
+        }
+        if (strcmp(leaf, "content_scale") == 0) { layer->content_scale = atof(value); return 0; }
+        if (strcmp(leaf, "align.x") == 0) { layer->align_x = atof(value); if (layer->align_x<0) layer->align_x=0; if (layer->align_x>1) layer->align_x=1; return 0; }
+        if (strcmp(leaf, "align.y") == 0) { layer->align_y = atof(value); if (layer->align_y<0) layer->align_y=0; if (layer->align_y>1) layer->align_y=1; return 0; }
         if (strcmp(leaf, "overflow") == 0) {
             int m = overflow_from_string_local(value);
             if (m < 0) return -1; layer->overflow_mode = m; return 0;
@@ -2141,6 +2176,24 @@ int hyprlax_runtime_get_property(hyprlax_context_t *ctx, const char *property, c
         if (lid <= 0 || !end || *end != '.') return -1; const char *leaf = end+1;
         parallax_layer_t *layer = layer_list_find(ctx->layers, (uint32_t)lid);
         if (!layer) return -1;
+        if (strcmp(leaf, "hidden") == 0) { W("%s", layer->hidden?"true":"false"); return 0; }
+        if (strcmp(leaf, "blur") == 0) { W("%.2f", layer->blur_amount); return 0; }
+        if (strcmp(leaf, "fit") == 0) {
+            auto const char* fit_to_string_local(int m) {
+                switch (m) {
+                    case LAYER_FIT_STRETCH: return "stretch";
+                    case LAYER_FIT_COVER: return "cover";
+                    case LAYER_FIT_CONTAIN: return "contain";
+                    case LAYER_FIT_WIDTH: return "fit_width";
+                    case LAYER_FIT_HEIGHT: return "fit_height";
+                    default: return "stretch";
+                }
+            }
+            W("%s", fit_to_string_local(layer->fit_mode)); return 0;
+        }
+        if (strcmp(leaf, "content_scale") == 0) { W("%.3f", layer->content_scale); return 0; }
+        if (strcmp(leaf, "align.x") == 0) { W("%.3f", layer->align_x); return 0; }
+        if (strcmp(leaf, "align.y") == 0) { W("%.3f", layer->align_y); return 0; }
         if (strcmp(leaf, "overflow") == 0) {
             int eff = (layer->overflow_mode >= 0) ? layer->overflow_mode : ctx->config.render_overflow_mode;
             W("%s", overflow_to_string_local(eff)); return 0;

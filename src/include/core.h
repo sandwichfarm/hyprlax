@@ -65,6 +65,7 @@ typedef struct parallax_layer {
     bool invert_workspace_y;
     bool invert_cursor_x;
     bool invert_cursor_y;
+    bool hidden;                /* dedicated visibility flag */
 
     /* Animation state */
     animation_state_t x_animation;
@@ -210,6 +211,7 @@ parallax_layer_t* layer_list_remove(parallax_layer_t *head, uint32_t layer_id);
 parallax_layer_t* layer_list_find(parallax_layer_t *head, uint32_t layer_id);
 void layer_list_destroy(parallax_layer_t *head);
 int layer_list_count(parallax_layer_t *head);
+parallax_layer_t* layer_list_sort_by_z(parallax_layer_t *head);
 
 /* Configuration parsing */
 int config_parse_args(config_t *cfg, int argc, char **argv);

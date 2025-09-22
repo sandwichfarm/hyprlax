@@ -35,6 +35,7 @@ parallax_layer_t* layer_create(const char *image_path, float shift_multiplier, f
     layer->invert_workspace_y = false;
     layer->invert_cursor_x = false;
     layer->invert_cursor_y = false;
+    layer->hidden = false;
 
     layer->current_x = 0.0f;
     layer->current_y = 0.0f;
@@ -177,4 +178,28 @@ int layer_list_count(parallax_layer_t *head) {
         current = current->next;
     }
     return count;
+}
+
+/* Sort the linked list by z_index ascending (stable) */
+parallax_layer_t* layer_list_sort_by_z(parallax_layer_t *head) {
+    if (!head || !head->next) return head;
+    parallax_layer_t *sorted = NULL;
+    parallax_layer_t *node = head;
+    while (node) {
+        parallax_layer_t *next = node->next;
+        /* insert node into sorted at proper position */
+        if (!sorted || node->z_index < sorted->z_index) {
+            node->next = sorted;
+            sorted = node;
+        } else {
+            parallax_layer_t *cur = sorted;
+            while (cur->next && cur->next->z_index <= node->z_index) {
+                cur = cur->next;
+            }
+            node->next = cur->next;
+            cur->next = node;
+        }
+        node = next;
+    }
+    return sorted;
 }
