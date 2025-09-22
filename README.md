@@ -1,6 +1,6 @@
 > **hyprlax is presently under heavy development**, follow progress [here](https://github.com/sandwichfarm/hyprlax/issues/13)
 > 
-> New version will include Multi-Monitor Support, Robust Configuration and support for additional Compositors such as Niri and River (though still works best with _hyprland_)
+> New version will include Multi-Monitor Support, extremely flexible configuration options for creative expression, more parallax input options (such as cursor input, and hybrid mode) and support for additional Compositors such as Niri and River.
 
 # hyprlax
 
