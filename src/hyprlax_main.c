@@ -1063,6 +1063,11 @@ int hyprlax_init_renderer(hyprlax_context_t *ctx) {
         return ret;
     }
 
+    /* Mark renderer as initialized so runtime paths (IPC add, lazy loads)
+     * can create textures. Previously this flag was never set, which
+     * prevented textures for IPC-added layers from being loaded. */
+    ctx->renderer->initialized = true;
+
     LOG_DEBUG("Renderer: %s", ctx->renderer->ops->get_name());
 
     return HYPRLAX_SUCCESS;
