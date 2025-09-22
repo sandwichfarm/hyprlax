@@ -188,6 +188,8 @@ def main():
                        help='Directory to write the overlay image. '
                             'If omitted, uses a persistent ./tmp when --once, '
                             'or a temporary directory otherwise.')
+    parser.add_argument('--only-image', action='store_true',
+                       help='Only generate the image and skip creating/updating the layer via IPC')
     args = parser.parse_args()
     
     # Decide output directory behavior
@@ -214,6 +216,8 @@ def main():
     if args.verbose:
         print(f"Starting time overlay with font size {args.font_size}")
         print(f"Overlay image path: {image_path}")
+        if args.only_image:
+            print("Only-image mode: Skipping IPC layer creation/update")
     args = parser.parse_args()
     
     # Decide output directory behavior
@@ -254,19 +258,18 @@ def main():
             if args.verbose or (iteration == 0 and args.once):
                 print(f"Generated time image: {current_time}")
             
-            # Update layer
-            if layer_id is None:
-                layer_id = get_layer_id()
-            
-            new_layer_id = update_layer(image_path, layer_id)
-            
-            if new_layer_id:
-                if args.verbose or (iteration == 0 and args.once):
-                    if layer_id is None:
-                        print(f"Added time overlay layer (ID: {new_layer_id})")
-                    else:
-                        print(f"Updated time overlay to {current_time}")
-                layer_id = new_layer_id
+            # Update layer via IPC unless only-image mode is set
+            if not args.only_image:
+                if layer_id is None:
+                    layer_id = get_layer_id()
+                new_layer_id = update_layer(image_path, layer_id)
+                if new_layer_id:
+                    if args.verbose or (iteration == 0 and args.once):
+                        if layer_id is None:
+                            print(f"Added time overlay layer (ID: {new_layer_id})")
+                        else:
+                            print(f"Updated time overlay to {current_time}")
+                    layer_id = new_layer_id
             
             iteration += 1
             
@@ -280,7 +283,7 @@ def main():
             
     except KeyboardInterrupt:
         print("\nStopping time overlay...")
-        if layer_id:
+        if (not args.only_image) and layer_id:
             subprocess.run(["hyprlax", "ctl", "remove", str(layer_id)])
     finally:
         # Cleanup only when using a temporary directory (looping mode)
