@@ -52,10 +52,16 @@ def create_time_image(font_size=FONT_SIZE, position='center', scale=FONT_SCALE):
         for path in font_paths:
             if os.path.exists(path):
                 font = ImageFont.truetype(path, effective_font_size)
+                font = ImageFont.truetype(path, effective_font_size)
                 print(f"Using font: {path}")
                 break
         if not font:
             # Try to use Pillow's default but with size
+            # Note: load_default ignores size on some Pillow versions
+            font = ImageFont.load_default()
+            print(
+                f"Warning: Using default font (requested size {effective_font_size})"
+            )
             # Note: load_default ignores size on some Pillow versions
             font = ImageFont.load_default()
             print(
@@ -71,6 +77,7 @@ def create_time_image(font_size=FONT_SIZE, position='center', scale=FONT_SCALE):
     text_height = bbox[3] - bbox[1]
     
     # Position the text
+    margin = 150  # Increased margin (unused for center)
     margin = 150  # Increased margin (unused for center)
     
     if position == 'bottom-right':
@@ -165,6 +172,12 @@ def main():
     parser.add_argument('--scale', type=float, default=FONT_SCALE,
                        help='Scale multiplier applied to --font-size '
                             '(default: 5.0)')
+    parser.add_argument('--position', type=str, default='center',
+                       choices=['bottom-right', 'top-right', 'center', 'bottom-left'],
+                       help='Position of the time display (default: center)')
+    parser.add_argument('--scale', type=float, default=FONT_SCALE,
+                       help='Scale multiplier applied to --font-size '
+                            '(default: 5.0)')
     parser.add_argument('--once', action='store_true',
                        help='Run once and exit (for cron)')
     parser.add_argument('--interval', type=int, default=UPDATE_INTERVAL,
@@ -175,6 +188,32 @@ def main():
                        help='Directory to write the overlay image. '
                             'If omitted, uses a persistent ./tmp when --once, '
                             'or a temporary directory otherwise.')
+    args = parser.parse_args()
+    
+    # Decide output directory behavior
+    # - If --out-dir provided: use it (absolute or relative to this script)
+    # - Else if --once: use persistent ./tmp next to this script
+    # - Else: use a temporary directory that will be cleaned up
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    cleanup = False
+
+    if args.out_dir:
+        out_dir = args.out_dir
+        if not os.path.isabs(out_dir):
+            out_dir = os.path.join(script_dir, out_dir)
+        os.makedirs(out_dir, exist_ok=True)
+    elif args.once:
+        out_dir = os.path.join(script_dir, 'tmp')
+        os.makedirs(out_dir, exist_ok=True)
+    else:
+        out_dir = tempfile.mkdtemp(prefix='hyprlax_time_')
+        cleanup = True
+
+    image_path = os.path.join(out_dir, 'time_overlay.png')
+    
+    if args.verbose:
+        print(f"Starting time overlay with font size {args.font_size}")
+        print(f"Overlay image path: {image_path}")
     args = parser.parse_args()
     
     # Decide output directory behavior
