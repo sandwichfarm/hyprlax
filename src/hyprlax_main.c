@@ -1246,6 +1246,7 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
 }
 
 /* Load texture from file */
+static inline int is_pow2(int v) { return v > 0 && (v & (v - 1)) == 0; }
 static GLuint load_texture(const char *path, int *width, int *height) {
     int channels;
     unsigned char *data = stbi_load(path, width, height, &channels, 4);
@@ -1259,9 +1260,13 @@ static GLuint load_texture(const char *path, int *width, int *height) {
     glBindTexture(GL_TEXTURE_2D, texture);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, *width, *height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
 
-    /* Use trilinear filtering for smoother animation */
-    glGenerateMipmap(GL_TEXTURE_2D);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    /* NPOT safety for GLES2: only generate mipmaps if both dimensions are powers of two */
+    if (is_pow2(*width) && is_pow2(*height)) {
+        glGenerateMipmap(GL_TEXTURE_2D);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    } else {
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    }
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -1566,6 +1571,24 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
     /* Layer count debug - commented out for performance
     LOG_TRACE("Rendering %d layers for monitor %s", ctx->layer_count, monitor->name); */
     while (layer) {
+        /* Attempt lazy texture load once we hit the layer in draw path */
+        if (layer->texture_id == 0 && layer->image_path && ctx->renderer && ctx->renderer->initialized) {
+            int lw = 0, lh = 0;
+            GLuint tid = load_texture(layer->image_path, &lw, &lh);
+            if (tid != 0) {
+                layer->texture_id = tid;
+                layer->width = lw;
+                layer->height = lh;
+                layer->texture_width = lw;
+                layer->texture_height = lh;
+                LOG_DEBUG("[LAZY] Loaded texture for layer %u (%s): %dx%d tex=%u",
+                          layer->id, layer->image_path, lw, lh, tid);
+            } else {
+                LOG_WARN("[LAZY] Failed to load texture for layer %u: %s", layer->id, layer->image_path);
+                ctx->deferred_render_needed = true; /* request another frame to retry */
+            }
+        }
+
         if (layer->hidden || layer->texture_id == 0) {
             layer = layer->next;
             continue;
@@ -1979,13 +2002,14 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                           time_since_render, frame_time, ctx->layer_count,
                           first_x, first_y);
             }
-            hyprlax_render_frame(ctx);
-            ctx->fps = 1.0 / time_since_render;
-            last_render_time = current_time;
-            frame_count++;
+    hyprlax_render_frame(ctx);
+    ctx->fps = 1.0 / time_since_render;
+    last_render_time = current_time;
+    frame_count++;
             
-            /* Clear needs_render flag - it will be set again if needed */
-            needs_render = false;
+    /* Clear needs_render flag; request another frame if deferred work pending */
+    needs_render = ctx->deferred_render_needed;
+    ctx->deferred_render_needed = false;
 
             /* Print FPS every second in debug mode */
             if (ctx->config.debug) {

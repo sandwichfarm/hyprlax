@@ -18,7 +18,7 @@ SHADOW_OFFSET = 4
 UPDATE_INTERVAL = 30  # Update every 30 seconds
 
 # Layer configuration
-LAYER_Z = 5  # Position between bg (default 0) and fg (higher z)
+LAYER_Z = 15  # Position between bg (default 0) and fg (higher z)
 LAYER_OPACITY = 1.0
 LAYER_SCALE = 1.0
 

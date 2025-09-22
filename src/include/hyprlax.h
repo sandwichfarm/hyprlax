@@ -97,6 +97,9 @@ typedef struct hyprlax_context {
     bool debounce_pending;     /* debounce timer armed */
     compositor_event_t pending_event; /* last compositor event to apply after debounce */
 
+    /* Internal: request an immediate retry render (e.g., pending texture load) */
+    bool deferred_render_needed;
+
 } hyprlax_context_t;
 
 /* Main application functions */

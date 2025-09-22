@@ -24,6 +24,10 @@
 #include <stdarg.h>
 #include <math.h>
 
+/* stb_image prototypes (implementation is compiled in hyprlax_main.c) */
+extern int stbi_info(const char *filename, int *x, int *y, int *comp);
+extern const char *stbi_failure_reason(void);
+
 /* Forward decls */
 static void json_escape(const char *in, char *out, size_t out_sz);
 static int layer_compare_qsort(const void* a, const void* b);
@@ -199,6 +203,7 @@ static ipc_command_t parse_command(const char* cmd) {
     if (strcmp(cmd, "status") == 0) return IPC_CMD_GET_STATUS;
     if (strcmp(cmd, "set") == 0) return IPC_CMD_SET_PROPERTY;
     if (strcmp(cmd, "get") == 0) return IPC_CMD_GET_PROPERTY;
+    if (strcmp(cmd, "diag") == 0) return IPC_CMD_DIAG;
     return IPC_CMD_UNKNOWN;
 }
 
@@ -602,7 +607,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                     float eff_my = (it->margin_px_x != 0.0f || it->margin_px_y != 0.0f) ? it->margin_px_y : app->config.render_margin_px_y;
                     const char *fit_s = (it->fit_mode==LAYER_FIT_STRETCH?"stretch": it->fit_mode==LAYER_FIT_COVER?"cover": it->fit_mode==LAYER_FIT_CONTAIN?"contain": it->fit_mode==LAYER_FIT_WIDTH?"fit_width":"fit_height");
                     int w = snprintf(response + off, sizeof(response) - off,
-                                     "ID: %u | Path: %s | Shift: %.2f | Opacity: %.2f | Z: %d | UV: %.3f,%.3f | Fit: %s | Align: %.2f,%.2f | CScale: %.2f | Blur: %.2f | Overflow: %s | Tile: %s/%s | Margin: %.1f,%.1f | Hidden: %s\n",
+                                     "ID: %u | Path: %s | Shift: %.2f | Opacity: %.2f | Z: %d | UV: %.3f,%.3f | Fit: %s | Align: %.2f,%.2f | CScale: %.2f | Blur: %.2f | Overflow: %s | Tile: %s/%s | Margin: %.1f,%.1f | Hidden: %s | Tex: %u | Size: %dx%d\n",
                                      it->id, it->image_path ? it->image_path : "<memory>",
                                      it->shift_multiplier, it->opacity, it->z_index,
                                      it->base_uv_x, it->base_uv_y,
@@ -611,7 +616,8 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                                      over_s,
                                      eff_tile_x?"true":"false", eff_tile_y?"true":"false",
                                      eff_mx, eff_my,
-                                     it->hidden?"yes":"no");
+                                     it->hidden?"yes":"no",
+                                     (unsigned int)it->texture_id, it->width, it->height);
                     if (w < 0 || off + (size_t)w >= sizeof(response)) { break; }
                     off += (size_t)w;
                 }
@@ -856,6 +862,53 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 success = true;
             } else {
                 ipc_errorf(response, sizeof(response), 1217, "Unknown property '%s'\n", property);
+            }
+            break;
+        }
+
+        case IPC_CMD_DIAG: {
+            char *sub = strtok(NULL, " \n");
+            if (!sub) { snprintf(response, sizeof(response), "Error: Usage: diag <subcmd> ...\n"); break; }
+            if (strcmp(sub, "texinfo") == 0) {
+                char *id_str = strtok(NULL, " \n");
+                if (!id_str) { snprintf(response, sizeof(response), "Error: Usage: diag texinfo <id>\n"); break; }
+                uint32_t id = 0; if (!parse_u32(id_str, &id)) { snprintf(response, sizeof(response), "Error: Invalid layer ID\n"); break; }
+                hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+                if (!app) { snprintf(response, sizeof(response), "Error: Runtime context unavailable\n"); break; }
+                parallax_layer_t *layer = layer_list_find(app->layers, id);
+                if (!layer) { snprintf(response, sizeof(response), "Error: Layer %u not found\n", id); break; }
+                const char *path = layer->image_path ? layer->image_path : "";
+                int access_ok = (access(path, R_OK) == 0);
+                struct stat st; int stat_ok = (stat(path, &st) == 0);
+                int w=0,h=0,comp=0; int info_ok = 0; const char *fail = NULL;
+                if (access_ok) {
+                    info_ok = stbi_info(path, &w, &h, &comp);
+                    if (!info_ok) fail = stbi_failure_reason();
+                }
+                snprintf(response, sizeof(response),
+                         "{\"id\":%u,\"path\":\"%s\",\"tex\":%u,\"size\":[%d,%d],\"access\":%s,\"stat\":{\"ok\":%s,\"size\":%lld,\"mtime\":%lld},\"stbi\":{\"ok\":%s,\"w\":%d,\"h\":%d,\"comp\":%d,\"err\":\"%s\"}}\n",
+                         id, path, (unsigned int)layer->texture_id, layer->width, layer->height,
+                         access_ok?"true":"false",
+                         stat_ok?"true":"false",
+                         stat_ok?(long long)st.st_size:0LL,
+                         stat_ok?(long long)st.st_mtime:0LL,
+                         info_ok?"true":"false", w, h, comp, fail?fail:"");
+                success = true; break;
+            } else if (strcmp(sub, "texload") == 0) {
+                char *id_str = strtok(NULL, " \n");
+                if (!id_str) { snprintf(response, sizeof(response), "Error: Usage: diag texload <id>\n"); break; }
+                uint32_t id = 0; if (!parse_u32(id_str, &id)) { snprintf(response, sizeof(response), "Error: Invalid layer ID\n"); break; }
+                hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+                if (!app) { snprintf(response, sizeof(response), "Error: Runtime context unavailable\n"); break; }
+                parallax_layer_t *layer = layer_list_find(app->layers, id);
+                if (!layer) { snprintf(response, sizeof(response), "Error: Layer %u not found\n", id); break; }
+                char prop[64]; snprintf(prop, sizeof(prop), "layer.%u.path", id);
+                int rc = hyprlax_runtime_set_property(app, prop, layer->image_path ? layer->image_path : "");
+                if (rc == 0) { snprintf(response, sizeof(response), "OK\n"); success = true; }
+                else { snprintf(response, sizeof(response), "Error: texload failed\n"); }
+                break;
+            } else {
+                snprintf(response, sizeof(response), "Error: Unknown diag subcommand '%s'\n", sub);
             }
             break;
         }
