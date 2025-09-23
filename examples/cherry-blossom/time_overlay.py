@@ -52,16 +52,10 @@ def create_time_image(font_size=FONT_SIZE, position='center', scale=FONT_SCALE):
         for path in font_paths:
             if os.path.exists(path):
                 font = ImageFont.truetype(path, effective_font_size)
-                font = ImageFont.truetype(path, effective_font_size)
                 print(f"Using font: {path}")
                 break
         if not font:
             # Try to use Pillow's default but with size
-            # Note: load_default ignores size on some Pillow versions
-            font = ImageFont.load_default()
-            print(
-                f"Warning: Using default font (requested size {effective_font_size})"
-            )
             # Note: load_default ignores size on some Pillow versions
             font = ImageFont.load_default()
             print(
@@ -77,7 +71,6 @@ def create_time_image(font_size=FONT_SIZE, position='center', scale=FONT_SCALE):
     text_height = bbox[3] - bbox[1]
     
     # Position the text
-    margin = 150  # Increased margin (unused for center)
     margin = 150  # Increased margin (unused for center)
     
     if position == 'bottom-right':
@@ -107,71 +100,62 @@ def create_time_image(font_size=FONT_SIZE, position='center', scale=FONT_SCALE):
     
     return img
 
-def update_layer(image_path, layer_id=None):
-    """Add or update the time layer via IPC"""
-    if layer_id is None:
-        # Add new layer
-        cmd = [
-            "hyprlax", "ctl", "add", image_path,
-            f"z={LAYER_Z}",
-            f"opacity={LAYER_OPACITY}",
-            f"scale={LAYER_SCALE}"
-        ]
-    else:
-        # For updates, we need to remove and re-add
-        # (since modify can't change the image path)
-        subprocess.run(["hyprlax", "ctl", "remove", str(layer_id)], 
-                      capture_output=True)
-        cmd = [
-            "hyprlax", "ctl", "add", image_path,
-            f"z={LAYER_Z}",
-            f"opacity={LAYER_OPACITY}",
-            f"scale={LAYER_SCALE}"
-        ]
+def create_layer(image_path):
+    """Create a new time layer"""
+    cmd = [
+        "hyprlax", "ctl", "add", image_path,
+        f"z={LAYER_Z}",
+        f"opacity={LAYER_OPACITY}",
+        f"scale={LAYER_SCALE}"
+    ]
     
     result = subprocess.run(cmd, capture_output=True, text=True)
     
     if result.returncode != 0:
-        print(f"Error updating layer: {result.stderr}", file=sys.stderr)
+        print(f"Error adding layer: {result.stderr}", file=sys.stderr)
         return None
     
-    # Extract layer ID from output if adding new layer
-    # Expected format: "Added layer with ID: X"
-    if "Added layer with ID:" in result.stdout:
+    # Extract layer ID from output
+    # Expected format: "Layer added with ID: X"
+    if "Layer added with ID:" in result.stdout:
         try:
-            layer_id = int(result.stdout.split("ID:")[1].strip())
-            return layer_id
+            new_id = int(result.stdout.split("ID:")[1].strip())
+            return new_id
         except:
-            pass
+            print(f"Could not extract layer ID from: {result.stdout}", file=sys.stderr)
     
-    return layer_id
+    return None
+
+def refresh_layer(layer_id, image_path):
+    """Refresh layer by updating its path (forces reload)"""
+    cmd = ["hyprlax", "ctl", "modify", str(layer_id), "path", image_path]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    
+    if result.returncode != 0:
+        print(f"Error refreshing layer: {result.stderr}", file=sys.stderr)
+        return False
+    
+    return True
 
 def get_layer_id():
     """Try to find our time layer ID from the list"""
-    result = subprocess.run(["hyprlax", "ctl", "list"], 
+    import json
+    result = subprocess.run(["hyprlax", "ctl", "list", "--json"], 
                            capture_output=True, text=True)
     if result.returncode == 0:
-        lines = result.stdout.strip().split('\n')
-        for line in lines:
-            if 'time_overlay' in line:
-                # Extract ID from line format: "ID: X | ..."
-                try:
-                    id_str = line.split('|')[0].replace('ID:', '').strip()
-                    return int(id_str)
-                except:
-                    pass
+        try:
+            layers = json.loads(result.stdout)
+            for layer in layers:
+                if 'path' in layer and 'time_overlay' in layer['path']:
+                    return layer.get('id')
+        except json.JSONDecodeError:
+            pass
     return None
 
 def main():
     parser = argparse.ArgumentParser(description='Add time overlay to hyprlax')
     parser.add_argument('--font-size', type=int, default=FONT_SIZE,
                        help=f'Font size for the time display (default: {FONT_SIZE})')
-    parser.add_argument('--position', type=str, default='center',
-                       choices=['bottom-right', 'top-right', 'center', 'bottom-left'],
-                       help='Position of the time display (default: center)')
-    parser.add_argument('--scale', type=float, default=FONT_SCALE,
-                       help='Scale multiplier applied to --font-size '
-                            '(default: 5.0)')
     parser.add_argument('--position', type=str, default='center',
                        choices=['bottom-right', 'top-right', 'center', 'bottom-left'],
                        help='Position of the time display (default: center)')
@@ -216,6 +200,7 @@ def main():
     if args.verbose:
         print(f"Starting time overlay with font size {args.font_size}")
         print(f"Overlay image path: {image_path}")
+<<<<<<< Updated upstream
         if args.only_image:
             print("Only-image mode: Skipping IPC layer creation/update")
     args = parser.parse_args()
@@ -244,6 +229,8 @@ def main():
     if args.verbose:
         print(f"Starting time overlay with font size {args.font_size}")
         print(f"Overlay image path: {image_path}")
+=======
+>>>>>>> Stashed changes
     
     try:
         layer_id = None
@@ -258,6 +245,7 @@ def main():
             if args.verbose or (iteration == 0 and args.once):
                 print(f"Generated time image: {current_time}")
             
+<<<<<<< Updated upstream
             # Update layer via IPC unless only-image mode is set
             if not args.only_image:
                 if layer_id is None:
@@ -270,11 +258,35 @@ def main():
                         else:
                             print(f"Updated time overlay to {current_time}")
                     layer_id = new_layer_id
+=======
+            # On first iteration, check for existing layer or create new one
+            if iteration == 0:
+                layer_id = get_layer_id()
+                if layer_id:
+                    if args.verbose:
+                        print(f"Found existing time layer (ID: {layer_id})")
+                else:
+                    # Create new layer
+                    layer_id = create_layer(image_path)
+                    if layer_id:
+                        print(f"Created time overlay layer (ID: {layer_id})")
+                    else:
+                        print("Failed to create time layer", file=sys.stderr)
+                        break
+>>>>>>> Stashed changes
             
-            iteration += 1
+            # Refresh the layer (this forces hyprlax to reload the image)
+            if iteration > 0 and layer_id:
+                if refresh_layer(layer_id, image_path):
+                    if args.verbose:
+                        print(f"Refreshed time overlay to {current_time}")
+                else:
+                    print(f"Failed to refresh layer for {current_time}", file=sys.stderr)
             
             if args.once:
                 break
+            
+            iteration += 1
             
             # Wait for next update
             if args.verbose:
@@ -285,6 +297,7 @@ def main():
         print("\nStopping time overlay...")
         if (not args.only_image) and layer_id:
             subprocess.run(["hyprlax", "ctl", "remove", str(layer_id)])
+            print(f"Removed time overlay layer (ID: {layer_id})")
     finally:
         # Cleanup only when using a temporary directory (looping mode)
         if cleanup:
