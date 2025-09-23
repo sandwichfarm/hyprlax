@@ -1103,6 +1103,140 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
 
+    /* Apply environment overrides (CLI > ENV > Config > Defaults overall). We read ENV now,
+     * and reapply CLI overrides right after to ensure CLI wins. */
+    {
+        const char *v;
+        v = getenv("HYPRLAX_RENDER_FPS");
+        if (v && *v) {
+            int iv = atoi(v); if (iv > 0 && iv <= 240) ctx->config.target_fps = iv;
+        }
+        v = getenv("HYPRLAX_PARALLAX_SHIFT_PIXELS");
+        if (v && *v) {
+            float f = atof(v); if (f >= 0.0f) ctx->config.shift_pixels = f;
+        }
+        v = getenv("HYPRLAX_ANIMATION_DURATION");
+        if (v && *v) {
+            float f = atof(v); if (f > 0.0f) ctx->config.animation_duration = f;
+        }
+        v = getenv("HYPRLAX_ANIMATION_EASING");
+        if (v && *v) {
+            ctx->config.default_easing = easing_from_string(v);
+        }
+        v = getenv("HYPRLAX_RENDER_VSYNC");
+        if (v && *v) {
+            if (!strcasecmp(v, "1") || !strcasecmp(v, "true") || !strcasecmp(v, "on")) ctx->config.vsync = true;
+            else if (!strcasecmp(v, "0") || !strcasecmp(v, "false") || !strcasecmp(v, "off")) ctx->config.vsync = false;
+        }
+        v = getenv("HYPRLAX_RENDER_TILE_X");
+        if (v && *v) {
+            if (!strcasecmp(v, "1") || !strcasecmp(v, "true") || !strcasecmp(v, "on")) ctx->config.render_tile_x = 1;
+            else if (!strcasecmp(v, "0") || !strcasecmp(v, "false") || !strcasecmp(v, "off")) ctx->config.render_tile_x = 0;
+        }
+        v = getenv("HYPRLAX_RENDER_TILE_Y");
+        if (v && *v) {
+            if (!strcasecmp(v, "1") || !strcasecmp(v, "true") || !strcasecmp(v, "on")) ctx->config.render_tile_y = 1;
+            else if (!strcasecmp(v, "0") || !strcasecmp(v, "false") || !strcasecmp(v, "off")) ctx->config.render_tile_y = 0;
+        }
+        v = getenv("HYPRLAX_RENDER_MARGIN_PX_X");
+        if (v && *v) {
+            float f = atof(v); if (f >= 0.0f) ctx->config.render_margin_px_x = f;
+        }
+        v = getenv("HYPRLAX_RENDER_MARGIN_PX_Y");
+        if (v && *v) {
+            float f = atof(v); if (f >= 0.0f) ctx->config.render_margin_px_y = f;
+        }
+        v = getenv("HYPRLAX_PARALLAX_MODE");
+        if (v && *v) {
+            ctx->config.parallax_mode = parallax_mode_from_string(v);
+        }
+        v = getenv("HYPRLAX_PARALLAX_SOURCES_CURSOR_WEIGHT");
+        if (v && *v) {
+            float f = atof(v); if (f < 0.0f) f = 0.0f; if (f > 1.0f) f = 1.0f; ctx->config.parallax_cursor_weight = f;
+        }
+        v = getenv("HYPRLAX_PARALLAX_SOURCES_WORKSPACE_WEIGHT");
+        if (v && *v) {
+            float f = atof(v); if (f < 0.0f) f = 0.0f; if (f > 1.0f) f = 1.0f; ctx->config.parallax_workspace_weight = f;
+        }
+        v = getenv("HYPRLAX_RENDER_OVERFLOW");
+        if (v && *v) {
+            /* Map to overflow mode if recognized */
+            extern int overflow_from_string_local(const char *s);
+            int m = overflow_from_string_local(v);
+            if (m != -2) ctx->config.render_overflow_mode = m;
+        }
+    }
+
+    /* Reapply CLI overrides for keys that may be overridden by ENV above */
+    {
+        for (int i = 1; i < argc; i++) {
+            const char *arg = argv[i];
+            const char *valeq = NULL;
+            const char *next = (i + 1 < argc) ? argv[i + 1] : NULL;
+            auto const char* get_val(const char *a, const char *n) {
+                const char *eq = strchr(a, '=');
+                return eq ? (eq + 1) : n;
+            }
+            if (!arg) continue;
+            if (!strcmp(arg, "-f") || !strcmp(arg, "--fps") || !strncmp(arg, "--fps=", 6)) {
+                valeq = get_val(arg, next);
+                if (valeq) { int iv = atoi(valeq); if (iv > 0 && iv <= 240) ctx->config.target_fps = iv; }
+                if (arg == argv[i] && strchr(arg, '=')) { /* consumed inline */ }
+                else if (next) i++;
+            } else if (!strcmp(arg, "-s") || !strcmp(arg, "--shift") || !strncmp(arg, "--shift=", 8)) {
+                valeq = get_val(arg, next);
+                if (valeq) { float f = atof(valeq); if (f >= 0.0f) ctx->config.shift_pixels = f; }
+                if (arg == argv[i] && strchr(arg, '=')) { } else if (next) i++;
+            } else if (!strcmp(arg, "-d") || !strcmp(arg, "--duration") || !strncmp(arg, "--duration=", 11)) {
+                valeq = get_val(arg, next);
+                if (valeq) { float f = atof(valeq); if (f > 0.0f) ctx->config.animation_duration = f; }
+                if (arg == argv[i] && strchr(arg, '=')) { } else if (next) i++;
+            } else if (!strcmp(arg, "-e") || !strcmp(arg, "--easing") || !strncmp(arg, "--easing=", 10)) {
+                valeq = get_val(arg, next);
+                if (valeq) { ctx->config.default_easing = easing_from_string(valeq); }
+                if (arg == argv[i] && strchr(arg, '=')) { } else if (next) i++;
+            } else if (!strcmp(arg, "-V") || !strcmp(arg, "--vsync")) {
+                ctx->config.vsync = true;
+            } else if (!strncmp(arg, "--overflow=", 12) || !strcmp(arg, "--overflow")) {
+                const char *v2 = strchr(arg, '=') ? strchr(arg, '=') + 1 : next;
+                if (v2) {
+                    extern int overflow_from_string_local(const char *s);
+                    int m = overflow_from_string_local(v2);
+                    if (m != -2) ctx->config.render_overflow_mode = m;
+                }
+                if (!strchr(arg, '=') && next) i++;
+            } else if (!strcmp(arg, "--tile-x")) {
+                ctx->config.render_tile_x = 1;
+            } else if (!strcmp(arg, "--tile-y")) {
+                ctx->config.render_tile_y = 1;
+            } else if (!strcmp(arg, "--no-tile-x")) {
+                ctx->config.render_tile_x = 0;
+            } else if (!strcmp(arg, "--no-tile-y")) {
+                ctx->config.render_tile_y = 0;
+            } else if (!strncmp(arg, "--margin-px-x=", 14) || !strcmp(arg, "--margin-px-x")) {
+                const char *v2 = strchr(arg, '=') ? strchr(arg, '=') + 1 : next;
+                if (v2) { float f = atof(v2); if (f >= 0.0f) ctx->config.render_margin_px_x = f; }
+                if (!strchr(arg, '=') && next) i++;
+            } else if (!strncmp(arg, "--margin-px-y=", 14) || !strcmp(arg, "--margin-px-y")) {
+                const char *v2 = strchr(arg, '=') ? strchr(arg, '=') + 1 : next;
+                if (v2) { float f = atof(v2); if (f >= 0.0f) ctx->config.render_margin_px_y = f; }
+                if (!strchr(arg, '=') && next) i++;
+            } else if (!strncmp(arg, "--parallax=", 11) || !strcmp(arg, "--parallax")) {
+                const char *v2 = strchr(arg, '=') ? strchr(arg, '=') + 1 : next;
+                if (v2) { ctx->config.parallax_mode = parallax_mode_from_string(v2); }
+                if (!strchr(arg, '=') && next) i++;
+            } else if (!strncmp(arg, "--mouse-weight=", 15) || !strcmp(arg, "--mouse-weight")) {
+                const char *v2 = strchr(arg, '=') ? strchr(arg, '=') + 1 : next;
+                if (v2) { float f = atof(v2); if (f < 0.0f) f = 0.0f; if (f > 1.0f) f = 1.0f; ctx->config.parallax_cursor_weight = f; }
+                if (!strchr(arg, '=') && next) i++;
+            } else if (!strncmp(arg, "--workspace-weight=", 20) || !strcmp(arg, "--workspace-weight")) {
+                const char *v2 = strchr(arg, '=') ? strchr(arg, '=') + 1 : next;
+                if (v2) { float f = atof(v2); if (f < 0.0f) f = 0.0f; if (f > 1.0f) f = 1.0f; ctx->config.parallax_workspace_weight = f; }
+                if (!strchr(arg, '=') && next) i++;
+            }
+        }
+    }
+
     /* Initialize logging system */
     log_init(ctx->config.debug, ctx->config.debug_log_path);
     /* Apply explicit log level (supports --trace and HYPRLAX_VERBOSE) */

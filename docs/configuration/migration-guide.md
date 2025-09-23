@@ -246,3 +246,22 @@ align = { x = 0.8, y = 0.7 }  # Position planet
 - See [TOML Reference](toml-reference.md) for all options
 - Check [Examples](examples/) for working configs
 - Report issues: https://github.com/sandwichfarm/hyprlax/issues
+### Canonical Keys and Naming
+
+Hyprlax now uses canonical dotted, snake_case keys consistently across Config (TOML), CLI/IPC, and ENV. Use these forms going forward; legacy aliases remain accepted for compatibility.
+
+- Global keys
+  - `render.fps` (ENV: `HYPRLAX_RENDER_FPS`) — alias: `fps`
+  - `parallax.shift_pixels` (ENV: `HYPRLAX_PARALLAX_SHIFT_PIXELS`) — alias: `shift`
+  - `animation.duration` (ENV: `HYPRLAX_ANIMATION_DURATION`) — alias: `duration`
+  - `animation.easing` (ENV: `HYPRLAX_ANIMATION_EASING`) — alias: `easing`
+
+- Per-layer keys (add/modify)
+  - `shift_multiplier` — alias: `scale`
+  - `uv_offset.x`, `uv_offset.y` — alias: `x`, `y`
+  - `align.x`, `align.y` — alias: `align_x`, `align_y`
+  - `margin_px.x`, `margin_px.y` — alias: `margin.x`, `margin.y`
+  - `visible` — alias: `hidden` (inverse semantics)
+  - `fit`, `overflow`, `tile.x`, `tile.y`, `opacity`, `blur`, `z`, `path`
+
+`hyprlax ctl list --json` now uses `shift_multiplier`, `uv_offset`, `content_scale`, `margin_px`, and `visible`.

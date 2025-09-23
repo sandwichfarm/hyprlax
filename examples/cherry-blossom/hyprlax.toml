@@ -4,7 +4,7 @@ debug = false
 duration = 3.0
 shift = 100
 vsync = false
-easing = expo
+easing = "expo"
 
 [global.parallax]
 mode = "cursor"

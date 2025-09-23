@@ -13,12 +13,12 @@ hyprlax ctl add /path/to/img.png 1.2 0.9 0
 
 # Modify layer properties
 hyprlax ctl modify 1 opacity 0.5
-hyprlax ctl modify 1 scale 0.8
+hyprlax ctl modify 1 shift_multiplier 0.8
 
 # UV pan (normalized): shifts the sampled texture
 # Typical range: -0.10 .. 0.10 (1.00 = full texture width/height)
-hyprlax ctl modify 1 x 0.05
-hyprlax ctl modify 1 y -0.02
+hyprlax ctl modify 1 uv_offset.x 0.05
+hyprlax ctl modify 1 uv_offset.y -0.02
 
 # Z-order (ascending): lower z draws first (behind)
 hyprlax ctl modify 1 z 10
@@ -28,16 +28,16 @@ hyprlax ctl modify 1 blur 3.0
 
 # Fit/align/content scale
 hyprlax ctl modify 1 fit cover
-hyprlax ctl modify 1 align_x 0.5
-hyprlax ctl modify 1 align_y 0.5
+hyprlax ctl modify 1 align.x 0.5
+hyprlax ctl modify 1 align.y 0.5
 hyprlax ctl modify 1 content_scale 1.2
 
 # Overflow/tiling/margins
 hyprlax ctl modify 1 overflow none
 hyprlax ctl modify 1 tile.x true
 hyprlax ctl modify 1 tile.y false
-hyprlax ctl modify 1 margin.x 24
-hyprlax ctl modify 1 margin.y 24
+hyprlax ctl modify 1 margin_px.x 24
+hyprlax ctl modify 1 margin_px.y 24
 
 # Remove / list / clear
 hyprlax ctl remove 1
@@ -59,14 +59,14 @@ hyprlax ctl down  2   # move backward by one step
 ## Settings
 
 ```bash
-# Friendly aliases
-hyprlax ctl set fps 120
-hyprlax ctl set shift 200
-hyprlax ctl set duration 1.2
-hyprlax ctl set easing cubic
+# Canonical dotted keys (aliases like fps/shift/duration/easing are accepted):
+hyprlax ctl set render.fps 120
+hyprlax ctl set parallax.shift_pixels 200
+hyprlax ctl set animation.duration 1.2
+hyprlax ctl set animation.easing cubic
 
-hyprlax ctl get fps
-hyprlax ctl get duration
+hyprlax ctl get render.fps
+hyprlax ctl get animation.duration
 ```
 
 Structured properties are also available (examples):
@@ -96,4 +96,3 @@ If you need pixel-accurate positioning in screen space, consider using per-pixel
 hyprlax ctl status           # add --json for machine-readable output
 hyprlax ctl reload           # reload config (TOML or legacy fallback)
 ```
-
