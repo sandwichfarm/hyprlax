@@ -158,8 +158,9 @@ hyprlax ctl status [--json|-j] [--long|-l]
 ```
 
 **Output includes:**
-- Running state, layers count, target FPS, current FPS, parallax mode, compositor, socket, vsync, debug
-- With `--json`, also includes `monitors[]` objects (name, size, position, scale, refresh, capability flags)
+- Default (text): running state, layers, target FPS, current FPS, parallax mode, Render (overflow + tile), compositor, socket, vsync, debug
+- `--long`: adds Shift Pixels, Parallax Weights (workspace/cursor), and full Render defaults (overflow, tile, margin_px)
+- `--json`: full machine-readable status including the above plus `monitors[]` (name, size, pos, scale, refresh, caps)
 
 ### reload
 Reload configuration file.

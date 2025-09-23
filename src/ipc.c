@@ -870,6 +870,10 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                                  over_s, tile_x?"true":"false", tile_y?"true":"false", mpx, mpy,
                                  monitors, comp, ctx->socket_path);
                     } else {
+                        int eff_over = app ? app->config.render_overflow_mode : 0;
+                        const char *over_s = (eff_over==0?"repeat_edge": eff_over==1?"repeat": eff_over==2?"repeat_x": eff_over==3?"repeat_y": eff_over==4?"none":"inherit");
+                        int tile_x = app ? app->config.render_tile_x : 0;
+                        int tile_y = app ? app->config.render_tile_y : 0;
                         snprintf(response, sizeof(response),
                                  "Status: Active\n"
                                  "hyprlax running\n"
@@ -877,10 +881,13 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                                  "Target FPS: %d\n"
                                  "FPS: %.1f\n"
                                  "Parallax: %s\n"
+                                 "Render: overflow=%s tile=%s/%s\n"
                                  "Monitors: %d\n"
                                  "Compositor: %s\n"
                                  "Socket: %s\n",
-                                 layers, target_fps, fps, mode, monitors, comp, ctx->socket_path);
+                                 layers, target_fps, fps, mode,
+                                 over_s, tile_x?"true":"false", tile_y?"true":"false",
+                                 monitors, comp, ctx->socket_path);
                     }
                 }
                 success = true;
