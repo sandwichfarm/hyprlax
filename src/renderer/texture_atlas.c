@@ -41,7 +41,7 @@ static int next_pow2(int n) {
 }
 
 /* Create texture atlas from multiple textures */
-texture_atlas_t* texture_atlas_create(texture_t **textures, int texture_count, 
+texture_atlas_t* texture_atlas_create(texture_t **textures, int texture_count,
                                       const renderer_ops_t *ops, bool enabled) {
     if (!enabled || !textures || texture_count <= 0 || !ops) {
         return NULL;
@@ -91,7 +91,7 @@ texture_atlas_t* texture_atlas_create(texture_t **textures, int texture_count,
 
     for (int i = 0; i < texture_count; i++) {
         texture_t *tex = textures[i];
-        
+
         /* Check if we need to move to next row */
         if (current_x + tex->width > atlas->atlas_width) {
             current_x = 0;
@@ -113,14 +113,14 @@ texture_atlas_t* texture_atlas_create(texture_t **textures, int texture_count,
 
         /* Note: We'd need access to the actual pixel data to copy it
          * For now, this is a placeholder structure */
-        
+
         current_x += max_texture_width;
     }
 
     /* Create the atlas texture */
-    atlas->atlas_texture = ops->create_texture(atlas_data, atlas->atlas_width, 
+    atlas->atlas_texture = ops->create_texture(atlas_data, atlas->atlas_width,
                                                atlas->atlas_height, TEXTURE_FORMAT_RGBA);
-    
+
     free(atlas_data);
 
     if (!atlas->atlas_texture) {
@@ -151,9 +151,9 @@ texture_t* texture_atlas_get_texture(texture_atlas_t *atlas) {
 }
 
 /* Get UV coordinates for a texture in the atlas */
-bool texture_atlas_get_uv(texture_atlas_t *atlas, int texture_index, 
+bool texture_atlas_get_uv(texture_atlas_t *atlas, int texture_index,
                           float *u1, float *v1, float *u2, float *v2) {
-    if (!atlas || !atlas->enabled || texture_index < 0 || 
+    if (!atlas || !atlas->enabled || texture_index < 0 ||
         texture_index >= atlas->entry_count) {
         return false;
     }
@@ -178,7 +178,7 @@ void texture_atlas_get_dimensions(texture_atlas_t *atlas, int *width, int *heigh
         if (height) *height = 0;
         return;
     }
-    
+
     if (width) *width = atlas->atlas_width;
     if (height) *height = atlas->atlas_height;
 }

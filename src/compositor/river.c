@@ -165,25 +165,25 @@ static bool get_river_socket_paths(char *control_path, char *status_path, size_t
     if (control_path) {
         snprintf(control_path, size, "%s/river.control.%s", runtime_dir, wayland_display);
     }
-    
+
     /* Status socket for monitoring events - uses Wayland protocol extension */
     if (status_path) {
         snprintf(status_path, size, "%s/%s", runtime_dir, wayland_display);
     }
-    
+
     return true;
 }
 
 /* Helper: Calculate primary tag based on policy */
 static int get_primary_tag(uint32_t tags, river_tag_policy_t policy) {
     if (tags == 0) return 1;
-    
+
     /* Check if only one tag is visible */
     if ((tags & (tags - 1)) == 0) {
         /* Single tag visible - use it regardless of policy */
         return get_first_tag(tags);
     }
-    
+
     /* Multiple tags visible - apply policy */
     switch (policy) {
         case TAG_POLICY_HIGHEST: {
@@ -196,16 +196,16 @@ static int get_primary_tag(uint32_t tags, river_tag_policy_t policy) {
             }
             return tag;
         }
-        
+
         case TAG_POLICY_LOWEST:
         case TAG_POLICY_FIRST_SET:
             /* Find lowest set bit */
             return get_first_tag(tags);
-            
+
         case TAG_POLICY_NO_PARALLAX:
             /* Return current tag to prevent animation */
             return -1;
-            
+
         default:
             return get_first_tag(tags);
     }
@@ -214,7 +214,7 @@ static int get_primary_tag(uint32_t tags, river_tag_policy_t policy) {
 /* Load River configuration from environment */
 static void river_load_config(river_data_t *data) {
     if (!data) return;
-    
+
     /* Check for tag policy configuration */
     const char *tag_policy = getenv("HYPRLAX_RIVER_TAG_POLICY");
     if (tag_policy) {
@@ -229,17 +229,17 @@ static void river_load_config(river_data_t *data) {
                    strcasecmp(tag_policy, "no_parallax") == 0) {
             data->tag_policy = TAG_POLICY_NO_PARALLAX;
         }
-        
+
         LOG_DEBUG("River tag policy set to: %s", tag_policy);
     }
-    
+
     /* Check if animation should be disabled for multi-tag */
     const char *animate = getenv("HYPRLAX_RIVER_ANIMATE_TAGS");
     if (animate) {
         data->animate_on_tag_change = (strcasecmp(animate, "false") != 0 &&
                                       strcasecmp(animate, "0") != 0);
     }
-    
+
     /* Tag count configuration */
     const char *tag_count = getenv("HYPRLAX_RIVER_TAG_COUNT");
     if (tag_count) {
@@ -284,7 +284,7 @@ static int river_init(void *platform_data) {
     g_river_data->animate_on_tag_change = true;
     g_river_data->tags_changed = false;
     g_river_data->new_focused_tags = 1;
-    
+
     /* Load configuration from environment */
     river_load_config(g_river_data);
 
@@ -305,7 +305,7 @@ static void river_destroy(void) {
     if (g_river_data->status_manager) {
         zriver_status_manager_v1_destroy(g_river_data->status_manager);
     }
-    
+
     /* Clean up Wayland objects */
     if (g_river_data->registry) {
         wl_registry_destroy(g_river_data->registry);
@@ -473,7 +473,7 @@ static int connect_river_socket(const char *path) {
 /* Connect to River IPC */
 static int river_connect_ipc(const char *socket_path) {
     (void)socket_path; /* Not used - auto-detect */
-    
+
     if (!g_river_data) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
@@ -494,10 +494,10 @@ static int river_connect_ipc(const char *socket_path) {
     /* Get registry and bind globals */
     g_river_data->registry = wl_display_get_registry(g_river_data->display);
     wl_registry_add_listener(g_river_data->registry, &registry_listener, g_river_data);
-    
+
     /* Roundtrip to get globals */
     wl_display_roundtrip(g_river_data->display);
-    
+
     /* Check if river-status protocol is available */
     if (!g_river_data->status_manager) {
         if (getenv("HYPRLAX_DEBUG")) {
@@ -508,7 +508,7 @@ static int river_connect_ipc(const char *socket_path) {
         g_river_data->status_connected = false;
         return HYPRLAX_SUCCESS;
     }
-    
+
     /* Create status objects if we have the required globals */
     if (g_river_data->seat && !g_river_data->seat_status) {
         g_river_data->seat_status = zriver_status_manager_v1_get_river_seat_status(
@@ -516,18 +516,18 @@ static int river_connect_ipc(const char *socket_path) {
         zriver_seat_status_v1_add_listener(g_river_data->seat_status,
                                           &seat_status_listener, g_river_data);
     }
-    
+
     if (g_river_data->output && !g_river_data->output_status) {
         g_river_data->output_status = zriver_status_manager_v1_get_river_output_status(
             g_river_data->status_manager, g_river_data->output);
         zriver_output_status_v1_add_listener(g_river_data->output_status,
                                             &output_status_listener, g_river_data);
     }
-    
+
     /* Flush and get initial state */
     wl_display_flush(g_river_data->display);
     wl_display_roundtrip(g_river_data->display);
-    
+
     g_river_data->connected = true;
     g_river_data->status_connected = (g_river_data->seat_status != NULL ||
                                      g_river_data->output_status != NULL);
@@ -558,7 +558,7 @@ static void river_disconnect_ipc(void) {
         zriver_status_manager_v1_destroy(g_river_data->status_manager);
         g_river_data->status_manager = NULL;
     }
-    
+
     if (g_river_data->registry) {
         wl_registry_destroy(g_river_data->registry);
         g_river_data->registry = NULL;
@@ -582,31 +582,31 @@ static int river_poll_events(compositor_event_t *event) {
     if (g_river_data->status_connected && g_river_data->display) {
         /* Process pending Wayland events */
         wl_display_dispatch_pending(g_river_data->display);
-        
+
         /* Check if we have a tag change to report */
         if (g_river_data->tags_changed) {
             uint32_t new_tags = g_river_data->new_focused_tags;
             g_river_data->tags_changed = false;
-            
+
             /* Process tag change */
             if (new_tags != g_river_data->focused_tags) {
         /* Calculate primary tags for animation */
         int old_primary = get_primary_tag(g_river_data->focused_tags, g_river_data->tag_policy);
         int new_primary = get_primary_tag(new_tags, g_river_data->tag_policy);
-        
+
         /* Check for multi-tag scenarios */
         bool old_multi = (g_river_data->focused_tags & (g_river_data->focused_tags - 1)) != 0;
         bool new_multi = (new_tags & (new_tags - 1)) != 0;
-        
+
         if (getenv("HYPRLAX_DEBUG")) {
             fprintf(stderr, "[DEBUG] River tag state: old=0x%x (%s) new=0x%x (%s)\n",
                     g_river_data->focused_tags, old_multi ? "multi" : "single",
                     new_tags, new_multi ? "multi" : "single");
         }
-        
+
         /* Determine if we should animate */
         bool should_animate = g_river_data->animate_on_tag_change;
-        
+
         /* Apply multi-tag policy */
         if (new_multi && g_river_data->tag_policy == TAG_POLICY_NO_PARALLAX) {
             should_animate = false;
@@ -614,7 +614,7 @@ static int river_poll_events(compositor_event_t *event) {
                 fprintf(stderr, "[DEBUG] River: Disabling animation due to multi-tag with NO_PARALLAX policy\n");
             }
         }
-        
+
         if (should_animate && old_primary > 0 && new_primary > 0 && old_primary != new_primary) {
             event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
             event->data.workspace.from_workspace = old_primary;
@@ -629,36 +629,36 @@ static int river_poll_events(compositor_event_t *event) {
                    g_river_data->current_output_name,
                    sizeof(event->data.workspace.monitor_name) - 1);
             event->data.workspace.monitor_name[sizeof(event->data.workspace.monitor_name) - 1] = '\0';
-            
+
             g_river_data->previous_focused_tags = g_river_data->focused_tags;
             g_river_data->focused_tags = new_tags;
-            
+
             if (getenv("HYPRLAX_DEBUG")) {
                 fprintf(stderr, "[DEBUG] River tag change event: %d -> %d (tags: 0x%x -> 0x%x)\n",
                         old_primary, new_primary,
                         g_river_data->previous_focused_tags, new_tags);
             }
-            
+
             return HYPRLAX_SUCCESS;
         }
-        
+
                 /* Update tags even if not animating */
                 g_river_data->previous_focused_tags = g_river_data->focused_tags;
                 g_river_data->focused_tags = new_tags;
-                
+
                 if (getenv("HYPRLAX_DEBUG") && !should_animate) {
                     fprintf(stderr, "[DEBUG] River tags updated without animation: 0x%x -> 0x%x\n",
                             g_river_data->previous_focused_tags, new_tags);
                 }
             }
         }
-        
+
         /* Check for more events */
         if (wl_display_prepare_read(g_river_data->display) == 0) {
             wl_display_read_events(g_river_data->display);
         }
     }
-    
+
     return HYPRLAX_ERROR_NO_DATA;
 }
 
@@ -676,12 +676,12 @@ static int river_send_command(const char *command, char *response,
     /* River commands are sent via riverctl, not a persistent socket */
     char cmd_buffer[1024];
     snprintf(cmd_buffer, sizeof(cmd_buffer), "riverctl %s 2>&1", command);
-    
+
     FILE *fp = popen(cmd_buffer, "r");
     if (!fp) {
         return HYPRLAX_ERROR_NO_DISPLAY;
     }
-    
+
     /* Read response if buffer provided */
     if (response && response_size > 0) {
         size_t total = 0;
@@ -691,7 +691,7 @@ static int river_send_command(const char *command, char *response,
         }
         response[response_size - 1] = '\0';
     }
-    
+
     int result = pclose(fp);
     return (result == 0) ? HYPRLAX_SUCCESS : HYPRLAX_ERROR_INVALID_ARGS;
 }
@@ -754,10 +754,10 @@ static void seat_status_focused_output(void *data,
     (void)seat_status;
     river_data_t *river = (river_data_t *)data;
     if (!river) return;
-    
+
     /* Store focused output for workspace events */
     river->output = output;
-    
+
     LOG_DEBUG("River: Focused output changed");
 }
 
@@ -794,12 +794,12 @@ static void output_status_focused_tags(void *data,
     (void)output_status;
     river_data_t *river = (river_data_t *)data;
     if (!river) return;
-    
+
     /* Store the new tags - we'll process them in poll_events */
     if (tags != river->focused_tags) {
         river->tags_changed = true;
         river->new_focused_tags = tags;
-        
+
         LOG_DEBUG("River: Tags changed from 0x%x to 0x%x", river->focused_tags, tags);
     }
 }
@@ -811,7 +811,7 @@ static void output_status_view_tags(void *data,
     (void)tags;
     river_data_t *river = (river_data_t *)data;
     if (!river) return;
-    
+
     /* This gives us occupied tags - which windows are on which tags */
     /* We could use this to optimize animations */
 }
@@ -822,7 +822,7 @@ static void output_status_urgent_tags(void *data,
     (void)output_status;
     river_data_t *river = (river_data_t *)data;
     if (!river) return;
-    
+
     river->urgent_tags = tags;
 }
 
@@ -847,7 +847,7 @@ static void registry_global(void *data, struct wl_registry *registry,
                            uint32_t name, const char *interface, uint32_t version) {
     river_data_t *river = (river_data_t *)data;
     if (!river) return;
-    
+
     if (strcmp(interface, "zriver_status_manager_v1") == 0) {
         river->status_manager = wl_registry_bind(registry, name,
                                                 &zriver_status_manager_v1_interface,

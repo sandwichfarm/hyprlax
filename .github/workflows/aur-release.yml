@@ -1,0 +1,79 @@
+name: Publish AUR (hyprlax)
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  aur:
+    if: ${{ github.event.release.prerelease == false }}
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install tools
+        run: |
+          pacman -Syu --noconfirm git openssh wget sed which base-devel wayland wayland-protocols
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare PKGBUILD for release tag
+        id: prep
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TAG:-}" ]]; then echo "Missing tag"; exit 1; fi
+          PKGVER="${TAG#v}"
+          echo "pkgver=${PKGVER}" >> "$GITHUB_OUTPUT"
+          WORKDIR=/tmp/aur-hyprlax
+          mkdir -p "$WORKDIR"
+          cp packaging/arch/hyprlax/PKGBUILD "$WORKDIR/PKGBUILD"
+          # Update pkgver in PKGBUILD
+          sed -i "s/^pkgver=.*/pkgver=${PKGVER}/" "$WORKDIR/PKGBUILD"
+          # Fetch source tarball and compute sha256
+          TARBALL_URL="https://github.com/sandwichfarm/hyprlax/archive/refs/tags/${TAG}.tar.gz"
+          wget -O /tmp/src.tar.gz "$TARBALL_URL"
+          SHA256=$(sha256sum /tmp/src.tar.gz | awk '{print $1}')
+          # Ensure source filename has v${pkgver}
+          sed -i "s|^source=.*|source=(\"hyprlax-v${PKGVER}.tar.gz::${TARBALL_URL}\")|" "$WORKDIR/PKGBUILD"
+          sed -i "s/^sha256sums=.*/sha256sums=('${SHA256}')/" "$WORKDIR/PKGBUILD"
+          # Generate .SRCINFO
+          cd "$WORKDIR"
+          makepkg --printsrcinfo > .SRCINFO
+          ls -la
+
+      - name: Configure SSH for AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${AUR_SSH_PRIVATE_KEY:-}" ]]; then
+            echo "AUR_SSH_PRIVATE_KEY secret is not set" >&2
+            exit 1
+          fi
+          install -m 700 -d ~/.ssh
+          echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
+
+      - name: Push to AUR (hyprlax)
+        env:
+          PKGDIR: /tmp/aur-hyprlax
+        run: |
+          set -euo pipefail
+          cd /tmp
+          git clone ssh://aur@aur.archlinux.org/hyprlax.git aur-hyprlax-repo
+          cd aur-hyprlax-repo
+          # Copy updated files
+          cp -f "$PKGDIR/PKGBUILD" "$PKGDIR/.SRCINFO" .
+          if git diff --quiet --no-index . "$PKGDIR"; then
+            echo "No changes to push to AUR"
+            exit 0
+          fi
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add PKGBUILD .SRCINFO
+          git commit -m "release: ${GITHUB_REF#refs/tags/}"
+          git push
+
