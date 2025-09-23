@@ -29,6 +29,20 @@ The installer will:
 - Set up your PATH if needed
 - Restart hyprlax if it's already running (for upgrades)
 
+## Install from AUR (Arch Linux)
+
+If you’re on Arch or an Arch-based distribution, you can install from the AUR:
+
+```bash
+# Using an AUR helper (recommended)
+yay -S hyprlax-git
+
+# Manual AUR build
+git clone https://aur.archlinux.org/hyprlax-git.git
+cd hyprlax-git
+makepkg -si
+```
+
 ## Installing from Release
 
 Download pre-built binaries from the [releases page](https://github.com/sandwichfarm/hyprlax/releases):

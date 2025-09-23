@@ -820,7 +820,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 ctx->monitor_mode = MULTI_MON_SPECIFIC;
                 LOG_DEBUG("Monitor selection: %s", optarg);
                 break;
-                
+
             case 1003:  /* --idle-poll-rate */
                 ctx->config.idle_poll_rate = atof(optarg);
                 if (ctx->config.idle_poll_rate < 0.1f || ctx->config.idle_poll_rate > 10.0f) {
@@ -1771,7 +1771,7 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
         LOG_ERROR("render_frame: No renderer available");
         return;
     }
-    
+
     /* Track if this frame is actually different from last frame (unused placeholder removed) */
 
     /* Always use monitor list - single monitor is just count=1 */
@@ -1816,17 +1816,17 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
 /* Check if any layer has active animations */
 static bool has_active_animations(hyprlax_context_t *ctx) {
     if (!ctx) return false;
-    
+
     /* Check layer animations */
     parallax_layer_t *layer = ctx->layers;
     while (layer) {
-        if (animation_is_active(&layer->x_animation) || 
+        if (animation_is_active(&layer->x_animation) ||
             animation_is_active(&layer->y_animation)) {
             return true;
         }
         layer = layer->next;
     }
-    
+
     /* Check monitor animations */
     if (ctx->monitors) {
         monitor_instance_t *monitor = ctx->monitors->head;
@@ -1837,7 +1837,7 @@ static bool has_active_animations(hyprlax_context_t *ctx) {
             monitor = monitor->next;
         }
     }
-    
+
     return false;
 }
 
@@ -1863,9 +1863,9 @@ int hyprlax_run(hyprlax_context_t *ctx) {
     int frame_count = 0;
     double debug_timer = 0.0;
     bool needs_render = true;  /* Render first frame */
-    
+
     if (ctx->config.debug) {
-        LOG_DEBUG("Frame time calculated: %.6f seconds (target FPS: %d)", 
+        LOG_DEBUG("Frame time calculated: %.6f seconds (target FPS: %d)",
                   frame_time, ctx->config.target_fps);
     }
 
@@ -1949,7 +1949,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
 
         /* Check if animations are active */
         bool animations_active = has_active_animations(ctx);
-        
+
         /* While animating, always need to render; with frame callbacks, wait for compositor pacing */
         const char *use_fc = getenv("HYPRLAX_FRAME_CALLBACK");
         if (animations_active) {
@@ -1966,7 +1966,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                 needs_render = true;
             }
         }
-        
+
         /* Only update animations if they're active */
         if (animations_active) {
             /* Update layer animations */
@@ -1980,23 +1980,23 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                     monitor = monitor->next;
                 }
             }
-            
+
             /* Re-check if animations are still active after update */
             bool still_animating = has_active_animations(ctx);
-            
+
             /* Ensure one final frame when animations complete */
             if (!still_animating && animations_active) {
                 needs_render = true;  /* Final frame */
                 diag_final = true;
             }
-            
+
             /* Update the animations_active flag for next iteration */
             animations_active = still_animating;
         }
 
         /* Calculate time since last render */
         double time_since_render = current_time - last_render_time;
-        
+
         /* Render frame if:
          * 1. We need to render (animation active, workspace changed, etc.)
          * 2. Enough time has passed since last frame (respecting target FPS)
@@ -2005,7 +2005,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             if (ctx->config.debug) {
                 static double last_log_time = 0;
                 if (current_time - last_log_time > 1.0) {
-                    LOG_DEBUG("RENDERING: animations=%d, time_since_render=%.3f", 
+                    LOG_DEBUG("RENDERING: animations=%d, time_since_render=%.3f",
                               animations_active, time_since_render);
                     last_log_time = current_time;
                 }
@@ -2026,7 +2026,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
     ctx->fps = 1.0 / time_since_render;
     last_render_time = current_time;
     frame_count++;
-            
+
     /* Clear needs_render flag; request another frame if deferred work pending */
     needs_render = ctx->deferred_render_needed;
     ctx->deferred_render_needed = false;
@@ -2035,7 +2035,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             if (ctx->config.debug) {
                 debug_timer += time_since_render;
                 if (debug_timer >= 1.0) {
-                    LOG_DEBUG("FPS: %.1f, Layers: %d, Animations: %s", 
+                    LOG_DEBUG("FPS: %.1f, Layers: %d, Animations: %s",
                              ctx->fps, ctx->layer_count,
                              animations_active ? "active" : "idle");
                     debug_timer = 0.0;
