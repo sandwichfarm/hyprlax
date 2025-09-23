@@ -11,7 +11,7 @@ import argparse
 
 # Configuration
 FONT_SIZE = 120  # Base font size (pre-scale)
-FONT_SCALE = 5.0  # Default scale multiplier (~5x larger)
+FONT_SCALE = 11.0  # Default scale multiplier (~5x larger)
 FONT_COLOR = (255, 255, 255, 255)  # Pure white
 SHADOW_COLOR = (0, 0, 0, 200)  # Darker shadow for readability
 SHADOW_OFFSET = 4
@@ -65,10 +65,16 @@ def create_time_image(font_size=FONT_SIZE, position='center', scale=FONT_SCALE):
         print(f"Font error: {e}")
         font = ImageFont.load_default()
     
-    # Calculate text dimensions
+    # Calculate text dimensions using textbbox
     bbox = draw.textbbox((0, 0), current_time, font=font)
     text_width = bbox[2] - bbox[0]
     text_height = bbox[3] - bbox[1]
+    
+    # Account for the text baseline offset
+    # textbbox returns the actual bounding box, including ascent/descent
+    # We need to adjust for the baseline position
+    text_offset_x = -bbox[0]  # Left bearing compensation
+    text_offset_y = -bbox[1]  # Top bearing compensation
     
     # Position the text
     margin = 150  # Increased margin (unused for center)
@@ -80,11 +86,16 @@ def create_time_image(font_size=FONT_SIZE, position='center', scale=FONT_SCALE):
         x = width - text_width - margin
         y = margin
     elif position == 'center':
+        # True center accounting for text metrics
         x = (width - text_width) // 2
         y = (height - text_height) // 2
     else:  # bottom-left
         x = margin
         y = height - text_height - margin
+    
+    # Apply the offset corrections
+    x += text_offset_x
+    y += text_offset_y
     
     # Draw shadow for better visibility
     draw.text((x + SHADOW_OFFSET, y + SHADOW_OFFSET), current_time, 
@@ -94,7 +105,7 @@ def create_time_image(font_size=FONT_SIZE, position='center', scale=FONT_SCALE):
     draw.text((x, y), current_time, font=font, fill=FONT_COLOR)
     
     # Debug: Draw a visible border to confirm image is being rendered
-    # draw.rectangle([0, 0, width-1, height-1], outline=(255, 0, 0, 100), width=5)
+    # draw.rectanglehyprlax([0, 0, width-1, height-1], outline=(255, 0, 0, 100), width=5)
     
     print(f"Time '{current_time}' positioned at ({x}, {y}), size: {text_width}x{text_height}")
     
@@ -106,7 +117,9 @@ def create_layer(image_path):
         "hyprlax", "ctl", "add", image_path,
         f"z={LAYER_Z}",
         f"opacity={LAYER_OPACITY}",
-        f"scale={LAYER_SCALE}"
+        f"scale={LAYER_SCALE}",
+        f"fit=cover"
+        f"scale=0.0"
     ]
     
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -200,88 +213,54 @@ def main():
     if args.verbose:
         print(f"Starting time overlay with font size {args.font_size}")
         print(f"Overlay image path: {image_path}")
-<<<<<<< Updated upstream
-        if args.only_image:
-            print("Only-image mode: Skipping IPC layer creation/update")
-    args = parser.parse_args()
-    
-    # Decide output directory behavior
-    # - If --out-dir provided: use it (absolute or relative to this script)
-    # - Else if --once: use persistent ./tmp next to this script
-    # - Else: use a temporary directory that will be cleaned up
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    cleanup = False
-
-    if args.out_dir:
-        out_dir = args.out_dir
-        if not os.path.isabs(out_dir):
-            out_dir = os.path.join(script_dir, out_dir)
-        os.makedirs(out_dir, exist_ok=True)
-    elif args.once:
-        out_dir = os.path.join(script_dir, 'tmp')
-        os.makedirs(out_dir, exist_ok=True)
-    else:
-        out_dir = tempfile.mkdtemp(prefix='hyprlax_time_')
-        cleanup = True
-
-    image_path = os.path.join(out_dir, 'time_overlay.png')
-    
-    if args.verbose:
-        print(f"Starting time overlay with font size {args.font_size}")
-        print(f"Overlay image path: {image_path}")
-=======
->>>>>>> Stashed changes
     
     try:
         layer_id = None
         iteration = 0
+        last_time = None
         
         while True:
-            # Generate new time image
+            # Get current time
             current_time = datetime.now().strftime("%H:%M")
-            img = create_time_image(args.font_size, args.position, args.scale)
-            img.save(image_path)
             
-            if args.verbose or (iteration == 0 and args.once):
-                print(f"Generated time image: {current_time}")
-            
-<<<<<<< Updated upstream
-            # Update layer via IPC unless only-image mode is set
-            if not args.only_image:
-                if layer_id is None:
-                    layer_id = get_layer_id()
-                new_layer_id = update_layer(image_path, layer_id)
-                if new_layer_id:
-                    if args.verbose or (iteration == 0 and args.once):
-                        if layer_id is None:
-                            print(f"Added time overlay layer (ID: {new_layer_id})")
+            # Skip update if time hasn't changed (unless first iteration)
+            if iteration > 0 and current_time == last_time:
+                if args.verbose:
+                    print(f"Time unchanged ({current_time}), skipping update")
+            else:
+                # Time has changed, generate new image
+                img = create_time_image(args.font_size, args.position, args.scale)
+                img.save(image_path)
+                
+                if args.verbose or (iteration == 0 and args.once):
+                    print(f"Generated time image: {current_time}")
+                
+                if not args.only_image:
+                    # On first iteration, check for existing layer or create new one
+                    if iteration == 0:
+                        layer_id = get_layer_id()
+                        if layer_id:
+                            if args.verbose:
+                                print(f"Found existing time layer (ID: {layer_id})")
                         else:
-                            print(f"Updated time overlay to {current_time}")
-                    layer_id = new_layer_id
-=======
-            # On first iteration, check for existing layer or create new one
-            if iteration == 0:
-                layer_id = get_layer_id()
-                if layer_id:
-                    if args.verbose:
-                        print(f"Found existing time layer (ID: {layer_id})")
-                else:
-                    # Create new layer
-                    layer_id = create_layer(image_path)
-                    if layer_id:
-                        print(f"Created time overlay layer (ID: {layer_id})")
-                    else:
-                        print("Failed to create time layer", file=sys.stderr)
-                        break
->>>>>>> Stashed changes
-            
-            # Refresh the layer (this forces hyprlax to reload the image)
-            if iteration > 0 and layer_id:
-                if refresh_layer(layer_id, image_path):
-                    if args.verbose:
-                        print(f"Refreshed time overlay to {current_time}")
-                else:
-                    print(f"Failed to refresh layer for {current_time}", file=sys.stderr)
+                            # Create new layer
+                            layer_id = create_layer(image_path)
+                            if layer_id:
+                                print(f"Created time overlay layer (ID: {layer_id})")
+                            else:
+                                print("Failed to create time layer", file=sys.stderr)
+                                break
+                    
+                    # Refresh the layer (this forces hyprlax to reload the image)
+                    if iteration > 0 and layer_id:
+                        if refresh_layer(layer_id, image_path):
+                            if args.verbose:
+                                print(f"Refreshed time overlay to {current_time}")
+                        else:
+                            print(f"Failed to refresh layer for {current_time}", file=sys.stderr)
+                
+                # Update last_time after successful update
+                last_time = current_time
             
             if args.once:
                 break

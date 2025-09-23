@@ -151,6 +151,8 @@ See [Compositor Configuration Guide](docs/compositors.md) for specific setup ins
 
 Control layers and settings at runtime using the integrated `ctl` subcommand:
 
+Tip: add `-j` or `--json` after `ctl` to get JSON output for any command. For `status` and `list`, this enables server-side structured JSON; for others, the client returns a simple wrapper like `{ "ok": true/false, "output"|"error": ... }`.
+
 ### Layer Management
 ```bash
 # Add a new layer

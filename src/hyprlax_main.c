@@ -1678,6 +1678,21 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
 
         const char *force_legacy = getenv("HYPRLAX_FORCE_LEGACY");
         if (ctx->renderer->ops->draw_layer_ex && !(force_legacy && *force_legacy)) {
+            int eff_over = (layer->overflow_mode >= 0) ? layer->overflow_mode : ctx->config.render_overflow_mode;
+            int eff_tile_x;
+            int eff_tile_y;
+            if (layer->tile_x >= 0) eff_tile_x = layer->tile_x;
+            else {
+                if (eff_over == 1 /* repeat */ || eff_over == 2 /* repeat_x */) eff_tile_x = 1;
+                else if (eff_over == 3 /* repeat_y */) eff_tile_x = 0;
+                else eff_tile_x = ctx->config.render_tile_x;
+            }
+            if (layer->tile_y >= 0) eff_tile_y = layer->tile_y;
+            else {
+                if (eff_over == 1 /* repeat */ || eff_over == 3 /* repeat_y */) eff_tile_y = 1;
+                else if (eff_over == 2 /* repeat_x */) eff_tile_y = 0;
+                else eff_tile_y = ctx->config.render_tile_y;
+            }
             renderer_layer_params_t p = {
                 .fit_mode = layer->fit_mode,
                 .content_scale = layer->content_scale,
@@ -1685,14 +1700,14 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
                 .align_y = layer->align_y,
                 .base_uv_x = layer->base_uv_x,
                 .base_uv_y = layer->base_uv_y,
-                .overflow_mode = (layer->overflow_mode >= 0) ? layer->overflow_mode : ctx->config.render_overflow_mode,
+                .overflow_mode = eff_over,
                 .margin_px_x = (layer->margin_px_x != 0.0f || layer->margin_px_y != 0.0f) ? layer->margin_px_x : ctx->config.render_margin_px_x,
                 .margin_px_y = (layer->margin_px_x != 0.0f || layer->margin_px_y != 0.0f) ? layer->margin_px_y : ctx->config.render_margin_px_y,
-                .tile_x = (layer->tile_x >= 0) ? layer->tile_x : ctx->config.render_tile_x,
-                .tile_y = (layer->tile_y >= 0) ? layer->tile_y : ctx->config.render_tile_y,
-                .auto_safe_norm_x = (ctx->config.parallax_max_offset_x > 0.0f && ((layer->tile_x >= 0 ? layer->tile_x : ctx->config.render_tile_x) == 0) && (((layer->overflow_mode >= 0) ? layer->overflow_mode : ctx->config.render_overflow_mode) == 4))
+                .tile_x = eff_tile_x,
+                .tile_y = eff_tile_y,
+                .auto_safe_norm_x = (ctx->config.parallax_max_offset_x > 0.0f && (eff_tile_x == 0) && (eff_over == 4))
                     ? (ctx->config.parallax_max_offset_x / (float)monitor->width) : 0.0f,
-                .auto_safe_norm_y = (ctx->config.parallax_max_offset_y > 0.0f && ((layer->tile_y >= 0 ? layer->tile_y : ctx->config.render_tile_y) == 0) && (((layer->overflow_mode >= 0) ? layer->overflow_mode : ctx->config.render_overflow_mode) == 4))
+                .auto_safe_norm_y = (ctx->config.parallax_max_offset_y > 0.0f && (eff_tile_y == 0) && (eff_over == 4))
                     ? (ctx->config.parallax_max_offset_y / (float)monitor->height) : 0.0f,
             };
             ctx->renderer->ops->draw_layer_ex(
@@ -2314,8 +2329,24 @@ int hyprlax_runtime_get_property(hyprlax_context_t *ctx, const char *property, c
             int eff = (layer->overflow_mode >= 0) ? layer->overflow_mode : ctx->config.render_overflow_mode;
             W("%s", overflow_to_string_local(eff)); return 0;
         }
-        if (strcmp(leaf, "tile.x") == 0) { int eff = (layer->tile_x >= 0) ? layer->tile_x : ctx->config.render_tile_x; W("%s", eff?"true":"false"); return 0; }
-        if (strcmp(leaf, "tile.y") == 0) { int eff = (layer->tile_y >= 0) ? layer->tile_y : ctx->config.render_tile_y; W("%s", eff?"true":"false"); return 0; }
+        if (strcmp(leaf, "tile.x") == 0) {
+            int over = (layer->overflow_mode >= 0) ? layer->overflow_mode : ctx->config.render_overflow_mode;
+            int eff;
+            if (layer->tile_x >= 0) eff = layer->tile_x;
+            else if (over == 1 || over == 2) eff = 1;
+            else if (over == 3) eff = 0;
+            else eff = ctx->config.render_tile_x;
+            W("%s", eff?"true":"false"); return 0;
+        }
+        if (strcmp(leaf, "tile.y") == 0) {
+            int over = (layer->overflow_mode >= 0) ? layer->overflow_mode : ctx->config.render_overflow_mode;
+            int eff;
+            if (layer->tile_y >= 0) eff = layer->tile_y;
+            else if (over == 1 || over == 3) eff = 1;
+            else if (over == 2) eff = 0;
+            else eff = ctx->config.render_tile_y;
+            W("%s", eff?"true":"false"); return 0;
+        }
         if (strcmp(leaf, "margin_px.x") == 0) { float eff = (layer->margin_px_x != 0.0f || layer->margin_px_y != 0.0f) ? layer->margin_px_x : ctx->config.render_margin_px_x; W("%.1f", eff); return 0; }
         if (strcmp(leaf, "margin_px.y") == 0) { float eff = (layer->margin_px_x != 0.0f || layer->margin_px_y != 0.0f) ? layer->margin_px_y : ctx->config.render_margin_px_y; W("%.1f", eff); return 0; }
         return -1;
