@@ -1,0 +1,10 @@
+# secrets
+.secrets.env
+
+# caches and temps
+assets/cache/
+tmp/
+
+# compiled python
+__pycache__/
+*.pyc
