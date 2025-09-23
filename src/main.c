@@ -75,7 +75,7 @@ int main(int argc, char **argv) {
     /* Check for help/version early */
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            printf("Usage: %s [OPTIONS] [--layer <image:shift:opacity:blur>...]\n", argv[0]);
+            printf("Usage: %s [OPTIONS] [--layer <image:shift:opacity:blur[:#RRGGBB[:strength]]>...]\n", argv[0]);
             printf("       %s ctl <command> [args...]\n", argv[0]);
             printf("\nOptions:\n");
             printf("  -h, --help                Show this help message\n");

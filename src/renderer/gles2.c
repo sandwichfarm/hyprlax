@@ -608,6 +608,43 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
     /* Set uniforms */
     shader_set_uniform_float(shader, "u_opacity", opacity);
 
+    /* Per-layer tint (defaults to no tint if params missing) */
+    {
+        static int s_env_checked = 0;
+        static int s_disable_tint = 0;              /* HYPRLAX_DISABLE_TINT */
+        static int s_tint_on_blur = 0;              /* HYPRLAX_TINT_ON_BLUR (default OFF for safety) */
+        if (!s_env_checked) {
+            const char *dt = getenv("HYPRLAX_DISABLE_TINT");
+            if (dt && *dt && strcmp(dt, "0") != 0 && strcasecmp(dt, "false") != 0) s_disable_tint = 1;
+            const char *tb = getenv("HYPRLAX_TINT_ON_BLUR");
+            if (tb && *tb && (strcmp(tb, "0") == 0 || !strcasecmp(tb, "false"))) s_tint_on_blur = 0;
+            s_env_checked = 1;
+        }
+        float tr = 1.0f, tg = 1.0f, tb = 1.0f, ts = 0.0f;
+        if (params) {
+            tr = params->tint_r; tg = params->tint_g; tb = params->tint_b; ts = params->tint_strength;
+        }
+        if (s_disable_tint) {
+            ts = 0.0f;
+        }
+        /* Optionally disable tint on blur programs to isolate driver issues */
+        if (!s_tint_on_blur && (shader == g_gles2_data->blur_shader || shader == g_gles2_data->blur_sep_shader)) {
+            ts = 0.0f;
+        }
+        GLint loc_tint = shader_get_uniform_location(shader, "u_tint");
+        GLint loc_ts   = shader_get_uniform_location(shader, "u_tint_strength");
+        if (loc_tint != -1) glUniform3f(loc_tint, tr, tg, tb);
+        if (loc_ts != -1)   glUniform1f(loc_ts, ts);
+        if (getenv("HYPRLAX_DEBUG")) {
+            static int tint_debug_once = 0;
+            if (!tint_debug_once) {
+                fprintf(stderr, "[DEBUG] tint uniforms: program=%u loc_tint=%d loc_ts=%d tr=%.3f tg=%.3f tb=%.3f ts=%.3f (on_blur=%d)\n",
+                        shader ? shader->id : 0, loc_tint, loc_ts, tr, tg, tb, ts, s_tint_on_blur);
+                tint_debug_once = 1;
+            }
+        }
+    }
+
     /* Legacy blur uniforms */
     if (shader == g_gles2_data->blur_shader) {
         shader_set_uniform_float(shader, "u_blur_amount", blur_amount);

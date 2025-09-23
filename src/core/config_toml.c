@@ -219,10 +219,12 @@ int config_load_toml(config_t *cfg, const char *path)
 int config_apply_toml_to_context(hyprlax_context_t *ctx, const char *path)
 {
     if (!ctx || !path) return HYPRLAX_ERROR_INVALID_ARGS;
+    if (getenv("HYPRLAX_INIT_TRACE")) fprintf(stderr, "[INIT_TRACE] TOML: apply to context start: %s\n", path);
 
     /* Load globals into ctx->config first */
     int rc = config_load_toml(&ctx->config, path);
     if (rc != HYPRLAX_SUCCESS) return rc;
+    if (getenv("HYPRLAX_INIT_TRACE")) fprintf(stderr, "[INIT_TRACE] TOML: globals loaded\n");
 
     /* Re-open to parse layers (keep separation of concerns above) */
     FILE *fp = fopen(path, "r");
@@ -235,12 +237,14 @@ int config_apply_toml_to_context(hyprlax_context_t *ctx, const char *path)
         LOG_ERROR("TOML parse error: %s", errbuf);
         return HYPRLAX_ERROR_LOAD_FAILED;
     }
+    if (getenv("HYPRLAX_INIT_TRACE")) fprintf(stderr, "[INIT_TRACE] TOML: parsed file\n");
 
     toml_table_t *global = toml_table_in(doc, "global");
     if (global) {
         toml_array_t *layers = toml_array_in(global, "layers");
         if (layers) {
             int n = toml_array_nelem(layers);
+            if (getenv("HYPRLAX_INIT_TRACE")) fprintf(stderr, "[INIT_TRACE] TOML: layers count=%d\n", n);
             for (int i = 0; i < n; i++) {
                 toml_table_t *lt = toml_table_at(layers, i);
                 if (!lt) continue;
@@ -272,6 +276,23 @@ int config_apply_toml_to_context(hyprlax_context_t *ctx, const char *path)
                 d = toml_double_in(lt, "blur");
                 if (d.ok) blur = (float)d.u.d;
 
+                /* Optional tint */
+                float tint_r = 1.0f, tint_g = 1.0f, tint_b = 1.0f, tint_strength = 0.0f;
+                toml_datum_t tc = toml_string_in(lt, "tint_color");
+                if (tc.ok && tc.u.s) {
+                    const char *s = tc.u.s;
+                    if (s[0] == '#' && strlen(s) == 7) {
+                        char cr[3] = {s[1], s[2], 0};
+                        char cg[3] = {s[3], s[4], 0};
+                        char cb[3] = {s[5], s[6], 0};
+                        char *end = NULL; long rv = strtol(cr, &end, 16); long gv = strtol(cg, &end, 16); long bv = strtol(cb, &end, 16);
+                        tint_r = (float)rv / 255.0f; tint_g = (float)gv / 255.0f; tint_b = (float)bv / 255.0f;
+                    }
+                    free(tc.u.s);
+                }
+                d = toml_double_in(lt, "tint_strength");
+                if (d.ok) { tint_strength = (float)d.u.d; if (tint_strength < 0.0f) tint_strength = 0.0f; if (tint_strength > 1.0f) tint_strength = 1.0f; }
+
                 if (image && *image) {
                     char *resolved = resolve_relative_path(path, image);
                     if (!resolved) {
@@ -282,6 +303,8 @@ int config_apply_toml_to_context(hyprlax_context_t *ctx, const char *path)
                         parallax_layer_t *last = ctx->layers;
                         if (last) {
                             while (last->next) last = last->next;
+                            /* Apply tint if provided */
+                            last->tint_r = tint_r; last->tint_g = tint_g; last->tint_b = tint_b; last->tint_strength = tint_strength;
                             if (shift_x >= 0.0f) last->shift_multiplier_x = shift_x;
                             if (shift_y >= 0.0f) last->shift_multiplier_y = shift_y;
                             /* Optional per-layer inversion */
