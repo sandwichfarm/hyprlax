@@ -21,7 +21,7 @@ Optional keys:
 
 | Key | Type | Default | Range | Description |
 |-----|------|---------|-------|-------------|
-| `shift_multiplier` | float | 1.0 | 0.1-5.0 | Per-layer parallax multiplier (0.0=static, 1.0=normal) |
+| `shift_multiplier` | float | 1.0 | 0.0-5.0 | Per-layer parallax multiplier (0.0=static, 1.0=normal) |
 | `opacity` | float | 1.0 | 0.0-1.0 | Transparency |
 | `uv_offset.x` | float | 0.0 | any | UV pan X offset (normalized; typical -0.10..0.10) |
 | `uv_offset.y` | float | 0.0 | any | UV pan Y offset (normalized; typical -0.10..0.10) |
@@ -53,7 +53,7 @@ hyprlax ctl modify <layer_id> <property> <value>
 
 | Property | Type | Range | Description |
 |----------|------|-------|-------------|
-| `shift_multiplier` | float | 0.1-5.0 | Per-layer parallax multiplier |
+| `shift_multiplier` | float | 0.0-5.0 | Per-layer parallax multiplier (0.0 disables movement) |
 | `opacity` | float | 0.0-1.0 | Transparency |
 | `uv_offset.x` | float | any | UV pan X offset (normalized; typical -0.10..0.10) |
 | `uv_offset.y` | float | any | UV pan Y offset (normalized; typical -0.10..0.10) |

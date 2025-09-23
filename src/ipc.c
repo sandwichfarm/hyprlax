@@ -66,7 +66,7 @@ static int apply_layer_property(hyprlax_context_t *app, parallax_layer_t *layer,
     if (token_check_len(value, IPC_MAX_VALUE_LEN, "value", response, response_sz)) return 0;
 
     if (strcmp(property, "shift_multiplier") == 0 || strcmp(property, "scale") == 0) {
-        float v = atof(value); if (v < 0.1f || v > 5.0f) { ipc_errorf(response, response_sz, 1250, "scale out of range (0.1..5.0)\n"); return 0; }
+        float v = atof(value); if (v < 0.0f || v > 5.0f) { ipc_errorf(response, response_sz, 1250, "scale out of range (0.0..5.0)\n"); return 0; }
         layer->shift_multiplier = v; layer->shift_multiplier_x = v; layer->shift_multiplier_y = v; return 1;
     } else if (strcmp(property, "opacity") == 0) {
         float v = atof(value); if (v < 0.0f || v > 1.0f) { ipc_errorf(response, response_sz, 1251, "opacity out of range (0.0..1.0)\n"); return 0; }

@@ -20,7 +20,7 @@ UPDATE_INTERVAL = 30  # Update every 30 seconds
 # Layer configuration
 LAYER_Z = 5  # Position between bg (default 0) and fg (higher z)
 LAYER_OPACITY = 1.0
-LAYER_SCALE = 1.0
+LAYER_SHIFT_MULTIPLIER = 0.0  # Parallax shift multiplier (0.1=minimal, 1=normal)
 
 def create_time_image(font_size=FONT_SIZE, position='center', scale=FONT_SCALE):
     """Generate transparent PNG with current time"""
@@ -117,9 +117,8 @@ def create_layer(image_path):
         "hyprlax", "ctl", "add", image_path,
         f"z={LAYER_Z}",
         f"opacity={LAYER_OPACITY}",
-        f"scale={LAYER_SCALE}",
+        f"shift_multiplier={LAYER_SHIFT_MULTIPLIER}",
         f"fit=cover"
-        f"scale=0.0"
     ]
     
     result = subprocess.run(cmd, capture_output=True, text=True)

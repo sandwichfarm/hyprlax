@@ -175,7 +175,7 @@ static void print_ctl_help(const char *prog) {
     printf("Layer Management Commands:\n");
     printf("  add <image> [shift_multiplier=..] [opacity=..] [uv_offset.x=..] [uv_offset.y=..] [z=..]\n");
     printf("      Add a new layer with the specified image\n");
-    printf("      shift_multiplier: per-layer parallax multiplier (0.1-5.0, default: 1.0)\n");
+    printf("      shift_multiplier: per-layer parallax multiplier (0.0-5.0, default: 1.0; 0 disables movement)\n");
     printf("      opacity: layer opacity (0.0-1.0, default: 1.0)\n");
     printf("      uv_offset.x, uv_offset.y: UV pan offsets (normalized, e.g., -0.10..0.10)\n");
     printf("      z: z-order (0-31, default: next)\n\n");
@@ -252,7 +252,7 @@ static void help_add(void) {
     printf("Parameters:\n");
     printf("  image               Path to an image file (png, jpg, etc.)\n");
     printf("  Properties (examples):\n");
-    printf("    shift_multiplier 0.9 Parallax multiplier (0.1..5.0)\n");
+    printf("    shift_multiplier 0.9 Parallax multiplier (0.0..5.0; 0 = no movement)\n");
     printf("    opacity 0.8         Opacity (0.0..1.0)\n");
     printf("    uv_offset.x -0.01 uv_offset.y 0.02  UV pan offsets (normalized)\n");
     printf("    z 5                 Z-order (0..31)\n");
@@ -282,7 +282,7 @@ static void help_modify(void) {
     printf("Usage: hyprlax ctl modify <id> <property> <value>\n\n");
     printf("Description:\n  Change a property on an existing layer.\n\n");
     printf("Properties:\n");
-    printf("  shift_multiplier <f> Parallax shift multiplier (0.1..5.0)\n");
+    printf("  shift_multiplier <f> Parallax shift multiplier (0.0..5.0; 0 = no movement)\n");
     printf("  opacity <f>         0.0..1.0\n");
     printf("  uv_offset.x <f>, uv_offset.y <f>  UV pan offsets (normalized); typical -0.10..0.10\n");
     printf("  z <i>               0..31 (reorders z; list is re-sorted)\n");
