@@ -11,7 +11,7 @@ import argparse
 
 # Configuration
 FONT_SIZE = 120  # Base font size (pre-scale)
-FONT_SCALE = 5.0  # Default scale multiplier (~5x larger)
+FONT_SCALE = 11.0  # Default scale multiplier (~5x larger)
 FONT_COLOR = (255, 255, 255, 255)  # Pure white
 SHADOW_COLOR = (0, 0, 0, 200)  # Darker shadow for readability
 SHADOW_OFFSET = 4
@@ -52,7 +52,6 @@ def create_time_image(font_size=FONT_SIZE, position='center', scale=FONT_SCALE):
         for path in font_paths:
             if os.path.exists(path):
                 font = ImageFont.truetype(path, effective_font_size)
-                font = ImageFont.truetype(path, effective_font_size)
                 print(f"Using font: {path}")
                 break
         if not font:
@@ -62,22 +61,22 @@ def create_time_image(font_size=FONT_SIZE, position='center', scale=FONT_SCALE):
             print(
                 f"Warning: Using default font (requested size {effective_font_size})"
             )
-            # Note: load_default ignores size on some Pillow versions
-            font = ImageFont.load_default()
-            print(
-                f"Warning: Using default font (requested size {effective_font_size})"
-            )
     except Exception as e:
         print(f"Font error: {e}")
         font = ImageFont.load_default()
     
-    # Calculate text dimensions
+    # Calculate text dimensions using textbbox
     bbox = draw.textbbox((0, 0), current_time, font=font)
     text_width = bbox[2] - bbox[0]
     text_height = bbox[3] - bbox[1]
     
+    # Account for the text baseline offset
+    # textbbox returns the actual bounding box, including ascent/descent
+    # We need to adjust for the baseline position
+    text_offset_x = -bbox[0]  # Left bearing compensation
+    text_offset_y = -bbox[1]  # Top bearing compensation
+    
     # Position the text
-    margin = 150  # Increased margin (unused for center)
     margin = 150  # Increased margin (unused for center)
     
     if position == 'bottom-right':
@@ -87,11 +86,16 @@ def create_time_image(font_size=FONT_SIZE, position='center', scale=FONT_SCALE):
         x = width - text_width - margin
         y = margin
     elif position == 'center':
+        # True center accounting for text metrics
         x = (width - text_width) // 2
         y = (height - text_height) // 2
     else:  # bottom-left
         x = margin
         y = height - text_height - margin
+    
+    # Apply the offset corrections
+    x += text_offset_x
+    y += text_offset_y
     
     # Draw shadow for better visibility
     draw.text((x + SHADOW_OFFSET, y + SHADOW_OFFSET), current_time, 
@@ -101,77 +105,70 @@ def create_time_image(font_size=FONT_SIZE, position='center', scale=FONT_SCALE):
     draw.text((x, y), current_time, font=font, fill=FONT_COLOR)
     
     # Debug: Draw a visible border to confirm image is being rendered
-    # draw.rectangle([0, 0, width-1, height-1], outline=(255, 0, 0, 100), width=5)
+    # draw.rectanglehyprlax([0, 0, width-1, height-1], outline=(255, 0, 0, 100), width=5)
     
     print(f"Time '{current_time}' positioned at ({x}, {y}), size: {text_width}x{text_height}")
     
     return img
 
-def update_layer(image_path, layer_id=None):
-    """Add or update the time layer via IPC"""
-    if layer_id is None:
-        # Add new layer
-        cmd = [
-            "hyprlax", "ctl", "add", image_path,
-            f"z={LAYER_Z}",
-            f"opacity={LAYER_OPACITY}",
-            f"scale={LAYER_SCALE}"
-        ]
-    else:
-        # For updates, we need to remove and re-add
-        # (since modify can't change the image path)
-        subprocess.run(["hyprlax", "ctl", "remove", str(layer_id)], 
-                      capture_output=True)
-        cmd = [
-            "hyprlax", "ctl", "add", image_path,
-            f"z={LAYER_Z}",
-            f"opacity={LAYER_OPACITY}",
-            f"scale={LAYER_SCALE}"
-        ]
+def create_layer(image_path):
+    """Create a new time layer"""
+    cmd = [
+        "hyprlax", "ctl", "add", image_path,
+        f"z={LAYER_Z}",
+        f"opacity={LAYER_OPACITY}",
+        f"scale={LAYER_SCALE}",
+        f"fit=cover"
+        f"scale=0.0"
+    ]
     
     result = subprocess.run(cmd, capture_output=True, text=True)
     
     if result.returncode != 0:
-        print(f"Error updating layer: {result.stderr}", file=sys.stderr)
+        print(f"Error adding layer: {result.stderr}", file=sys.stderr)
         return None
     
-    # Extract layer ID from output if adding new layer
-    # Expected format: "Added layer with ID: X"
-    if "Added layer with ID:" in result.stdout:
+    # Extract layer ID from output
+    # Expected format: "Layer added with ID: X"
+    if "Layer added with ID:" in result.stdout:
         try:
-            layer_id = int(result.stdout.split("ID:")[1].strip())
-            return layer_id
+            new_id = int(result.stdout.split("ID:")[1].strip())
+            return new_id
         except:
-            pass
+            print(f"Could not extract layer ID from: {result.stdout}", file=sys.stderr)
     
-    return layer_id
+    return None
+
+def refresh_layer(layer_id, image_path):
+    """Refresh layer by updating its path (forces reload)"""
+    cmd = ["hyprlax", "ctl", "modify", str(layer_id), "path", image_path]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    
+    if result.returncode != 0:
+        print(f"Error refreshing layer: {result.stderr}", file=sys.stderr)
+        return False
+    
+    return True
 
 def get_layer_id():
     """Try to find our time layer ID from the list"""
-    result = subprocess.run(["hyprlax", "ctl", "list"], 
+    import json
+    result = subprocess.run(["hyprlax", "ctl", "list", "--json"], 
                            capture_output=True, text=True)
     if result.returncode == 0:
-        lines = result.stdout.strip().split('\n')
-        for line in lines:
-            if 'time_overlay' in line:
-                # Extract ID from line format: "ID: X | ..."
-                try:
-                    id_str = line.split('|')[0].replace('ID:', '').strip()
-                    return int(id_str)
-                except:
-                    pass
+        try:
+            layers = json.loads(result.stdout)
+            for layer in layers:
+                if 'path' in layer and 'time_overlay' in layer['path']:
+                    return layer.get('id')
+        except json.JSONDecodeError:
+            pass
     return None
 
 def main():
     parser = argparse.ArgumentParser(description='Add time overlay to hyprlax')
     parser.add_argument('--font-size', type=int, default=FONT_SIZE,
                        help=f'Font size for the time display (default: {FONT_SIZE})')
-    parser.add_argument('--position', type=str, default='center',
-                       choices=['bottom-right', 'top-right', 'center', 'bottom-left'],
-                       help='Position of the time display (default: center)')
-    parser.add_argument('--scale', type=float, default=FONT_SCALE,
-                       help='Scale multiplier applied to --font-size '
-                            '(default: 5.0)')
     parser.add_argument('--position', type=str, default='center',
                        choices=['bottom-right', 'top-right', 'center', 'bottom-left'],
                        help='Position of the time display (default: center)')
@@ -188,32 +185,8 @@ def main():
                        help='Directory to write the overlay image. '
                             'If omitted, uses a persistent ./tmp when --once, '
                             'or a temporary directory otherwise.')
-    args = parser.parse_args()
-    
-    # Decide output directory behavior
-    # - If --out-dir provided: use it (absolute or relative to this script)
-    # - Else if --once: use persistent ./tmp next to this script
-    # - Else: use a temporary directory that will be cleaned up
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    cleanup = False
-
-    if args.out_dir:
-        out_dir = args.out_dir
-        if not os.path.isabs(out_dir):
-            out_dir = os.path.join(script_dir, out_dir)
-        os.makedirs(out_dir, exist_ok=True)
-    elif args.once:
-        out_dir = os.path.join(script_dir, 'tmp')
-        os.makedirs(out_dir, exist_ok=True)
-    else:
-        out_dir = tempfile.mkdtemp(prefix='hyprlax_time_')
-        cleanup = True
-
-    image_path = os.path.join(out_dir, 'time_overlay.png')
-    
-    if args.verbose:
-        print(f"Starting time overlay with font size {args.font_size}")
-        print(f"Overlay image path: {image_path}")
+    parser.add_argument('--only-image', action='store_true',
+                       help='Only generate the image and skip creating/updating the layer via IPC')
     args = parser.parse_args()
     
     # Decide output directory behavior
@@ -244,34 +217,55 @@ def main():
     try:
         layer_id = None
         iteration = 0
+        last_time = None
         
         while True:
-            # Generate new time image
+            # Get current time
             current_time = datetime.now().strftime("%H:%M")
-            img = create_time_image(args.font_size, args.position, args.scale)
-            img.save(image_path)
             
-            if args.verbose or (iteration == 0 and args.once):
-                print(f"Generated time image: {current_time}")
-            
-            # Update layer
-            if layer_id is None:
-                layer_id = get_layer_id()
-            
-            new_layer_id = update_layer(image_path, layer_id)
-            
-            if new_layer_id:
+            # Skip update if time hasn't changed (unless first iteration)
+            if iteration > 0 and current_time == last_time:
+                if args.verbose:
+                    print(f"Time unchanged ({current_time}), skipping update")
+            else:
+                # Time has changed, generate new image
+                img = create_time_image(args.font_size, args.position, args.scale)
+                img.save(image_path)
+                
                 if args.verbose or (iteration == 0 and args.once):
-                    if layer_id is None:
-                        print(f"Added time overlay layer (ID: {new_layer_id})")
-                    else:
-                        print(f"Updated time overlay to {current_time}")
-                layer_id = new_layer_id
-            
-            iteration += 1
+                    print(f"Generated time image: {current_time}")
+                
+                if not args.only_image:
+                    # On first iteration, check for existing layer or create new one
+                    if iteration == 0:
+                        layer_id = get_layer_id()
+                        if layer_id:
+                            if args.verbose:
+                                print(f"Found existing time layer (ID: {layer_id})")
+                        else:
+                            # Create new layer
+                            layer_id = create_layer(image_path)
+                            if layer_id:
+                                print(f"Created time overlay layer (ID: {layer_id})")
+                            else:
+                                print("Failed to create time layer", file=sys.stderr)
+                                break
+                    
+                    # Refresh the layer (this forces hyprlax to reload the image)
+                    if iteration > 0 and layer_id:
+                        if refresh_layer(layer_id, image_path):
+                            if args.verbose:
+                                print(f"Refreshed time overlay to {current_time}")
+                        else:
+                            print(f"Failed to refresh layer for {current_time}", file=sys.stderr)
+                
+                # Update last_time after successful update
+                last_time = current_time
             
             if args.once:
                 break
+            
+            iteration += 1
             
             # Wait for next update
             if args.verbose:
@@ -280,8 +274,9 @@ def main():
             
     except KeyboardInterrupt:
         print("\nStopping time overlay...")
-        if layer_id:
+        if (not args.only_image) and layer_id:
             subprocess.run(["hyprlax", "ctl", "remove", str(layer_id)])
+            print(f"Removed time overlay layer (ID: {layer_id})")
     finally:
         # Cleanup only when using a temporary directory (looping mode)
         if cleanup:

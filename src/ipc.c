@@ -35,6 +35,91 @@ static int layer_compare_qsort(const void* a, const void* b);
 /* Forward decl for JSON escaping used in list output */
 static void json_escape(const char *in, char *out, size_t out_sz);
 
+/* Helpers shared by add/modify property handling */
+/* Forward decls for helpers defined later in file */
+static void ipc_errorf(char *out, size_t out_sz, int code, const char *fmt, ...);
+static int token_check_len(const char *tok, size_t maxlen, const char *name,
+                           char *response, size_t response_sz);
+static int parse_int_range(const char *s, int minv, int maxv, int *out);
+
+static int str_to_bool(const char *v) {
+    if (!v) return 0;
+    return (!strcmp(v, "1") || !strcasecmp(v, "true") || !strcasecmp(v, "on") || !strcasecmp(v, "yes")) ? 1 : 0;
+}
+static int overflow_from_string(const char *s) {
+    if (!s) return -2;
+    if (!strcmp(s, "inherit")) return -1;
+    if (!strcmp(s, "repeat_edge") || !strcmp(s, "clamp")) return 0;
+    if (!strcmp(s, "repeat") || !strcmp(s, "tile")) return 1;
+    if (!strcmp(s, "repeat_x") || !strcmp(s, "tilex")) return 2;
+    if (!strcmp(s, "repeat_y") || !strcmp(s, "tiley")) return 3;
+    if (!strcmp(s, "none") || !strcmp(s, "off")) return 4;
+    return -2;
+}
+
+/* Apply a single property to a layer; returns 1 on success, 0 on error (with response filled) */
+static int apply_layer_property(hyprlax_context_t *app, parallax_layer_t *layer,
+                                const char *property, const char *value,
+                                char *response, size_t response_sz) {
+    if (!app || !layer || !property || !value) return 0;
+    if (token_check_len(property, IPC_MAX_PROP_LEN, "property", response, response_sz)) return 0;
+    if (token_check_len(value, IPC_MAX_VALUE_LEN, "value", response, response_sz)) return 0;
+
+    if (strcmp(property, "scale") == 0) {
+        float v = atof(value); if (v < 0.1f || v > 5.0f) { ipc_errorf(response, response_sz, 1250, "scale out of range (0.1..5.0)\n"); return 0; }
+        layer->shift_multiplier = v; layer->shift_multiplier_x = v; layer->shift_multiplier_y = v; return 1;
+    } else if (strcmp(property, "opacity") == 0) {
+        float v = atof(value); if (v < 0.0f || v > 1.0f) { ipc_errorf(response, response_sz, 1251, "opacity out of range (0.0..1.0)\n"); return 0; }
+        layer->opacity = v; return 1;
+    } else if (strcmp(property, "path") == 0) {
+        char propbuf[64]; snprintf(propbuf, sizeof(propbuf), "layer.%u.path", layer->id);
+        int rc = hyprlax_runtime_set_property(app, propbuf, value);
+        if (rc == 0) return 1; ipc_errorf(response, response_sz, 1252, "failed to set path\n"); return 0;
+    } else if (strcmp(property, "x") == 0) {
+        layer->base_uv_x = (float)atof(value); return 1;
+    } else if (strcmp(property, "y") == 0) {
+        layer->base_uv_y = (float)atof(value); return 1;
+    } else if (strcmp(property, "overflow") == 0) {
+        int m = overflow_from_string(value);
+        if (m == -2) { ipc_errorf(response, response_sz, 1255, "invalid overflow value\n"); return 0; }
+        layer->overflow_mode = m; return 1;
+    } else if (strcmp(property, "tile.x") == 0) {
+        layer->tile_x = str_to_bool(value) ? 1 : 0; return 1;
+    } else if (strcmp(property, "tile.y") == 0) {
+        layer->tile_y = str_to_bool(value) ? 1 : 0; return 1;
+    } else if (strcmp(property, "margin.x") == 0 || strcmp(property, "margin_px.x") == 0) {
+        float v = atof(value); if (v < 0.0f) { ipc_errorf(response, response_sz, 1256, "margin.x must be >= 0\n"); return 0; } layer->margin_px_x = v; return 1;
+    } else if (strcmp(property, "margin.y") == 0 || strcmp(property, "margin_px.y") == 0) {
+        float v = atof(value); if (v < 0.0f) { ipc_errorf(response, response_sz, 1257, "margin.y must be >= 0\n"); return 0; } layer->margin_px_y = v; return 1;
+    } else if (strcmp(property, "blur") == 0) {
+        float v = atof(value); if (v < 0.0f) { ipc_errorf(response, response_sz, 1258, "blur must be >= 0\n"); return 0; } layer->blur_amount = v; return 1;
+    } else if (strcmp(property, "fit") == 0) {
+        if (!strcmp(value, "stretch")) layer->fit_mode = LAYER_FIT_STRETCH;
+        else if (!strcmp(value, "cover")) layer->fit_mode = LAYER_FIT_COVER;
+        else if (!strcmp(value, "contain")) layer->fit_mode = LAYER_FIT_CONTAIN;
+        else if (!strcmp(value, "fit_width")) layer->fit_mode = LAYER_FIT_WIDTH;
+        else if (!strcmp(value, "fit_height")) layer->fit_mode = LAYER_FIT_HEIGHT;
+        else { ipc_errorf(response, response_sz, 1254, "invalid fit value\n"); return 0; }
+        return 1;
+    } else if (strcmp(property, "content_scale") == 0) {
+        float v = atof(value); if (v <= 0.0f) { ipc_errorf(response, response_sz, 1253, "content_scale must be > 0\n"); return 0; } layer->content_scale = v; return 1;
+    } else if (strcmp(property, "align_x") == 0) {
+        layer->align_x = atof(value); if (layer->align_x < 0.0f) layer->align_x = 0.0f; if (layer->align_x > 1.0f) layer->align_x = 1.0f; return 1;
+    } else if (strcmp(property, "align_y") == 0) {
+        layer->align_y = atof(value); if (layer->align_y < 0.0f) layer->align_y = 0.0f; if (layer->align_y > 1.0f) layer->align_y = 1.0f; return 1;
+    } else if (strcmp(property, "z") == 0) {
+        int zv = 0; int rc = parse_int_range(value, 0, 31, &zv);
+        if (rc <= 0) { ipc_errorf(response, response_sz, rc==0?1260:1261, rc==0?"invalid z\n":"z out of range (0..31)\n"); return 0; }
+        layer->z_index = zv; return 1;
+    } else if (strcmp(property, "hidden") == 0) {
+        layer->hidden = str_to_bool(value) ? true : false; return 1;
+    } else if (strcmp(property, "visible") == 0) {
+        bool vis = str_to_bool(value) ? true : false; layer->hidden = !vis; return 1;
+    }
+    ipc_errorf(response, response_sz, 1201, "Invalid property '%s'\n", property);
+    return 0;
+}
+
 /* (Removed) Simple env debug check: use LOG_* levels instead */
 
 /* Sanitize an input line: strip CR/LF and trailing spaces */
@@ -355,31 +440,42 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 ipc_errorf(response, sizeof(response), 1100, "Image path required\n");
                 break;
             }
+            /* If the first token looks like an option instead of a path, emit a clearer error */
+            if (!strncmp(path, "scale=", 6) || !strncmp(path, "opacity=", 8) ||
+                !strncmp(path, "x=", 2) || !strncmp(path, "y=", 2) || !strncmp(path, "z=", 2) ||
+                !strcmp(path, "scale") || !strcmp(path, "opacity") || !strcmp(path, "x") || !strcmp(path, "y") || !strcmp(path, "z")) {
+                snprintf(response, sizeof(response), "Error: Image path must be the first argument\n");
+                break;
+            }
+            /* Optional: preflight check for readability to improve error clarity */
+            if (access(path, R_OK) != 0) {
+                /* Don't hard fail if app can load non-files, but provide a useful error */
+                /* Continue; hyprlax_add_layer may still handle this (e.g., memory textures or after chdir) */
+            }
 
-            // Parse optional parameters with validation
-            float scale = 1.0f, opacity = 1.0f, x_offset = 0.0f, y_offset = 0.0f;
-            int z_index = INT_MIN; int parse_err = 0;
-
-            char* param;
-            while ((param = strtok(NULL, " \n"))) {
-                if (strncmp(param, "scale=", 6) == 0) {
-                    double dv = 1.0; int rc = parse_double_range(param + 6, 0.1, 5.0, &dv);
-                    if (rc <= 0) { snprintf(response, sizeof(response), rc==0?"Error: invalid scale\n":"Error: scale out of range (0.1..5.0)\n"); parse_err = 1; break; }
-                    scale = (float)dv;
-                } else if (strncmp(param, "opacity=", 8) == 0) {
-                    double dv = 1.0; int rc = parse_double_range(param + 8, 0.0, 1.0, &dv);
-                    if (rc <= 0) { snprintf(response, sizeof(response), rc==0?"Error: invalid opacity\n":"Error: opacity out of range (0.0..1.0)\n"); parse_err = 1; break; }
-                    opacity = (float)dv;
-                } else if (strncmp(param, "x=", 2) == 0) {
-                    x_offset = (float)atof(param + 2);
-                } else if (strncmp(param, "y=", 2) == 0) {
-                    y_offset = (float)atof(param + 2);
-                } else if (strncmp(param, "z=", 2) == 0) {
-                    int zv = 0; int rc = parse_int_range(param + 2, 0, 31, &zv);
-                    if (rc <= 0) { snprintf(response, sizeof(response), rc==0?"Error: invalid z\n":"Error: z out of range (0..31)\n"); parse_err = 1; break; }
-                    z_index = zv;
+            /* Parse arbitrary key[= ]value pairs and apply later */
+            const int MAX_KV = 64;
+            const char *keys[MAX_KV];
+            const char *vals[MAX_KV];
+            int kvn = 0; int parse_err = 0;
+            char *pending = NULL;
+            char *param;
+            while (!parse_err && (param = strtok(NULL, " \n"))) {
+                char *eq = strchr(param, '=');
+                if (!eq) {
+                    if (!pending) { pending = param; }
+                    else {
+                        if (kvn < MAX_KV) { keys[kvn] = pending; vals[kvn] = param; kvn++; }
+                        pending = NULL;
+                    }
+                } else {
+                    *eq = '\0';
+                    const char *k = param; const char *v = eq + 1;
+                    if (!*k) { snprintf(response, sizeof(response), "Error: empty key in parameter\n"); parse_err = 1; break; }
+                    if (kvn < MAX_KV) { keys[kvn] = k; vals[kvn] = v; kvn++; }
                 }
             }
+            if (!parse_err && pending) { snprintf(response, sizeof(response), "Error: '%s' requires a value\n", pending); parse_err = 1; }
             if (parse_err) { break; }
 
             /* Bridge to application context */
@@ -393,7 +489,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
             for (parallax_layer_t *it = app->layers; it; it = it->next) {
                 if (it->id > prev_max_id) prev_max_id = it->id;
             }
-            int rc_add = hyprlax_add_layer(app, path, scale, opacity, 0.0f);
+            int rc_add = hyprlax_add_layer(app, path, 1.0f, 1.0f, 0.0f);
             if (rc_add == 0) {
                 /* Find the new layer and apply initial params */
                 uint32_t new_id = 0; parallax_layer_t *new_layer = NULL;
@@ -401,18 +497,20 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                     if (it->id > prev_max_id) { new_id = it->id; new_layer = it; }
                 }
                 if (new_layer) {
-                    new_layer->shift_multiplier = scale;
-                    new_layer->shift_multiplier_x = scale;
-                    new_layer->shift_multiplier_y = scale;
-                    new_layer->opacity = opacity;
-                    new_layer->base_uv_x = x_offset;
-                    new_layer->base_uv_y = y_offset;
-                    if (z_index != INT_MIN) new_layer->z_index = z_index;
+                    /* Apply all provided properties */
+                    for (int i = 0; i < kvn; i++) {
+                        if (!apply_layer_property(app, new_layer, keys[i], vals[i], response, sizeof(response))) {
+                            /* On first error, report and stop */
+                            break;
+                        }
+                    }
+                    /* Re-sort after potential z changes */
+                    app->layers = layer_list_sort_by_z(app->layers);
                 }
                 /* Maintain draw order by z */
                 app->layers = layer_list_sort_by_z(app->layers);
-                snprintf(response, sizeof(response), new_layer ? "Layer added with ID: %u\n" : "Layer added\n", new_id);
-                success = true;
+                if (response[0] && strncmp(response, "Error", 5) == 0) { success = false; }
+                else { snprintf(response, sizeof(response), new_layer ? "Layer added with ID: %u\n" : "Layer added\n", new_id); success = true; }
             } else {
                 ipc_errorf(response, sizeof(response), 1110, "Failed to add layer\n");
             }
@@ -466,78 +564,11 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 ipc_errorf(response, sizeof(response), 1102, "Failed to modify layer %u\n", id);
                 break;
             }
-            bool ok = false;
-            auto int parse_bool_str(const char *v) {
-                if (!v) return 0;
-                return (!strcmp(v, "1") || !strcasecmp(v, "true") || !strcasecmp(v, "on") || !strcasecmp(v, "yes")) ? 1 : 0;
+            if (apply_layer_property(app, layer, property, value, response, sizeof(response))) {
+                /* Re-sort list by z if z was modified */
+                if (strcmp(property, "z") == 0) app->layers = layer_list_sort_by_z(app->layers);
+                snprintf(response, sizeof(response), "Layer %u modified\n", id); success = true;
             }
-            auto int overflow_from_string(const char *s) {
-                if (!s) return -2;
-                if (!strcmp(s, "inherit")) return -1;
-                if (!strcmp(s, "repeat_edge") || !strcmp(s, "clamp")) return 0;
-                if (!strcmp(s, "repeat") || !strcmp(s, "tile")) return 1;
-                if (!strcmp(s, "repeat_x") || !strcmp(s, "tilex")) return 2;
-                if (!strcmp(s, "repeat_y") || !strcmp(s, "tiley")) return 3;
-                if (!strcmp(s, "none") || !strcmp(s, "off")) return 4;
-                return -2;
-            }
-            if (strcmp(property, "scale") == 0) {
-                float v = atof(value); if (v < 0.1f || v > 5.0f) { ipc_errorf(response, sizeof(response), 1250, "scale out of range (0.1..5.0)\n"); break; }
-                layer->shift_multiplier = v; layer->shift_multiplier_x = v; layer->shift_multiplier_y = v; ok = true;
-            } else if (strcmp(property, "opacity") == 0) {
-                float v = atof(value); if (v < 0.0f || v > 1.0f) { ipc_errorf(response, sizeof(response), 1251, "opacity out of range (0.0..1.0)\n"); break; }
-                layer->opacity = v; ok = true;
-            } else if (strcmp(property, "path") == 0) {
-                /* Delegate to runtime setter to handle GL reload safely */
-                char propbuf[64]; snprintf(propbuf, sizeof(propbuf), "layer.%u.path", id);
-                int rc = hyprlax_runtime_set_property(app, propbuf, value);
-                if (rc == 0) { ok = true; }
-            } else if (strcmp(property, "x") == 0) {
-                layer->base_uv_x = atof(value); ok = true;
-            } else if (strcmp(property, "y") == 0) {
-                layer->base_uv_y = atof(value); ok = true;
-            } else if (strcmp(property, "overflow") == 0) {
-                int m = overflow_from_string(value);
-                if (m == -2) { ipc_errorf(response, sizeof(response), 1255, "invalid overflow value\n"); break; }
-                layer->overflow_mode = m; ok = true;
-            } else if (strcmp(property, "tile.x") == 0) {
-                layer->tile_x = parse_bool_str(value) ? 1 : 0; ok = true;
-            } else if (strcmp(property, "tile.y") == 0) {
-                layer->tile_y = parse_bool_str(value) ? 1 : 0; ok = true;
-            } else if (strcmp(property, "margin.x") == 0 || strcmp(property, "margin_px.x") == 0) {
-                float v = atof(value); if (v < 0.0f) { ipc_errorf(response, sizeof(response), 1256, "margin.x must be >= 0\n"); break; } layer->margin_px_x = v; ok = true;
-            } else if (strcmp(property, "margin.y") == 0 || strcmp(property, "margin_px.y") == 0) {
-                float v = atof(value); if (v < 0.0f) { ipc_errorf(response, sizeof(response), 1257, "margin.y must be >= 0\n"); break; } layer->margin_px_y = v; ok = true;
-            } else if (strcmp(property, "blur") == 0) {
-                float v = atof(value); if (v < 0.0f) { ipc_errorf(response, sizeof(response), 1258, "blur must be >= 0\n"); break; } layer->blur_amount = v; ok = true;
-            } else if (strcmp(property, "fit") == 0) {
-                if (!strcmp(value, "stretch")) layer->fit_mode = LAYER_FIT_STRETCH, ok = true;
-                else if (!strcmp(value, "cover")) layer->fit_mode = LAYER_FIT_COVER, ok = true;
-                else if (!strcmp(value, "contain")) layer->fit_mode = LAYER_FIT_CONTAIN, ok = true;
-                else if (!strcmp(value, "fit_width")) layer->fit_mode = LAYER_FIT_WIDTH, ok = true;
-                else if (!strcmp(value, "fit_height")) layer->fit_mode = LAYER_FIT_HEIGHT, ok = true;
-                else { ipc_errorf(response, sizeof(response), 1254, "invalid fit value\n"); break; }
-            } else if (strcmp(property, "content_scale") == 0) {
-                float v = atof(value); if (v <= 0.0f) { ipc_errorf(response, sizeof(response), 1253, "content_scale must be > 0\n"); break; } layer->content_scale = v; ok = true;
-            } else if (strcmp(property, "align_x") == 0) {
-                layer->align_x = atof(value); if (layer->align_x < 0.0f) layer->align_x = 0.0f; if (layer->align_x > 1.0f) layer->align_x = 1.0f; ok = true;
-            } else if (strcmp(property, "align_y") == 0) {
-                layer->align_y = atof(value); if (layer->align_y < 0.0f) layer->align_y = 0.0f; if (layer->align_y > 1.0f) layer->align_y = 1.0f; ok = true;
-            } else if (strcmp(property, "z") == 0) {
-                int zv = 0; int rc = parse_int_range(value, 0, 31, &zv);
-                if (rc <= 0) { ipc_errorf(response, sizeof(response), rc==0?1260:1261, rc==0?"invalid z\n":"z out of range (0..31)\n"); break; }
-                layer->z_index = zv; ok = true;
-                /* Re-sort list by z */
-                app->layers = layer_list_sort_by_z(app->layers);
-            } else if (strcmp(property, "hidden") == 0) {
-                bool hide = parse_bool_str(value) ? true : false;
-                layer->hidden = hide; ok = true;
-            } else if (strcmp(property, "visible") == 0) {
-                bool vis = parse_bool_str(value) ? true : false;
-                layer->hidden = !vis; ok = true;
-            }
-            if (ok) { snprintf(response, sizeof(response), "Layer %u modified\n", id); success = true; }
-            else { ipc_errorf(response, sizeof(response), 1201, "Invalid property '%s'\n", property); }
             break;
         }
 
@@ -578,8 +609,16 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                     first = false;
                     int eff_over = (it->overflow_mode >= 0) ? it->overflow_mode : app->config.render_overflow_mode;
                     const char *over_s = (eff_over==0?"repeat_edge": eff_over==1?"repeat": eff_over==2?"repeat_x": eff_over==3?"repeat_y": eff_over==4?"none":"inherit");
-                    int eff_tile_x = (it->tile_x >= 0) ? it->tile_x : app->config.render_tile_x;
-                    int eff_tile_y = (it->tile_y >= 0) ? it->tile_y : app->config.render_tile_y;
+                    int eff_tile_x;
+                    int eff_tile_y;
+                    if (it->tile_x >= 0) eff_tile_x = it->tile_x;
+                    else {
+                        if (eff_over == 1 || eff_over == 2) eff_tile_x = 1; else if (eff_over == 3) eff_tile_x = 0; else eff_tile_x = app->config.render_tile_x;
+                    }
+                    if (it->tile_y >= 0) eff_tile_y = it->tile_y;
+                    else {
+                        if (eff_over == 1 || eff_over == 3) eff_tile_y = 1; else if (eff_over == 2) eff_tile_y = 0; else eff_tile_y = app->config.render_tile_y;
+                    }
                     float eff_mx = (it->margin_px_x != 0.0f || it->margin_px_y != 0.0f) ? it->margin_px_x : app->config.render_margin_px_x;
                     float eff_my = (it->margin_px_x != 0.0f || it->margin_px_y != 0.0f) ? it->margin_px_y : app->config.render_margin_px_y;
                     const char *fit_s = (it->fit_mode==LAYER_FIT_STRETCH?"stretch": it->fit_mode==LAYER_FIT_COVER?"cover": it->fit_mode==LAYER_FIT_CONTAIN?"contain": it->fit_mode==LAYER_FIT_WIDTH?"fit_width":"fit_height");
@@ -601,13 +640,21 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                     if (filter_path && (!it->image_path || !strstr(it->image_path, filter_path))) continue;
                     int eff_over = (it->overflow_mode >= 0) ? it->overflow_mode : app->config.render_overflow_mode;
                     const char *over_s = (eff_over==0?"repeat_edge": eff_over==1?"repeat": eff_over==2?"repeat_x": eff_over==3?"repeat_y": eff_over==4?"none":"inherit");
-                    int eff_tile_x = (it->tile_x >= 0) ? it->tile_x : app->config.render_tile_x;
-                    int eff_tile_y = (it->tile_y >= 0) ? it->tile_y : app->config.render_tile_y;
+                    int eff_tile_x;
+                    int eff_tile_y;
+                    if (it->tile_x >= 0) eff_tile_x = it->tile_x;
+                    else {
+                        if (eff_over == 1 || eff_over == 2) eff_tile_x = 1; else if (eff_over == 3) eff_tile_x = 0; else eff_tile_x = app->config.render_tile_x;
+                    }
+                    if (it->tile_y >= 0) eff_tile_y = it->tile_y;
+                    else {
+                        if (eff_over == 1 || eff_over == 3) eff_tile_y = 1; else if (eff_over == 2) eff_tile_y = 0; else eff_tile_y = app->config.render_tile_y;
+                    }
                     float eff_mx = (it->margin_px_x != 0.0f || it->margin_px_y != 0.0f) ? it->margin_px_x : app->config.render_margin_px_x;
                     float eff_my = (it->margin_px_x != 0.0f || it->margin_px_y != 0.0f) ? it->margin_px_y : app->config.render_margin_px_y;
                     const char *fit_s = (it->fit_mode==LAYER_FIT_STRETCH?"stretch": it->fit_mode==LAYER_FIT_COVER?"cover": it->fit_mode==LAYER_FIT_CONTAIN?"contain": it->fit_mode==LAYER_FIT_WIDTH?"fit_width":"fit_height");
                     int w = snprintf(response + off, sizeof(response) - off,
-                                     "ID: %u | Path: %s | Shift: %.2f | Opacity: %.2f | Z: %d | UV: %.3f,%.3f | Fit: %s | Align: %.2f,%.2f | CScale: %.2f | Blur: %.2f | Overflow: %s | Tile: %s/%s | Margin: %.1f,%.1f | Hidden: %s | Tex: %u | Size: %dx%d\n",
+                                     "ID: %u | Path: %s | Scale: %.2f | Opacity: %.2f | Z: %d | UV: %.3f,%.3f | Fit: %s | Align: %.2f,%.2f | CScale: %.2f | Blur: %.2f | Overflow: %s | Tile: %s/%s | Margin: %.1f,%.1f | Hidden: %s | Tex: %u | Size: %dx%d\n",
                                      it->id, it->image_path ? it->image_path : "<memory>",
                                      it->shift_multiplier, it->opacity, it->z_index,
                                      it->base_uv_x, it->base_uv_y,
@@ -629,7 +676,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                     if (filter_hidden >= 0 && (it->hidden ? 1 : 0) != filter_hidden) continue;
                     if (filter_path && (!it->image_path || !strstr(it->image_path, filter_path))) continue;
                     int w = snprintf(response + off, sizeof(response) - off,
-                                     "%u z=%d op=%.2f shift=%.2f blur=%.2f hid=%s path=%s\n",
+                                     "%u z=%d op=%.2f scale=%.2f blur=%.2f hid=%s path=%s\n",
                                      it->id, it->z_index, it->opacity, it->shift_multiplier, it->blur_amount,
                                      it->hidden?"y":"n", it->image_path ? it->image_path : "<memory>");
                     if (w < 0 || off + (size_t)w >= sizeof(response)) { break; }
