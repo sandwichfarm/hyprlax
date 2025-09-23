@@ -171,8 +171,8 @@ START_TEST(test_ipc_list_layers)
     list = ipc_list_layers(ctx);
     ck_assert_ptr_nonnull(list);
     ck_assert_ptr_nonnull(strstr(list, test_image));
-    ck_assert_ptr_nonnull(strstr(list, "Scale: 1.00"));
-    ck_assert_ptr_nonnull(strstr(list, "Scale: 2.00"));
+    ck_assert_ptr_nonnull(strstr(list, "Shift Multiplier: 1.00"));
+    ck_assert_ptr_nonnull(strstr(list, "Shift Multiplier: 2.00"));
     ck_assert_ptr_nonnull(strstr(list, "Opacity: 0.80"));
     ck_assert_ptr_nonnull(strstr(list, "Opacity: 0.50"));
     free(list);

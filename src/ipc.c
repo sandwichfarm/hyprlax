@@ -65,7 +65,7 @@ static int apply_layer_property(hyprlax_context_t *app, parallax_layer_t *layer,
     if (token_check_len(property, IPC_MAX_PROP_LEN, "property", response, response_sz)) return 0;
     if (token_check_len(value, IPC_MAX_VALUE_LEN, "value", response, response_sz)) return 0;
 
-    if (strcmp(property, "scale") == 0) {
+    if (strcmp(property, "shift_multiplier") == 0 || strcmp(property, "scale") == 0) {
         float v = atof(value); if (v < 0.1f || v > 5.0f) { ipc_errorf(response, response_sz, 1250, "scale out of range (0.1..5.0)\n"); return 0; }
         layer->shift_multiplier = v; layer->shift_multiplier_x = v; layer->shift_multiplier_y = v; return 1;
     } else if (strcmp(property, "opacity") == 0) {
@@ -75,9 +75,9 @@ static int apply_layer_property(hyprlax_context_t *app, parallax_layer_t *layer,
         char propbuf[64]; snprintf(propbuf, sizeof(propbuf), "layer.%u.path", layer->id);
         int rc = hyprlax_runtime_set_property(app, propbuf, value);
         if (rc == 0) return 1; ipc_errorf(response, response_sz, 1252, "failed to set path\n"); return 0;
-    } else if (strcmp(property, "x") == 0) {
+    } else if (strcmp(property, "uv_offset.x") == 0 || strcmp(property, "x") == 0) {
         layer->base_uv_x = (float)atof(value); return 1;
-    } else if (strcmp(property, "y") == 0) {
+    } else if (strcmp(property, "uv_offset.y") == 0 || strcmp(property, "y") == 0) {
         layer->base_uv_y = (float)atof(value); return 1;
     } else if (strcmp(property, "overflow") == 0) {
         int m = overflow_from_string(value);
@@ -87,9 +87,9 @@ static int apply_layer_property(hyprlax_context_t *app, parallax_layer_t *layer,
         layer->tile_x = str_to_bool(value) ? 1 : 0; return 1;
     } else if (strcmp(property, "tile.y") == 0) {
         layer->tile_y = str_to_bool(value) ? 1 : 0; return 1;
-    } else if (strcmp(property, "margin.x") == 0 || strcmp(property, "margin_px.x") == 0) {
+    } else if (strcmp(property, "margin_px.x") == 0 || strcmp(property, "margin.x") == 0) {
         float v = atof(value); if (v < 0.0f) { ipc_errorf(response, response_sz, 1256, "margin.x must be >= 0\n"); return 0; } layer->margin_px_x = v; return 1;
-    } else if (strcmp(property, "margin.y") == 0 || strcmp(property, "margin_px.y") == 0) {
+    } else if (strcmp(property, "margin_px.y") == 0 || strcmp(property, "margin.y") == 0) {
         float v = atof(value); if (v < 0.0f) { ipc_errorf(response, response_sz, 1257, "margin.y must be >= 0\n"); return 0; } layer->margin_px_y = v; return 1;
     } else if (strcmp(property, "blur") == 0) {
         float v = atof(value); if (v < 0.0f) { ipc_errorf(response, response_sz, 1258, "blur must be >= 0\n"); return 0; } layer->blur_amount = v; return 1;
@@ -103,9 +103,9 @@ static int apply_layer_property(hyprlax_context_t *app, parallax_layer_t *layer,
         return 1;
     } else if (strcmp(property, "content_scale") == 0) {
         float v = atof(value); if (v <= 0.0f) { ipc_errorf(response, response_sz, 1253, "content_scale must be > 0\n"); return 0; } layer->content_scale = v; return 1;
-    } else if (strcmp(property, "align_x") == 0) {
+    } else if (strcmp(property, "align.x") == 0 || strcmp(property, "align_x") == 0) {
         layer->align_x = atof(value); if (layer->align_x < 0.0f) layer->align_x = 0.0f; if (layer->align_x > 1.0f) layer->align_x = 1.0f; return 1;
-    } else if (strcmp(property, "align_y") == 0) {
+    } else if (strcmp(property, "align.y") == 0 || strcmp(property, "align_y") == 0) {
         layer->align_y = atof(value); if (layer->align_y < 0.0f) layer->align_y = 0.0f; if (layer->align_y > 1.0f) layer->align_y = 1.0f; return 1;
     } else if (strcmp(property, "z") == 0) {
         int zv = 0; int rc = parse_int_range(value, 0, 31, &zv);
@@ -441,9 +441,12 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 break;
             }
             /* If the first token looks like an option instead of a path, emit a clearer error */
-            if (!strncmp(path, "scale=", 6) || !strncmp(path, "opacity=", 8) ||
+            if (!strncmp(path, "shift_multiplier=", 17) || !strncmp(path, "scale=", 6) || !strncmp(path, "opacity=", 8) ||
                 !strncmp(path, "x=", 2) || !strncmp(path, "y=", 2) || !strncmp(path, "z=", 2) ||
-                !strcmp(path, "scale") || !strcmp(path, "opacity") || !strcmp(path, "x") || !strcmp(path, "y") || !strcmp(path, "z")) {
+                !strncmp(path, "uv_offset.x=", 12) || !strncmp(path, "uv_offset.y=", 12) ||
+                !strcmp(path, "shift_multiplier") || !strcmp(path, "scale") || !strcmp(path, "opacity") ||
+                !strcmp(path, "x") || !strcmp(path, "y") || !strcmp(path, "z") ||
+                !strcmp(path, "uv_offset.x") || !strcmp(path, "uv_offset.y")) {
                 snprintf(response, sizeof(response), "Error: Image path must be the first argument\n");
                 break;
             }
@@ -624,10 +627,10 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                     const char *fit_s = (it->fit_mode==LAYER_FIT_STRETCH?"stretch": it->fit_mode==LAYER_FIT_COVER?"cover": it->fit_mode==LAYER_FIT_CONTAIN?"contain": it->fit_mode==LAYER_FIT_WIDTH?"fit_width":"fit_height");
                     char esc[512]; json_escape(it->image_path ? it->image_path : "<memory>", esc, sizeof(esc));
                     int w = snprintf(response + off, sizeof(response) - off,
-                        "{\"id\":%u,\"path\":\"%s\",\"shift\":%.3f,\"opacity\":%.3f,\"z\":%d,\"uv\":[%.4f,%.4f],\"fit\":\"%s\",\"align\":[%.3f,%.3f],\"content_scale\":%.3f,\"blur\":%.3f,\"overflow\":\"%s\",\"tile\":[%s,%s],\"margin\":[%.1f,%.1f],\"hidden\":%s}",
+                        "{\"id\":%u,\"path\":\"%s\",\"shift_multiplier\":%.3f,\"opacity\":%.3f,\"z\":%d,\"uv_offset\":[%.4f,%.4f],\"fit\":\"%s\",\"align\":[%.3f,%.3f],\"content_scale\":%.3f,\"blur\":%.3f,\"overflow\":\"%s\",\"tile\":[%s,%s],\"margin_px\":[%.1f,%.1f],\"visible\":%s}",
                         it->id, esc, it->shift_multiplier, it->opacity, it->z_index,
                         it->base_uv_x, it->base_uv_y, fit_s, it->align_x, it->align_y, it->content_scale, it->blur_amount,
-                        over_s, eff_tile_x?"true":"false", eff_tile_y?"true":"false", eff_mx, eff_my, it->hidden?"true":"false");
+                        over_s, eff_tile_x?"true":"false", eff_tile_y?"true":"false", eff_mx, eff_my, it->hidden?"false":"true");
                     if (w < 0 || off + (size_t)w >= sizeof(response)) { break; }
                     off += (size_t)w;
                 }
@@ -654,7 +657,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                     float eff_my = (it->margin_px_x != 0.0f || it->margin_px_y != 0.0f) ? it->margin_px_y : app->config.render_margin_px_y;
                     const char *fit_s = (it->fit_mode==LAYER_FIT_STRETCH?"stretch": it->fit_mode==LAYER_FIT_COVER?"cover": it->fit_mode==LAYER_FIT_CONTAIN?"contain": it->fit_mode==LAYER_FIT_WIDTH?"fit_width":"fit_height");
                     int w = snprintf(response + off, sizeof(response) - off,
-                                     "ID: %u | Path: %s | Scale: %.2f | Opacity: %.2f | Z: %d | UV: %.3f,%.3f | Fit: %s | Align: %.2f,%.2f | CScale: %.2f | Blur: %.2f | Overflow: %s | Tile: %s/%s | Margin: %.1f,%.1f | Hidden: %s | Tex: %u | Size: %dx%d\n",
+                                     "ID: %u | Path: %s | Shift Multiplier: %.2f | Opacity: %.2f | Z: %d | UV Offset: %.3f,%.3f | Fit: %s | Align: %.2f,%.2f | Content Scale: %.2f | Blur: %.2f | Overflow: %s | Tile: %s/%s | Margin Px: %.1f,%.1f | Visible: %s | Tex: %u | Size: %dx%d\n",
                                      it->id, it->image_path ? it->image_path : "<memory>",
                                      it->shift_multiplier, it->opacity, it->z_index,
                                      it->base_uv_x, it->base_uv_y,
@@ -663,7 +666,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                                      over_s,
                                      eff_tile_x?"true":"false", eff_tile_y?"true":"false",
                                      eff_mx, eff_my,
-                                     it->hidden?"yes":"no",
+                                     it->hidden?"no":"yes",
                                      (unsigned int)it->texture_id, it->width, it->height);
                     if (w < 0 || off + (size_t)w >= sizeof(response)) { break; }
                     off += (size_t)w;
@@ -676,7 +679,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                     if (filter_hidden >= 0 && (it->hidden ? 1 : 0) != filter_hidden) continue;
                     if (filter_path && (!it->image_path || !strstr(it->image_path, filter_path))) continue;
                     int w = snprintf(response + off, sizeof(response) - off,
-                                     "%u z=%d op=%.2f scale=%.2f blur=%.2f hid=%s path=%s\n",
+                                     "%u z=%d op=%.2f shift_multiplier=%.2f blur=%.2f vis=%s path=%s\n",
                                      it->id, it->z_index, it->opacity, it->shift_multiplier, it->blur_amount,
                                      it->hidden?"y":"n", it->image_path ? it->image_path : "<memory>");
                     if (w < 0 || off + (size_t)w >= sizeof(response)) { break; }
@@ -801,8 +804,8 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                     (void)workspace_detect_capabilities(ctype, &tcaps);
 
                     off += snprintf(response + off, sizeof(response) - off,
-                        "{\"running\":true,\"layers\":%d,\"target_fps\":%d,\"fps\":%.2f,\"parallax\":\"%s\",\"compositor\":\"%s\",\"socket\":\"%s\",\"vsync\":%s,\"debug\":%s,\"caps\":{\"steal\":%s,\"move\":%s,\"split\":%s,\"wsets\":%s,\"tags\":%s,\"vstack\":%s},\"monitors\":[",
-                        layers, target_fps, fps, mode, comp, ctx->socket_path, vsync?"true":"false", debug?"true":"false",
+                        "{\"running\":true,\"layers\":%d,\"target_fps\":%d,\"fps\":%.2f,\"parallax\":\"%s\",\"shift_pixels\":%.1f,\"compositor\":\"%s\",\"socket\":\"%s\",\"vsync\":%s,\"debug\":%s,\"caps\":{\"steal\":%s,\"move\":%s,\"split\":%s,\"wsets\":%s,\"tags\":%s,\"vstack\":%s},\"monitors\":[",
+                        layers, target_fps, fps, mode, app?app->config.shift_pixels:0.0f, comp, ctx->socket_path, vsync?"true":"false", debug?"true":"false",
                         tcaps.can_steal_workspace?"true":"false",
                         tcaps.supports_workspace_move?"true":"false",
                         tcaps.has_split_plugin?"true":"false",
@@ -861,22 +864,22 @@ bool ipc_process_commands(ipc_context_t* ctx) {
             hyprlax_context_t *app_set = (hyprlax_context_t*)ctx->app_context;
             if (!app_set) { ipc_errorf(response, sizeof(response), 1300, "Runtime settings not available\n"); break; }
             bool handled = false;
-            if (strcmp(property, "fps") == 0) {
+            if (strcmp(property, "fps") == 0 || strcmp(property, "render.fps") == 0) {
                 int iv = 0; int rc = parse_int_range(value, 30, 240, &iv);
                 if (rc <= 0) { ipc_errorf(response, sizeof(response), rc==0?1210:1211, rc==0?"invalid fps\n":"fps out of range (30..240)\n"); break; }
                 app_set->config.target_fps = iv; handled = true;
             }
-            else if (strcmp(property, "shift") == 0) {
+            else if (strcmp(property, "shift") == 0 || strcmp(property, "parallax.shift_pixels") == 0) {
                 double dv = 0.0; int rc = parse_double_range(value, 0.0, 1000.0, &dv);
                 if (rc <= 0) { ipc_errorf(response, sizeof(response), rc==0?1212:1213, rc==0?"invalid shift\n":"shift out of range (0..1000)\n"); break; }
                 app_set->config.shift_pixels = (float)dv; handled = true;
             }
-            else if (strcmp(property, "duration") == 0) {
+            else if (strcmp(property, "duration") == 0 || strcmp(property, "animation.duration") == 0) {
                 double dv = 0.0; int rc = parse_double_range(value, 0.1, 10.0, &dv);
                 if (rc <= 0) { ipc_errorf(response, sizeof(response), rc==0?1214:1215, rc==0?"invalid duration\n":"duration out of range (0.1..10.0)\n"); break; }
                 app_set->config.animation_duration = (float)dv; handled = true;
             }
-            else if (strcmp(property, "easing") == 0) { app_set->config.default_easing = easing_from_string(value); handled = true; }
+            else if (strcmp(property, "easing") == 0 || strcmp(property, "animation.easing") == 0) { app_set->config.default_easing = easing_from_string(value); handled = true; }
             if (!handled) {
                 int rc = hyprlax_runtime_set_property(app_set, property, value);
                 if (rc == 0) { snprintf(response, sizeof(response), "OK\n"); success = true; break; }
@@ -900,10 +903,10 @@ bool ipc_process_commands(ipc_context_t* ctx) {
 
             hyprlax_context_t *app_get = (hyprlax_context_t*)ctx->app_context;
             if (!app_get) { ipc_errorf(response, sizeof(response), 1300, "Runtime settings not available\n"); break; }
-            if (strcmp(property, "fps") == 0) { snprintf(response, sizeof(response), "%d\n", app_get->config.target_fps); success = true; break; }
-            if (strcmp(property, "shift") == 0) { snprintf(response, sizeof(response), "%.1f\n", app_get->config.shift_pixels); success = true; break; }
-            if (strcmp(property, "duration") == 0) { snprintf(response, sizeof(response), "%.3f\n", app_get->config.animation_duration); success = true; break; }
-            if (strcmp(property, "easing") == 0) { snprintf(response, sizeof(response), "%s\n", easing_to_string(app_get->config.default_easing)); success = true; break; }
+            if (strcmp(property, "fps") == 0 || strcmp(property, "render.fps") == 0) { snprintf(response, sizeof(response), "%d\n", app_get->config.target_fps); success = true; break; }
+            if (strcmp(property, "shift") == 0 || strcmp(property, "parallax.shift_pixels") == 0) { snprintf(response, sizeof(response), "%.1f\n", app_get->config.shift_pixels); success = true; break; }
+            if (strcmp(property, "duration") == 0 || strcmp(property, "animation.duration") == 0) { snprintf(response, sizeof(response), "%.3f\n", app_get->config.animation_duration); success = true; break; }
+            if (strcmp(property, "easing") == 0 || strcmp(property, "animation.easing") == 0) { snprintf(response, sizeof(response), "%s\n", easing_to_string(app_get->config.default_easing)); success = true; break; }
             if (hyprlax_runtime_get_property(app_get, property, response, sizeof(response)) == 0) {
                 size_t len = strlen(response); if (len < sizeof(response) - 1) response[len++] = '\n', response[len] = '\0';
                 success = true;
@@ -1075,7 +1078,7 @@ char* ipc_list_layers(ipc_context_t* ctx) {
         for (int i = 0; i < ctx->layer_count; i++) {
             layer_t *layer = ctx->layers[i]; if (!layer) continue;
             int w = snprintf(result + off, IPC_MAX_MESSAGE_SIZE - off,
-                "ID: %u | Path: %s | Scale: %.2f | Opacity: %.2f | Position: (%.2f, %.2f) | Z: %d | Visible: %s\n",
+                "ID: %u | Path: %s | Shift Multiplier: %.2f | Opacity: %.2f | Position: (%.2f, %.2f) | Z: %d | Visible: %s\n",
                 layer->id, layer->image_path, layer->scale, layer->opacity,
                 layer->x_offset, layer->y_offset, layer->z_index,
                 layer->visible ? "yes" : "no");
@@ -1089,7 +1092,7 @@ char* ipc_list_layers(ipc_context_t* ctx) {
     char *out = malloc(IPC_MAX_MESSAGE_SIZE); if (!out) return NULL; out[0] = '\0'; size_t off = 0;
     for (parallax_layer_t *it = app->layers; it; it = it->next) {
         int w = snprintf(out + off, IPC_MAX_MESSAGE_SIZE - off,
-                         "ID: %u | Path: %s | Shift: %.2f | Opacity: %.2f | Z: %d\n",
+                         "ID: %u | Path: %s | Shift Multiplier: %.2f | Opacity: %.2f | Z: %d\n",
                          it->id, it->image_path ? it->image_path : "<memory>", it->shift_multiplier, it->opacity, it->z_index);
         if (w < 0 || off + (size_t)w >= IPC_MAX_MESSAGE_SIZE)
             break;

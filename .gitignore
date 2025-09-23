@@ -39,3 +39,6 @@ test_config/
 *.tar.gz
 *.zip
 dist/
+
+#Python (examples)
+**/__pycache__

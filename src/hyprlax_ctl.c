@@ -173,11 +173,11 @@ static void print_ctl_help(const char *prog) {
     printf("Global options:\n");
     printf("  --json, -j               Return JSON for any command (client-wrapped)\n\n");
     printf("Layer Management Commands:\n");
-    printf("  add <image> [scale=..] [opacity=..] [x=..] [y=..] [z=..]\n");
+    printf("  add <image> [shift_multiplier=..] [opacity=..] [uv_offset.x=..] [uv_offset.y=..] [z=..]\n");
     printf("      Add a new layer with the specified image\n");
-    printf("      scale: parallax shift multiplier (0.1-5.0, default: 1.0)\n");
+    printf("      shift_multiplier: per-layer parallax multiplier (0.1-5.0, default: 1.0)\n");
     printf("      opacity: layer opacity (0.0-1.0, default: 1.0)\n");
-    printf("      x,y: UV pan offsets (normalized, e.g., -0.10..0.10)\n");
+    printf("      uv_offset.x, uv_offset.y: UV pan offsets (normalized, e.g., -0.10..0.10)\n");
     printf("      z: z-order (0-31, default: next)\n\n");
 
     printf("  remove <id>\n");
@@ -185,8 +185,8 @@ static void print_ctl_help(const char *prog) {
 
     printf("  modify <id> <property> <value>\n");
     printf("      Modify a layer property\n");
-    printf("      Properties: scale, opacity, x, y, z, visible, hidden, blur,\n");
-    printf("                  fit, content_scale, align_x, align_y, overflow, tile.x, tile.y, margin.x, margin.y\n");
+    printf("      Properties: shift_multiplier, opacity, uv_offset.x, uv_offset.y, z, visible, blur,\n");
+    printf("                  fit, content_scale, align.x, align.y, overflow, tile.x, tile.y, margin_px.x, margin_px.y\n");
     printf("        - x, y are UV pan offsets (normalized),\n");
     printf("          typical range: -0.10 .. 0.10 (1.00 = full texture width/height)\n\n");
 
@@ -208,11 +208,12 @@ static void print_ctl_help(const char *prog) {
     printf("Runtime Settings Commands:\n");
     printf("  set <property> <value>\n");
     printf("      Set a runtime property\n");
-    printf("      Properties: fps, shift, duration, easing,\n");
-    printf("                 blur_passes, blur_size, debug\n\n");
+    printf("      Canonical: render.fps, parallax.shift_pixels, animation.duration, animation.easing\n");
+    printf("      Aliases:   fps, shift, duration, easing (kept for compatibility)\n\n");
 
     printf("  get <property>\n");
-    printf("      Get current value of a property\n\n");
+    printf("      Get current value of a property\n");
+    printf("      Use canonical dotted keys (e.g., parallax.shift_pixels); aliases supported.\n\n");
 
     /* Z-order utilities */
     printf("Z-order Utilities:\n");
@@ -251,24 +252,24 @@ static void help_add(void) {
     printf("Parameters:\n");
     printf("  image               Path to an image file (png, jpg, etc.)\n");
     printf("  Properties (examples):\n");
-    printf("    scale 0.9           Parallax multiplier (0.1..5.0)\n");
+    printf("    shift_multiplier 0.9 Parallax multiplier (0.1..5.0)\n");
     printf("    opacity 0.8         Opacity (0.0..1.0)\n");
-    printf("    x -0.01 y 0.02      UV pan offsets (normalized)\n");
+    printf("    uv_offset.x -0.01 uv_offset.y 0.02  UV pan offsets (normalized)\n");
     printf("    z 5                 Z-order (0..31)\n");
     printf("    fit contain         Fit mode: stretch|cover|contain|fit_width|fit_height\n");
-    printf("    align_x 0.5         Horizontal alignment (0..1)\n");
-    printf("    align_y 0.1         Vertical alignment (0..1)\n");
+    printf("    align.x 0.5         Horizontal alignment (0..1)\n");
+    printf("    align.y 0.1         Vertical alignment (0..1)\n");
     printf("    content_scale 1.2   Content scale (>0)\n");
     printf("    overflow repeat_x   Overflow mode\n");
     printf("    tile.x true         Tile X (true/false)\n");
     printf("    tile.y false        Tile Y (true/false)\n");
-    printf("    margin.x 10         Margin X in px (>=0)\n");
-    printf("    margin.y 20         Margin Y in px (>=0)\n");
+    printf("    margin_px.x 10      Margin X in px (>=0)\n");
+    printf("    margin_px.y 20      Margin Y in px (>=0)\n");
     printf("    blur 1.5            Blur amount (>=0)\n");
     printf("    hidden true         Hide layer initially\n\n");
     printf("Examples:\n");
-    printf("  hyprlax ctl add ~/Pictures/bg.jpg opacity=0.9 scale=0.3\n");
-    printf("  hyprlax ctl add layer.png x 0.05 y -0.02 z 10 fit cover\n");
+    printf("  hyprlax ctl add ~/Pictures/bg.jpg opacity=0.9 shift_multiplier=0.3\n");
+    printf("  hyprlax ctl add layer.png uv_offset.x 0.05 uv_offset.y -0.02 z 10 fit cover\n");
 }
 
 static void help_remove(void) {
@@ -281,22 +282,22 @@ static void help_modify(void) {
     printf("Usage: hyprlax ctl modify <id> <property> <value>\n\n");
     printf("Description:\n  Change a property on an existing layer.\n\n");
     printf("Properties:\n");
-    printf("  scale <f>           Parallax shift multiplier (0.1..5.0)\n");
+    printf("  shift_multiplier <f> Parallax shift multiplier (0.1..5.0)\n");
     printf("  opacity <f>         0.0..1.0\n");
-    printf("  x <f>, y <f>        UV pan offsets (normalized); typical -0.10..0.10\n");
+    printf("  uv_offset.x <f>, uv_offset.y <f>  UV pan offsets (normalized); typical -0.10..0.10\n");
     printf("  z <i>               0..31 (reorders z; list is re-sorted)\n");
     printf("  visible <bool>      true/false (alias of hidden=false)\n");
     printf("  hidden <bool>       true/false\n");
     printf("  blur <f>            Blur amount\n");
     printf("  fit <mode>          stretch|cover|contain|fit_width|fit_height\n");
     printf("  content_scale <f>   Content scale factor > 0\n");
-    printf("  align_x <f>         0.0..1.0\n");
-    printf("  align_y <f>         0.0..1.0\n");
+    printf("  align.x <f>         0.0..1.0\n");
+    printf("  align.y <f>         0.0..1.0\n");
     printf("  overflow <mode>     repeat_edge|repeat|repeat_x|repeat_y|none|inherit\n");
     printf("  tile.x <bool>       true/false\n");
     printf("  tile.y <bool>       true/false\n");
-    printf("  margin.x <px>       Margin in pixels (effective with overflow)\n");
-    printf("  margin.y <px>       Margin in pixels (effective with overflow)\n\n");
+    printf("  margin_px.x <px>    Margin in pixels (effective with overflow)\n");
+    printf("  margin_px.y <px>    Margin in pixels (effective with overflow)\n\n");
     printf("Examples:\n  hyprlax ctl modify 1 opacity 0.6\n  hyprlax ctl modify 3 z 12\n");
 }
 

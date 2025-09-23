@@ -44,19 +44,17 @@ static void parse_global_table(toml_table_t *global, config_t *cfg)
 
     toml_datum_t d;
 
-    d = toml_int_in(global, "fps");
-    if (d.ok) cfg->target_fps = (int)d.u.i;
+    /* Legacy flat keys (kept for compatibility) */
+    d = toml_int_in(global, "fps"); if (d.ok) cfg->target_fps = (int)d.u.i;
+    d = toml_double_in(global, "duration"); if (d.ok) cfg->animation_duration = (float)d.u.d;
+    d = toml_double_in(global, "shift"); if (d.ok) cfg->shift_pixels = (float)d.u.d;
+    d = toml_string_in(global, "easing"); if (d.ok) { cfg->default_easing = easing_from_string(d.u.s); free(d.u.s); }
 
-    d = toml_double_in(global, "duration");
-    if (d.ok) cfg->animation_duration = (float)d.u.d;
-
-    d = toml_double_in(global, "shift");
-    if (d.ok) cfg->shift_pixels = (float)d.u.d;
-
-    d = toml_string_in(global, "easing");
-    if (d.ok) {
-        cfg->default_easing = easing_from_string(d.u.s);
-        free(d.u.s);
+    /* Canonical nested keys */
+    toml_table_t *animation = toml_table_in(global, "animation");
+    if (animation) {
+        d = toml_double_in(animation, "duration"); if (d.ok) cfg->animation_duration = (float)d.u.d;
+        d = toml_string_in(animation, "easing"); if (d.ok) { cfg->default_easing = easing_from_string(d.u.s); free(d.u.s); }
     }
 
     d = toml_bool_in(global, "debug");
@@ -89,6 +87,10 @@ static void parse_global_table(toml_table_t *global, config_t *cfg)
                 }
             }
         }
+
+        /* Canonical: shift_pixels inside parallax */
+        d = toml_double_in(parallax, "shift_pixels");
+        if (d.ok) cfg->shift_pixels = (float)d.u.d;
 
         toml_table_t *sources = toml_table_in(parallax, "sources");
         if (sources) {
