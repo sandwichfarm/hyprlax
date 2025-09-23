@@ -177,18 +177,16 @@ hyprlax ctl clear
 
 ### Runtime Settings
 ```bash
-# Change FPS
-hyprlax ctl set fps 120
+# Change FPS (canonical key; alias `fps` also works)
+hyprlax ctl set render.fps 120
 
-# Change animation duration
-hyprlax ctl set duration 2.0
-
-# Change easing function
-hyprlax ctl set easing elastic
+# Change animation duration / easing (aliases: duration/easing)
+hyprlax ctl set animation.duration 2.0
+hyprlax ctl set animation.easing elastic
 
 # Query current settings
-hyprlax ctl get fps
-hyprlax ctl get duration
+hyprlax ctl get render.fps
+hyprlax ctl get animation.duration
 
 # Get daemon status
 hyprlax ctl status
@@ -201,6 +199,7 @@ hyprlax ctl status
 ### 📚 User Guides
 - [Installation](docs/installation.md) - Detailed installation instructions
 - [Configuration](docs/configuration.md) - All configuration options
+- [Environment Variables](docs/configuration/environment.md) - ENV mapping and precedence
 - [Compositor Support](docs/compositors.md) - Compositor-specific features
 - [Multi-Layer Parallax](docs/multi-layer.md) - Creating depth with layers
 - [Animation](docs/animation.md) - Easing functions and timing

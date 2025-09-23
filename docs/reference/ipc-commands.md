@@ -14,22 +14,22 @@ hyprlax ctl <command> [arguments...]
 Add a new image layer (IPC overlay). Optional parameters are key=value pairs.
 
 ```bash
-hyprlax ctl add <image_path> [scale=..] [opacity=..] [x=..] [y=..] [z=..]
+hyprlax ctl add <image_path> [shift_multiplier=..] [opacity=..] [uv_offset.x=..] [uv_offset.y=..] [z=..]
 ```
 
 Optional keys:
 
 | Key | Type | Default | Range | Description |
 |-----|------|---------|-------|-------------|
-| `scale` | float | 1.0 | 0.1-5.0 | Scale factor |
+| `shift_multiplier` | float | 1.0 | 0.1-5.0 | Per-layer parallax multiplier (0.0=static, 1.0=normal) |
 | `opacity` | float | 1.0 | 0.0-1.0 | Transparency |
-| `x` | float | 0.0 | any | UV pan X offset (normalized; typical -0.10..0.10) |
-| `y` | float | 0.0 | any | UV pan Y offset (normalized; typical -0.10..0.10) |
+| `uv_offset.x` | float | 0.0 | any | UV pan X offset (normalized; typical -0.10..0.10) |
+| `uv_offset.y` | float | 0.0 | any | UV pan Y offset (normalized; typical -0.10..0.10) |
 | `z` | int | next | 0-31 | Z-order (layer stack position) |
 
 **Example:**
 ```bash
-hyprlax ctl add ~/walls/sunset.jpg opacity=0.9 scale=1.2 z=10
+hyprlax ctl add ~/walls/sunset.jpg opacity=0.9 shift_multiplier=1.2 z=10
 ```
 
 ### remove
@@ -53,30 +53,30 @@ hyprlax ctl modify <layer_id> <property> <value>
 
 | Property | Type | Range | Description |
 |----------|------|-------|-------------|
-| `scale` | float | 0.1-5.0 | Scale factor |
+| `shift_multiplier` | float | 0.1-5.0 | Per-layer parallax multiplier |
 | `opacity` | float | 0.0-1.0 | Transparency |
-| `x` | float | any | UV pan X offset (normalized; typical -0.10..0.10) |
-| `y` | float | any | UV pan Y offset (normalized; typical -0.10..0.10) |
+| `uv_offset.x` | float | any | UV pan X offset (normalized; typical -0.10..0.10) |
+| `uv_offset.y` | float | any | UV pan Y offset (normalized; typical -0.10..0.10) |
 | `z` | int | 0-31 | Z-order (layer stack position) |
 | `visible` | bool | true/false, 1/0 | Visibility toggle |
-| `hidden` | bool | true/false | Dedicated visibility flag (preferred) |
+| `hidden` | bool | true/false | Deprecated; prefer `visible` |
 | `blur` | float | >=0 | Per-layer blur amount |
 | `fit` | string | stretch/cover/contain/fit_width/fit_height | Content fit mode |
 | `content_scale` | float | >0 | Content scale multiplier |
-| `align_x` | float | 0..1 | Horizontal alignment (0 left, 0.5 center, 1 right) |
-| `align_y` | float | 0..1 | Vertical alignment (0 top, 0.5 center, 1 bottom) |
+| `align.x` | float | 0..1 | Horizontal alignment (0 left, 0.5 center, 1 right) |
+| `align.y` | float | 0..1 | Vertical alignment (0 top, 0.5 center, 1 bottom) |
 | `overflow` | string | inherit/repeat_edge/repeat/repeat_x/repeat_y/none | Overflow behavior |
 | `tile.x` | bool | true/false | Tiling on X |
 | `tile.y` | bool | true/false | Tiling on Y |
-| `margin.x` | float | px | Safe margin X (px) when overflow none |
-| `margin.y` | float | px | Safe margin Y (px) when overflow none |
+| `margin_px.x` | float | px | Safe margin X (px) when overflow none |
+| `margin_px.y` | float | px | Safe margin Y (px) when overflow none |
 | `path` | string | file path | Image path; reloads texture |
 
 **Examples:**
 ```bash
 hyprlax ctl modify 1 opacity 0.5
 hyprlax ctl modify 2 visible false
-hyprlax ctl modify 3 scale 1.2
+hyprlax ctl modify 3 shift_multiplier 1.2
 ```
 
 ### list
@@ -87,9 +87,9 @@ hyprlax ctl list [--long|-l] [--json|-j] [--filter <expr>]
 ```
 
 Formats:
-- Compact (default): one line per layer with id, z, opacity, shift, blur, hidden, path
-- Long (`--long`): detailed properties including UV, fit, align, content_scale, overflow, tile, margins
-- JSON (`--json`): machine-readable array of layer objects
+- Compact (default): one line per layer with id, z, opacity, shift_multiplier, blur, vis, path
+- Long (`--long`): detailed properties including UV Offset, fit, align, Content Scale, overflow, tile, Margin Px
+- JSON (`--json`): machine-readable array of layer objects (canonical keys)
 
 Filters:
 - `id=<id>`
@@ -112,12 +112,14 @@ Change runtime settings.
 hyprlax ctl set <property> <value>
 ```
 
-| Property | Type | Range | Description |
-|----------|------|-------|-------------|
-| `fps` | int | 30-240 | Target frame rate |
-| `shift` | float | 0-1000 | Base parallax shift (pixels) |
-| `duration` | float | 0.1-10.0 | Animation duration (seconds) |
-| `easing` | string | see list | Easing function name |
+| Property (canonical) | Type | Range | Description |
+|----------------------|------|-------|-------------|
+| `render.fps` | int | 30-240 | Target frame rate |
+| `parallax.shift_pixels` | float | 0-1000 | Base parallax shift (pixels) |
+| `animation.duration` | float | 0.1-10.0 | Animation duration (seconds) |
+| `animation.easing` | string | see list | Easing function name |
+
+Aliases (kept for compatibility): `fps`, `shift`, `duration`, `easing`.
 | `blur_passes` | int | 0-5 | Number of blur passes |
 | `blur_size` | int | 3-31 (odd) | Blur kernel size |
 | `debug` | bool | true/false | Debug output toggle |
@@ -231,6 +233,25 @@ fi
 - Location (fallback): `/tmp/hyprlax-$USER.sock`
 - Permissions: `0600` (user read/write only)
 - Protocol: Unix domain socket
+
+## Status JSON Fields
+
+When running `hyprlax ctl status --json`, the response includes:
+
+- `running`: boolean
+- `layers`: number
+- `target_fps`: number
+- `fps`: number
+- `parallax`: string (workspace|cursor|hybrid)
+- `shift_pixels`: number (pixels per workspace)
+- `parallax_weights`: object `{ workspace: number, cursor: number }`
+- `render`: object `{ overflow: string, tile: [bool,bool], margin_px: [number,number] }`
+- `compositor`: string
+- `socket`: string
+- `vsync`: boolean
+- `debug`: boolean
+- `caps`: capability flags
+- `monitors`: array of monitor objects `{ name, size, pos, scale, refresh, caps }`
 
 ## IPC Error Codes (optional)
 

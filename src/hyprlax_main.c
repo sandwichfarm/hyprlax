@@ -1103,6 +1103,69 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
 
+    /* Apply environment overrides (ENV > CLI > Config > Defaults) */
+    {
+        const char *v;
+        v = getenv("HYPRLAX_RENDER_FPS");
+        if (v && *v) {
+            int iv = atoi(v); if (iv > 0 && iv <= 240) ctx->config.target_fps = iv;
+        }
+        v = getenv("HYPRLAX_PARALLAX_SHIFT_PIXELS");
+        if (v && *v) {
+            float f = atof(v); if (f >= 0.0f) ctx->config.shift_pixels = f;
+        }
+        v = getenv("HYPRLAX_ANIMATION_DURATION");
+        if (v && *v) {
+            float f = atof(v); if (f > 0.0f) ctx->config.animation_duration = f;
+        }
+        v = getenv("HYPRLAX_ANIMATION_EASING");
+        if (v && *v) {
+            ctx->config.default_easing = easing_from_string(v);
+        }
+        v = getenv("HYPRLAX_RENDER_VSYNC");
+        if (v && *v) {
+            if (!strcasecmp(v, "1") || !strcasecmp(v, "true") || !strcasecmp(v, "on")) ctx->config.vsync = true;
+            else if (!strcasecmp(v, "0") || !strcasecmp(v, "false") || !strcasecmp(v, "off")) ctx->config.vsync = false;
+        }
+        v = getenv("HYPRLAX_RENDER_TILE_X");
+        if (v && *v) {
+            if (!strcasecmp(v, "1") || !strcasecmp(v, "true") || !strcasecmp(v, "on")) ctx->config.render_tile_x = 1;
+            else if (!strcasecmp(v, "0") || !strcasecmp(v, "false") || !strcasecmp(v, "off")) ctx->config.render_tile_x = 0;
+        }
+        v = getenv("HYPRLAX_RENDER_TILE_Y");
+        if (v && *v) {
+            if (!strcasecmp(v, "1") || !strcasecmp(v, "true") || !strcasecmp(v, "on")) ctx->config.render_tile_y = 1;
+            else if (!strcasecmp(v, "0") || !strcasecmp(v, "false") || !strcasecmp(v, "off")) ctx->config.render_tile_y = 0;
+        }
+        v = getenv("HYPRLAX_RENDER_MARGIN_PX_X");
+        if (v && *v) {
+            float f = atof(v); if (f >= 0.0f) ctx->config.render_margin_px_x = f;
+        }
+        v = getenv("HYPRLAX_RENDER_MARGIN_PX_Y");
+        if (v && *v) {
+            float f = atof(v); if (f >= 0.0f) ctx->config.render_margin_px_y = f;
+        }
+        v = getenv("HYPRLAX_PARALLAX_MODE");
+        if (v && *v) {
+            ctx->config.parallax_mode = parallax_mode_from_string(v);
+        }
+        v = getenv("HYPRLAX_PARALLAX_SOURCES_CURSOR_WEIGHT");
+        if (v && *v) {
+            float f = atof(v); if (f < 0.0f) f = 0.0f; if (f > 1.0f) f = 1.0f; ctx->config.parallax_cursor_weight = f;
+        }
+        v = getenv("HYPRLAX_PARALLAX_SOURCES_WORKSPACE_WEIGHT");
+        if (v && *v) {
+            float f = atof(v); if (f < 0.0f) f = 0.0f; if (f > 1.0f) f = 1.0f; ctx->config.parallax_workspace_weight = f;
+        }
+        v = getenv("HYPRLAX_RENDER_OVERFLOW");
+        if (v && *v) {
+            /* Map to overflow mode if recognized */
+            extern int overflow_from_string_local(const char *s);
+            int m = overflow_from_string_local(v);
+            if (m != -2) ctx->config.render_overflow_mode = m;
+        }
+    }
+
     /* Initialize logging system */
     log_init(ctx->config.debug, ctx->config.debug_log_path);
     /* Apply explicit log level (supports --trace and HYPRLAX_VERBOSE) */

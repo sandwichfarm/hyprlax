@@ -803,9 +803,19 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                     int ctype = (app && app->compositor) ? app->compositor->type : COMPOSITOR_AUTO;
                     (void)workspace_detect_capabilities(ctype, &tcaps);
 
+                    int eff_over = app ? app->config.render_overflow_mode : 0;
+                    const char *over_s = (eff_over==0?"repeat_edge": eff_over==1?"repeat": eff_over==2?"repeat_x": eff_over==3?"repeat_y": eff_over==4?"none":"inherit");
+                    const char *tilex_s = (app && app->config.render_tile_x) ? "true" : "false";
+                    const char *tiley_s = (app && app->config.render_tile_y) ? "true" : "false";
+                    float mpx = app ? app->config.render_margin_px_x : 0.0f;
+                    float mpy = app ? app->config.render_margin_px_y : 0.0f;
+                    float w_ws = app ? app->config.parallax_workspace_weight : 0.0f;
+                    float w_cur = app ? app->config.parallax_cursor_weight : 0.0f;
+
                     off += snprintf(response + off, sizeof(response) - off,
-                        "{\"running\":true,\"layers\":%d,\"target_fps\":%d,\"fps\":%.2f,\"parallax\":\"%s\",\"shift_pixels\":%.1f,\"compositor\":\"%s\",\"socket\":\"%s\",\"vsync\":%s,\"debug\":%s,\"caps\":{\"steal\":%s,\"move\":%s,\"split\":%s,\"wsets\":%s,\"tags\":%s,\"vstack\":%s},\"monitors\":[",
-                        layers, target_fps, fps, mode, app?app->config.shift_pixels:0.0f, comp, ctx->socket_path, vsync?"true":"false", debug?"true":"false",
+                        "{\"running\":true,\"layers\":%d,\"target_fps\":%d,\"fps\":%.2f,\"parallax\":\"%s\",\"shift_pixels\":%.1f,\"parallax_weights\":{\"workspace\":%.3f,\"cursor\":%.3f},\"render\":{\"overflow\":\"%s\",\"tile\":[%s,%s],\"margin_px\":[%.1f,%.1f]},\"compositor\":\"%s\",\"socket\":\"%s\",\"vsync\":%s,\"debug\":%s,\"caps\":{\"steal\":%s,\"move\":%s,\"split\":%s,\"wsets\":%s,\"tags\":%s,\"vstack\":%s},\"monitors\":[",
+                        layers, target_fps, fps, mode, app?app->config.shift_pixels:0.0f, w_ws, w_cur, over_s, tilex_s, tiley_s, mpx, mpy,
+                        comp, ctx->socket_path, vsync?"true":"false", debug?"true":"false",
                         tcaps.can_steal_workspace?"true":"false",
                         tcaps.supports_workspace_move?"true":"false",
                         tcaps.has_split_plugin?"true":"false",
