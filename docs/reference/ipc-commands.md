@@ -154,7 +154,7 @@ hyprlax ctl get easing
 Show hyprlax status information.
 
 ```bash
-hyprlax ctl status [--json|-j]
+hyprlax ctl status [--json|-j] [--long|-l]
 ```
 
 **Output includes:**

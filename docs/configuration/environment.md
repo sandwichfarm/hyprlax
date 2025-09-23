@@ -83,8 +83,8 @@ export HYPRLAX_ANIMATION_EASING=expo
 
 At startup, hyprlax merges configuration from multiple sources. The intended precedence is:
 
-1. Environment variables (highest)
-2. CLI flags
+1. CLI flags (highest)
+2. Environment variables
 3. Config file (TOML or legacy)
 4. Built-in defaults (lowest)
 

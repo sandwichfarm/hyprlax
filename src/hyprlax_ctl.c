@@ -200,8 +200,8 @@ static void print_ctl_help(const char *prog) {
 
     /* System commands early to keep help concise for tests */
     printf("System Commands:\n");
-    printf("  status\n");
-    printf("      Show daemon status and statistics\n\n");
+    printf("  status [--json|-j] [--long|-l]\n");
+    printf("      Show daemon status and statistics (use --long for details)\n\n");
     printf("  reload\n");
     printf("      Reload configuration file\n\n");
 

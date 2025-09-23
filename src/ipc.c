@@ -780,11 +780,12 @@ bool ipc_process_commands(ipc_context_t* ctx) {
 
         case IPC_CMD_GET_STATUS:
             {
-                /* Parse optional --json */
-                bool json = false;
+                /* Parse optional --json / --long */
+                bool json = false, longf = false;
                 char *opt;
                 while ((opt = strtok(NULL, " \n"))) {
                     if (strcmp(opt, "--json") == 0 || strcmp(opt, "-j") == 0) json = true;
+                    else if (strcmp(opt, "--long") == 0 || strcmp(opt, "-l") == 0) longf = true;
                 }
 
                 hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
@@ -842,9 +843,45 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                     }
                     if (off + 2 < sizeof(response)) { response[off++] = ']'; response[off++]='}'; response[off++]='\n'; response[off]='\0'; }
                 } else {
-                    snprintf(response, sizeof(response),
-                             "Status: Active\nhyprlax running\nLayers: %d\nTarget FPS: %d\nFPS: %.1f\nParallax: %s\nMonitors: %d\nCompositor: %s\nSocket: %s\n",
-                             layers, target_fps, fps, mode, monitors, comp, ctx->socket_path);
+                    if (longf) {
+                        int eff_over = app ? app->config.render_overflow_mode : 0;
+                        const char *over_s = (eff_over==0?"repeat_edge": eff_over==1?"repeat": eff_over==2?"repeat_x": eff_over==3?"repeat_y": eff_over==4?"none":"inherit");
+                        int tile_x = app ? app->config.render_tile_x : 0;
+                        int tile_y = app ? app->config.render_tile_y : 0;
+                        float mpx = app ? app->config.render_margin_px_x : 0.0f;
+                        float mpy = app ? app->config.render_margin_px_y : 0.0f;
+                        float w_ws = app ? app->config.parallax_workspace_weight : 0.0f;
+                        float w_cur = app ? app->config.parallax_cursor_weight : 0.0f;
+                        float spx = app ? app->config.shift_pixels : 0.0f;
+                        snprintf(response, sizeof(response),
+                                 "Status: Active\n"
+                                 "hyprlax running\n"
+                                 "Layers: %d\n"
+                                 "Target FPS: %d\n"
+                                 "FPS: %.1f\n"
+                                 "Parallax: %s\n"
+                                 "Shift Pixels: %.1f\n"
+                                 "Parallax Weights: workspace=%.3f cursor=%.3f\n"
+                                 "Render: overflow=%s tile=%s/%s margin_px=%.1f/%.1f\n"
+                                 "Monitors: %d\n"
+                                 "Compositor: %s\n"
+                                 "Socket: %s\n",
+                                 layers, target_fps, fps, mode, spx, w_ws, w_cur,
+                                 over_s, tile_x?"true":"false", tile_y?"true":"false", mpx, mpy,
+                                 monitors, comp, ctx->socket_path);
+                    } else {
+                        snprintf(response, sizeof(response),
+                                 "Status: Active\n"
+                                 "hyprlax running\n"
+                                 "Layers: %d\n"
+                                 "Target FPS: %d\n"
+                                 "FPS: %.1f\n"
+                                 "Parallax: %s\n"
+                                 "Monitors: %d\n"
+                                 "Compositor: %s\n"
+                                 "Socket: %s\n",
+                                 layers, target_fps, fps, mode, monitors, comp, ctx->socket_path);
+                    }
                 }
                 success = true;
                 break;
