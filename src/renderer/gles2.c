@@ -612,12 +612,14 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
     {
         static int s_env_checked = 0;
         static int s_disable_tint = 0;              /* HYPRLAX_DISABLE_TINT */
-        static int s_tint_on_blur = 0;              /* HYPRLAX_TINT_ON_BLUR (default OFF for safety) */
+        static int s_tint_on_blur = 1;              /* HYPRLAX_TINT_ON_BLUR (default ON; set 0 to disable) */
         if (!s_env_checked) {
             const char *dt = getenv("HYPRLAX_DISABLE_TINT");
             if (dt && *dt && strcmp(dt, "0") != 0 && strcasecmp(dt, "false") != 0) s_disable_tint = 1;
             const char *tb = getenv("HYPRLAX_TINT_ON_BLUR");
-            if (tb && *tb && (strcmp(tb, "0") == 0 || !strcasecmp(tb, "false"))) s_tint_on_blur = 0;
+            if (tb && *tb) {
+                if ((strcmp(tb, "0") == 0) || !strcasecmp(tb, "false")) s_tint_on_blur = 0; else s_tint_on_blur = 1;
+            }
             s_env_checked = 1;
         }
         float tr = 1.0f, tg = 1.0f, tb = 1.0f, ts = 0.0f;
