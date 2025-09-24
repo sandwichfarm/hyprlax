@@ -7,6 +7,7 @@ import math
 import time
 import shutil
 import argparse
+import tempfile
 import subprocess
 from datetime import datetime, timedelta, timezone
 from urllib import request, parse, error as urlerror
@@ -87,10 +88,20 @@ def get_mon_geometry():
 
 
 def atomic_write(img, path):
-    # Save atomically using a temp .png then rename
-    tmp = path + '.tmp.png'
-    img.save(tmp, format='PNG')
-    os.replace(tmp, path)
+    # Save atomically using a temp file in the same directory
+    d = os.path.dirname(path)
+    os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + '.', suffix='.tmp.png', dir=d)
+    os.close(fd)
+    try:
+        img.save(tmp, format='PNG')
+        os.replace(tmp, path)
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
 
 
 def parse_at_time(at_str, tz_str):
@@ -367,12 +378,12 @@ def smoothstep(x: float):
     return x * x * (3 - 2 * x)
 
 
-def compute_arch_xy(t: float, W: int, H: int, arc_height: float, margins=(80, 80)):
+def compute_arch_xy(t: float, W: int, H: int, y_base_px: float, arc_height_px: float, margins=(80, 80)):
     # Linear x across screen with margins; y is sinusoidal arch peaking at mid
     left, right = margins[0], margins[1]
-    x = left + (W - left - right) * clamp(t, 0.0, 1.0)
-    y_base = H * 0.62
-    y = y_base - arc_height * math.sin(math.pi * clamp(t, 0.0, 1.0))
+    t = clamp(t, 0.0, 1.0)
+    x = left + (W - left - right) * t
+    y = y_base_px - arc_height_px * math.sin(math.pi * t)
     return int(round(x)), int(round(y))
 
 
@@ -397,42 +408,90 @@ def tint_spec(hexrgb: str, strength: float):
     return f"{hexrgb}:{s:.2f}"
 
 
-def compute_tints(phase: str, minutes_to_edge: float, moon_alt_frac: float, twilight_minutes: int):
-    # Return sky_tint_spec, bld_tint_spec
+def compute_tint_all_layers(phase: str, minutes_to_edge: float, twilight_minutes: int):
+    # Return a single tint spec to apply to all layers
     if phase == 'day':
-        return 'none', 'none'
+        return 'none'
     if phase in ('dawn', 'dusk'):
-        # warm tint ramp over the configured twilight window
+        # warm global tint ramp
         denom = max(1.0, float(twilight_minutes))
-        k = smoothstep(1.0 - clamp(abs(minutes_to_edge), 0.0, denom)/denom)
-        return tint_spec('#ffb566', 0.35 * k), tint_spec('#ffd39e', 0.25 * k)
-    # night
-    base_sky = 0.12
-    base_bld = 0.18
-    # Moon adds coolness proportional to altitude fraction (0..1)
-    bld = clamp(base_bld + 0.10 * moon_alt_frac, 0.0, 0.35)
-    return tint_spec('#7aa5ff', base_sky), tint_spec('#6b87c8', bld)
+        k = smoothstep(1.0 - clamp(abs(minutes_to_edge), 0.0, denom) / denom)
+        return tint_spec('#ffb566', 0.30 * k)
+    # night: darken globally with black
+    return tint_spec('#000000', 0.50)
 
 
 def discover_layers(example_dir: str, overlays=('sun_overlay.png', 'moon_overlay.png'), sky_regex=None, bld_regex=None, verbose=False):
-    # Returns dict: { 'sun_id', 'moon_id', 'sky_ids':[], 'bld_ids':[] }
-    out = {'sun_id': None, 'moon_id': None, 'sky_ids': [], 'bld_ids': []}
+    # Returns dict: { 'sun_id', 'moon_id', 'sky_ids':[], 'bld_ids':[], 'all_ids':[], 'z_by_id':{}, 'id_by_path':{}, 'path_by_id':{} }
+    out = {'sun_id': None, 'moon_id': None, 'sky_ids': [], 'bld_ids': [], 'all_ids': [], 'z_by_id': {}, 'id_by_path': {}, 'path_by_id': {}}
+    # Try JSON first
+    layers_list = None
     res = run_ctl(['list', '--json'])
-    if res.returncode != 0:
+    if res.returncode == 0:
+        try:
+            j = json.loads(res.stdout)
+            if isinstance(j, list):
+                layers_list = j
+            elif isinstance(j, dict):
+                # Some implementations might embed under a key
+                for key in ('layers', 'items', 'data'):
+                    if isinstance(j.get(key), list):
+                        layers_list = j[key]
+                        break
+        except Exception:
+            layers_list = None
+    # Fallback to parsing --long output
+    if layers_list is None:
+        res2 = run_ctl(['list', '--long'])
+        if res2.returncode == 0:
+            lines = res2.stdout.splitlines()
+            parsed = []
+            import re as _re
+            rid = _re.compile(r"ID:\s*(\d+)")
+            rpath = _re.compile(r"Path:\s*(\S+)")
+            rz = _re.compile(r"\bZ:\s*(\d+)\b")
+            for ln in lines:
+                m1 = rid.search(ln)
+                m2 = rpath.search(ln)
+                m3 = rz.search(ln)
+                if m1 and m2:
+                    try:
+                        entry = {'id': int(m1.group(1)), 'path': m2.group(1)}
+                        if m3:
+                            entry['z'] = int(m3.group(1))
+                        parsed.append(entry)
+                    except Exception:
+                        pass
+            layers_list = parsed
+
+    if not layers_list:
+        if verbose:
+            print("[layers] No layers discovered (empty list)")
         return out
-    try:
-        layers = json.loads(res.stdout)
-    except Exception:
-        return out
+
     import re
-    sky_re = re.compile(sky_regex or r"/(1|2|3|4)\.png$")
-    bld_re = re.compile(bld_regex or r"/(5|6|7|8|9|10)\.png$")
+    # Match either start or path separator before number, accept optional './'
+    sky_re = re.compile(sky_regex or r"(?:^|[\\/])\.?/?(1|2|3|4)\.png$")
+    bld_re = re.compile(bld_regex or r"(?:^|[\\/])\.?/?(5|6|7|8|9|10)\.png$")
     base_abs = os.path.abspath(SCRIPT_DIR)
-    for L in layers:
-        path = L.get('path') or ''
-        lid = L.get('id')
+    for L in layers_list:
+        # Be resilient to dict or tuple-like
+        try:
+            path = L.get('path') or ''
+            lid = L.get('id')
+        except AttributeError:
+            # If not dict-like, skip
+            continue
         if not path or lid is None:
             continue
+        out['all_ids'].append(lid)
+        out['path_by_id'][lid] = path
+        if 'z' in L:
+            try:
+                out['z_by_id'][lid] = int(L['z'])
+            except Exception:
+                pass
+        out['id_by_path'][os.path.basename(path)] = lid
         if any(x in path for x in overlays):
             if overlays[0] in path:
                 out['sun_id'] = lid
@@ -440,7 +499,7 @@ def discover_layers(example_dir: str, overlays=('sun_overlay.png', 'moon_overlay
                 out['moon_id'] = lid
             continue
         # Match only files within this example directory
-        if (example_dir in path) or (base_abs in path):
+        if (example_dir in path) or (base_abs in path) or path.startswith('./') or path.startswith('../'):
             if sky_re.search(path):
                 out['sky_ids'].append(lid)
             elif bld_re.search(path):
@@ -484,15 +543,24 @@ def main():
     parser.add_argument('--once', action='store_true', help='Run once and exit')
     parser.add_argument('--sun-size', type=int, default=260, help='Sun diameter in px')
     parser.add_argument('--moon-size', type=int, default=180, help='Moon diameter in px')
-    parser.add_argument('--arc-height-day', type=float, default=580.0, help='Day arch height in px')
-    parser.add_argument('--arc-height-night', type=float, default=500.0, help='Night arch height in px')
+    parser.add_argument('--arc-height-day', type=float, default=-1.0, help='Day arch height in px (<=0 to auto)')
+    parser.add_argument('--arc-height-night', type=float, default=-1.0, help='Night arch height in px (<=0 to auto)')
+    parser.add_argument('--horizon-frac', type=float, default=0.62, help='Horizon baseline as fraction of height (0 top .. 1 bottom)')
+    parser.add_argument('--apex-frac-day', type=float, default=0.18, help='Target apex Y (fraction of height) for day')
+    parser.add_argument('--apex-frac-night', type=float, default=0.22, help='Target apex Y (fraction of height) for night')
+    parser.add_argument('--top-margin', type=int, default=40, help='Minimum top margin in pixels for the apex')
     parser.add_argument('--twilight-minutes', type=int, default=45, help='Dawn/dusk window in minutes')
     parser.add_argument('--sun-z', type=int, default=5, help='Z-index for sun overlay')
     parser.add_argument('--moon-z', type=int, default=5, help='Z-index for moon overlay')
+    parser.add_argument('--moon-phase', type=float, default=None, help='Override moon phase [0..1] (0=new, 0.5=full)')
+    parser.add_argument('--force-moon', action='store_true', help='Show moon at night regardless of API/phase gating')
+    parser.add_argument('--moon-phase-min', type=float, default=0.05, help='Minimum phase to show moon (inclusive)')
+    parser.add_argument('--moon-phase-max', type=float, default=0.95, help='Maximum phase to show moon (inclusive)')
     parser.add_argument('--dry-run', action='store_true', help='Do not call hyprlax; compute and log only')
     parser.add_argument('--at', type=str, default=None, help='Simulate a specific time (ISO 8601 or HH:MM[:SS])')
     parser.add_argument('--demo', type=str, choices=['dawn','dusk','day','night'], default=None, help='Demo mode: loop a window quickly')
     parser.add_argument('--demo-seconds', type=int, default=120, help='Seconds to complete a full window in demo mode')
+    parser.add_argument('--debug-overlay', action='store_true', help='Draw overlay debug crosshair/border to verify visibility')
     parser.add_argument('--verbose', '-v', action='store_true')
     parser.add_argument('--sky-regex', type=str, default=None, help='Regex to select sky layers from list --json')
     parser.add_argument('--bld-regex', type=str, default=None, help='Regex to select building layers from list --json')
@@ -541,12 +609,34 @@ def main():
 
     def ensure_layers():
         if args.dry_run:
-            return {'sun_id': 0, 'moon_id': 0, 'sky_ids': [], 'bld_ids': []}
+            return {'sun_id': 0, 'moon_id': 0, 'sky_ids': [], 'bld_ids': [], 'all_ids': []}
         L = discover_layers('examples/pixel-city-advanced', overlays=overlays, sky_regex=args.sky_regex, bld_regex=args.bld_regex, verbose=args.verbose)
+        # Compute overlay z: between layer 1 and 2 when possible, else between sky and buildings
+        overlay_z = args.sun_z
+        try:
+            id1 = L['id_by_path'].get('1.png')
+            id2 = L['id_by_path'].get('2.png')
+            z1 = L['z_by_id'].get(id1)
+            z2 = L['z_by_id'].get(id2)
+        except Exception:
+            z1 = z2 = None
+        if z1 is not None and z2 is not None:
+            overlay_z = max(z1 + 1, z2 - 1)
+        else:
+            if L['sky_ids'] and L['bld_ids'] and L['z_by_id']:
+                max_sky = max(L['z_by_id'].get(i, -9999) for i in L['sky_ids'])
+                min_bld = min(L['z_by_id'].get(i, 9999) for i in L['bld_ids'])
+                overlay_z = max(max_sky + 1, min_bld - 1)
+        if args.verbose:
+            print(f"[z] overlay_z={overlay_z}")
         if L['sun_id'] is None:
-            L['sun_id'] = add_overlay_layer(overlay_paths['sun'], args.sun_z, verbose=args.verbose)
+            L['sun_id'] = add_overlay_layer(overlay_paths['sun'], overlay_z, verbose=args.verbose)
+        else:
+            modify_layer(L['sun_id'], 'z', str(overlay_z), verbose=args.verbose)
         if L['moon_id'] is None:
-            L['moon_id'] = add_overlay_layer(overlay_paths['moon'], args.moon_z, verbose=args.verbose)
+            L['moon_id'] = add_overlay_layer(overlay_paths['moon'], overlay_z, verbose=args.verbose)
+        else:
+            modify_layer(L['moon_id'], 'z', str(overlay_z), verbose=args.verbose)
         return L
 
     # Ensure placeholder overlays exist so initial add succeeds
@@ -592,6 +682,27 @@ def main():
 
         get_demo_now = _demo_now
 
+    # Determine moon phase override and gating
+    mp = args.moon_phase if args.moon_phase is not None else times.get('moon_phase')
+    if mp is not None:
+        mp = clamp(float(mp), 0.0, 1.0)
+    phase_min = clamp(args.moon_phase_min, 0.0, 1.0)
+    phase_max = clamp(args.moon_phase_max, 0.0, 1.0)
+
+    # Precompute arch geometry
+    y_base = H * clamp(args.horizon_frac, 0.0, 1.0)
+    # Auto arc heights from apex fractions if not explicitly set
+    if args.arc_height_day and args.arc_height_day > 0:
+        arch_day = args.arc_height_day
+    else:
+        apex_day = max(args.top_margin, H * clamp(args.apex_frac_day, 0.0, 1.0))
+        arch_day = max(10.0, y_base - apex_day)
+    if args.arc_height_night and args.arc_height_night > 0:
+        arch_night = args.arc_height_night
+    else:
+        apex_night = max(args.top_margin, H * clamp(args.apex_frac_night, 0.0, 1.0))
+        arch_night = max(10.0, y_base - apex_night)
+
     def compute_once(now_dt):
         sr = times['sunrise']
         ss = times['sunset']
@@ -612,20 +723,26 @@ def main():
                 t_night = (now_dt - (ss - timedelta(days=1))) / duration
             t_day = None
 
-        # Moon phase 0..1 (0 new, 0.5 full). Hide near new (~<0.05 or >0.95)
-        moon_phase = times.get('moon_phase')
-        moon_visible = (moon_phase is not None) and (0.05 <= moon_phase <= 0.95)
+        # Determine if sun is visible (daytime) first
         sun_visible = (t_day is not None)
+        # Moon phase 0..1 (0 new, 0.5 full). Use override if provided.
+        moon_phase = mp
+        moon_visible = False
+        if not sun_visible:
+            if args.force_moon:
+                moon_visible = True
+            else:
+                moon_visible = (moon_phase is not None) and (phase_min <= moon_phase <= phase_max)
 
         # compute arch positions
         sun_xy = None
         moon_xy = None
         if sun_visible:
-            x, y = compute_arch_xy(float(t_day), W, H, args.arc_height_day)
+            x, y = compute_arch_xy(float(t_day), W, H, y_base, arch_day)
             sun_xy = (x, y)
         else:
             if t_night is not None:
-                x, y = compute_arch_xy(float(t_night), W, H, args.arc_height_night)
+                x, y = compute_arch_xy(float(t_night), W, H, y_base, arch_night)
                 moon_xy = (x, y)
         # moon altitude fraction approx by sin(pi * t_night)
         moon_alt_frac = 0.0
@@ -636,7 +753,7 @@ def main():
         edges = [sr, ss, nsr]
         minutes_to_edge = min(abs((now_dt - e).total_seconds())/60.0 for e in edges)
 
-        sky_tint, bld_tint = compute_tints(phase, minutes_to_edge, moon_alt_frac, args.twilight_minutes)
+        layer_tint = compute_tint_all_layers(phase, minutes_to_edge, args.twilight_minutes)
 
         return {
             'phase': phase,
@@ -644,8 +761,7 @@ def main():
             'moon_visible': moon_visible and (not sun_visible),  # never both visible
             'sun_xy': sun_xy,
             'moon_xy': moon_xy,
-            'sky_tint': sky_tint,
-            'bld_tint': bld_tint,
+            'layer_tint': layer_tint,
         }
 
     def draw_overlay(kind, xy, size, phase01):
@@ -660,16 +776,24 @@ def main():
         px = int(round(sx - spr.width / 2))
         py = int(round(sy - spr.height / 2))
         img.alpha_composite(spr, (px, py))
+        if args.debug_overlay:
+            dbg = ImageDraw.Draw(img)
+            # border
+            dbg.rectangle([0, 0, W-1, H-1], outline=(255, 0, 255, 128), width=3)
+            # crosshair at xy
+            dbg.line([(sx-40, sy), (sx+40, sy)], fill=(255, 0, 255, 200), width=3)
+            dbg.line([(sx, sy-40), (sx, sy+40)], fill=(255, 0, 255, 200), width=3)
         atomic_write(img, overlay_paths[kind])
 
-    def apply_tints(sky_spec: str, bld_spec: str):
+    def apply_tint_all(spec: str):
         if args.dry_run:
             return True
         ok = True
-        for lid in layers['sky_ids']:
-            ok &= modify_layer(lid, 'tint', sky_spec, verbose=args.verbose)
-        for lid in layers['bld_ids']:
-            ok &= modify_layer(lid, 'tint', bld_spec, verbose=args.verbose)
+        # Apply to all base layers except overlays
+        for lid in layers.get('all_ids', []):
+            if lid in (layers.get('sun_id'), layers.get('moon_id')):
+                continue
+            ok &= modify_layer(lid, 'tint', spec, verbose=args.verbose)
         return ok
 
     def refresh_overlay(kind: str, lid: int):
@@ -690,11 +814,11 @@ def main():
                 now = now_tz(env.get('TZ'))
             state = compute_once(now)
             if args.verbose:
-                print(f"[state] {now.isoformat()} phase={state['phase']} sun={state['sun_xy']} moon={state['moon_xy']} sky_tint={state['sky_tint']} bld_tint={state['bld_tint']}")
+                print(f"[state] {now.isoformat()} phase={state['phase']} sun={state['sun_xy']} moon={state['moon_xy']} tint={state['layer_tint']}")
 
             # Draw + IPC with gating
             # Tint gating
-            tint_changed = (state['sky_tint'] != last['sky_tint']) or (state['bld_tint'] != last['bld_tint'])
+            tint_changed = (state['layer_tint'] != last.get('layer_tint'))
 
             # Sun
             if state['sun_visible'] and state['sun_xy']:
@@ -719,7 +843,7 @@ def main():
                 pos_changed = (last['moon_xy'] is None) or (max(abs(state['moon_xy'][0] - (last['moon_xy'][0] if last['moon_xy'] else 0)),
                                                             abs(state['moon_xy'][1] - (last['moon_xy'][1] if last['moon_xy'] else 0))) > pos_eps)
                 if pos_changed:
-                    phase01 = times.get('moon_phase') if times else 0.5
+                    phase01 = mp if mp is not None else 0.5
                     draw_overlay('moon', state['moon_xy'], args.moon_size, phase01)
                     if not args.dry_run and layers['moon_id']:
                         refresh_overlay('moon', layers['moon_id'])
@@ -734,13 +858,12 @@ def main():
 
             # Tints
             if tint_changed:
-                apply_tints(state['sky_tint'], state['bld_tint'])
+                apply_tint_all(state['layer_tint'])
 
             # Update gating state
             last['sun_xy'] = state['sun_xy']
             last['moon_xy'] = state['moon_xy']
-            last['sky_tint'] = state['sky_tint']
-            last['bld_tint'] = state['bld_tint']
+            last['layer_tint'] = state['layer_tint']
 
             if args.once or (fixed_now is not None and not args.demo):
                 break
