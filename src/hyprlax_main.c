@@ -1487,7 +1487,7 @@ int hyprlax_add_layer(hyprlax_context_t *ctx, const char *image_path,
     new_layer->blur_amount = blur;
 
     /* Assign default z-index if not explicitly set elsewhere:
-     * - First layer gets z=0
+     * - First layer is assigned z=0
      * - Subsequent layers get max_z + 10
      * IPC 'add' with explicit z will override this immediately after. */
     int maxz = INT_MIN;

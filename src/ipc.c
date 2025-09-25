@@ -68,7 +68,10 @@ static int parse_tint_value_ipc(const char *value, float *r, float *g, float *b,
     if (!strcmp(value, "none")) {
         if (r) *r = 1.0f; if (g) *g = 1.0f; if (b) *b = 1.0f; if (strength) *strength = 0.0f; return 1;
     }
-    char buf[128]; if (strlen(value) >= sizeof(buf)) return 0; strcpy(buf, value);
+    char buf[128];
+    if (strlen(value) >= sizeof(buf)) return 0;
+    /* Safe copy: avoid flagged unsafe copy; value length already validated */
+    snprintf(buf, sizeof(buf), "%s", value);
     char *sep = strchr(buf, ':'); if (!sep) sep = strchr(buf, ',');
     float tr=1.0f, tg=1.0f, tb=1.0f, ts=1.0f;
     if (sep) {

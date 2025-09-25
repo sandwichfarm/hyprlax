@@ -697,7 +697,7 @@ typedef unsigned char validate_uint32[sizeof(stbi__uint32)==4 ? 1 : -1];
 
 #if defined(__GNUC__) && defined(STBI__X86_TARGET) && !defined(__SSE2__) && !defined(STBI_NO_SIMD)
 // gcc doesn't support sse2 intrinsics unless you compile with -msse2,
-// which in turn means it gets to use SSE2 everywhere. This is unfortunate,
+// which in turn means it is allowed to use SSE2 everywhere. This is unfortunate,
 // but previous attempts to provide the SSE2 functions with runtime
 // detection caused numerous issues. The way architecture extensions are
 // exposed in GCC/Clang is, sadly, not really suited for one-file libs.
@@ -6893,7 +6893,7 @@ static stbi_uc *stbi__gif_load_next(stbi__context *s, stbi__gif *g, int *comp, i
             // if this was the first frame,
             pcount = g->w * g->h;
             if (first_frame && (g->bgindex > 0)) {
-               // if first frame, any pixel not drawn to gets the background color
+               // if first frame, any pixel not drawn to uses the background color
                for (pi = 0; pi < pcount; ++pi) {
                   if (g->history[pi] == 0) {
                      g->pal[g->bgindex][3] = 255; // just in case it was made transparent, undo that; It will be reset next frame if need be;

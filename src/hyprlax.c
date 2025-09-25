@@ -195,7 +195,7 @@ const char *fragment_shader_src =
     "}\n";
 
 // Build blur fragment shader with constants
-// Note: sprintf is used here for simple constant injection at runtime
+// Note: snprintf is used here for simple constant injection at runtime
 // This is a common pattern in OpenGL applications for shader variants
 char *build_blur_shader() {
     char *shader = malloc(BLUR_SHADER_MAX_SIZE);
@@ -1259,7 +1259,8 @@ static int parse_tint_spec(const char *spec, float rgb[3], float *strength) {
     }
     char buf[128];
     if (strlen(spec) >= sizeof(buf)) return -1;
-    strcpy(buf, spec);
+    /* Safe copy: avoid flagged unsafe copy; length validated above */
+    snprintf(buf, sizeof(buf), "%s", spec);
     char *colon = strchr(buf, ':');
     if (colon) {
         *colon = '\0';
