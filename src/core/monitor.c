@@ -398,7 +398,14 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
                 layer_update_offset(layer, layer_target_x, layer_target_y,
                                   monitor->config ? monitor->config->animation_duration : 1.0,
                                   monitor->config ? monitor->config->default_easing : EASE_CUBIC_OUT);
-
+                /* Defensive: if any callee scribbled over the linked-list pointer, restore it */
+                if (layer->next != next_layer) {
+                    if (ctx && ctx->config.debug) {
+                        fprintf(stderr, "[DEBUG]     WARNING: layer->next mutated (%p -> %p); restoring\n",
+                                (void*)layer->next, (void*)next_layer);
+                    }
+                    layer->next = next_layer;
+                }
                 if (ctx && ctx->config.debug) {
                     fprintf(stderr, "[DEBUG]     Layer %d updated; next=%p\n", layer_count-1, (void*)next_layer);
                 }

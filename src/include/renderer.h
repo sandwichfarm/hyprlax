@@ -59,6 +59,11 @@ typedef struct renderer_layer_params {
     int tile_y;         /* 1 = repeat in Y regardless of overflow */
     float auto_safe_norm_x; /* additional normalized shrink based on max offset */
     float auto_safe_norm_y;
+    /* Per-layer tint */
+    float tint_r;
+    float tint_g;
+    float tint_b;
+    float tint_strength;
 } renderer_layer_params_t;
 
 /* Renderer operations interface */

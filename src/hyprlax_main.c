@@ -39,6 +39,8 @@ static int hyprlax_load_layer_textures(hyprlax_context_t *ctx);
 void hyprlax_handle_workspace_change_2d(hyprlax_context_t *ctx,
                                        int from_x, int from_y,
                                        int to_x, int to_y);
+/* Helper prototype: parse either --opt=value or --opt value */
+static inline const char* arg_get_val_local(const char *arg, const char *next);
 
 /* Linux event/timer helpers */
 static int create_timerfd_monotonic(void) {
@@ -628,6 +630,8 @@ int hyprlax_reload_config(hyprlax_context_t *ctx) {
 
 /* Parse command-line arguments */
 static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
+    int init_trace = getenv("HYPRLAX_INIT_TRACE") && *getenv("HYPRLAX_INIT_TRACE") ? 1 : 0;
+    if (init_trace) fprintf(stderr, "[INIT_TRACE] parse_arguments: begin argc=%d\n", argc);
     /* Honor environment variables for log levels */
     const char *trace_env = getenv("HYPRLAX_TRACE");
     const char *dbg_env = getenv("HYPRLAX_DEBUG");
@@ -681,7 +685,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                               long_options, &option_index)) != -1) {
         switch (opt) {
             case 'h':
-                printf("Usage: %s [OPTIONS] [--layer <image:shift:opacity:blur>...]\n", argv[0]);
+                printf("Usage: %s [OPTIONS] [--layer <image:shift:opacity:blur[:#RRGGBB[:strength]]>...]\n", argv[0]);
                 printf("\nOptions:\n");
                 printf("  -h, --help                Show this help message\n");
                 printf("  -v, --version             Show version information\n");
@@ -736,18 +740,23 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
 
             case 'c':
                 ctx->config.config_path = strdup(optarg);
+                if (getenv("HYPRLAX_INIT_TRACE")) fprintf(stderr, "[INIT_TRACE] parse_arguments: --config %s\n", optarg);
                 /* If TOML, use TOML parser; otherwise legacy parser */
                 const char *ext = strrchr(optarg, '.');
                 if (ext && (strcmp(ext, ".toml") == 0 || strcmp(ext, ".TOML") == 0)) {
+                    if (getenv("HYPRLAX_INIT_TRACE")) fprintf(stderr, "[INIT_TRACE] parse_arguments: loading TOML\n");
                     if (config_apply_toml_to_context(ctx, ctx->config.config_path) != HYPRLAX_SUCCESS) {
                         LOG_ERROR("Failed to load TOML config: %s", optarg);
                         return -1;
                     }
+                    if (getenv("HYPRLAX_INIT_TRACE")) fprintf(stderr, "[INIT_TRACE] parse_arguments: TOML loaded\n");
                 } else {
+                    if (getenv("HYPRLAX_INIT_TRACE")) fprintf(stderr, "[INIT_TRACE] parse_arguments: loading legacy config\n");
                     if (parse_config_file(ctx, ctx->config.config_path) < 0) {
                         LOG_ERROR("Failed to load config file: %s", optarg);
                         return -1;
                     }
+                    if (getenv("HYPRLAX_INIT_TRACE")) fprintf(stderr, "[INIT_TRACE] parse_arguments: legacy config loaded\n");
                 }
                 break;
 
@@ -892,9 +901,11 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 return -1;
         }
     }
+    if (init_trace) fprintf(stderr, "[INIT_TRACE] parse_arguments: after getopt optind=%d argc=%d\n", optind, argc);
 
     /* Parse layer arguments */
     for (int i = optind; i < argc; i++) {
+        if (init_trace) fprintf(stderr, "[INIT_TRACE] parse_arguments: tail arg[%d]=%s\n", i, argv[i]);
         if (strcmp(argv[i], "--layer") == 0 && i + 1 < argc) {
             /* Parse layer specification: image:shift:opacity:blur */
             char *layer_spec = argv[++i];
@@ -902,6 +913,8 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
             char *shift_str = strtok(NULL, ":");
             char *opacity_str = strtok(NULL, ":");
             char *blur_str = strtok(NULL, ":");
+            char *tint_str = strtok(NULL, ":");
+            char *tint_strength_str = strtok(NULL, ":");
 
             if (image) {
                 float shift = shift_str ? atof(shift_str) : 1.0f;
@@ -909,6 +922,35 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 float blur = blur_str ? atof(blur_str) : 0.0f;
 
                 hyprlax_add_layer(ctx, image, shift, opacity, blur);
+
+                /* Apply tint if provided */
+                if (tint_str) {
+                    parallax_layer_t *last = ctx->layers;
+                    while (last && last->next) last = last->next;
+                    if (last) {
+                        if (strcmp(tint_str, "none") == 0) {
+                            last->tint_r = last->tint_g = last->tint_b = 1.0f;
+                            last->tint_strength = 0.0f;
+                        } else if (tint_str[0] == '#' && strlen(tint_str) == 7) {
+                            char r[3] = {tint_str[1], tint_str[2], 0};
+                            char g[3] = {tint_str[3], tint_str[4], 0};
+                            char b[3] = {tint_str[5], tint_str[6], 0};
+                            char *end = NULL;
+                            long rv = strtol(r, &end, 16); if (end && *end) rv = 255;
+                            long gv = strtol(g, &end, 16); if (end && *end) gv = 255;
+                            long bv = strtol(b, &end, 16); if (end && *end) bv = 255;
+                            last->tint_r = (float)rv / 255.0f;
+                            last->tint_g = (float)gv / 255.0f;
+                            last->tint_b = (float)bv / 255.0f;
+                            float ts = 1.0f;
+                            if (tint_strength_str && *tint_strength_str) {
+                                ts = (float)atof(tint_strength_str);
+                                if (ts < 0.0f) ts = 0.0f; if (ts > 1.0f) ts = 1.0f;
+                            }
+                            last->tint_strength = ts;
+                        }
+                    }
+                }
             }
         } else {
             /* Legacy: treat as image path */
@@ -920,6 +962,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
             hyprlax_add_layer(ctx, argv[i], 1.0f, 1.0f, 0.0f);
         }
     }
+    if (init_trace) fprintf(stderr, "[INIT_TRACE] parse_arguments: end\n");
 
     return 0;
 }
@@ -1097,15 +1140,19 @@ static int hyprlax_init_ipc(hyprlax_context_t *ctx) {
 /* Initialize application */
 int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
     if (!ctx) return HYPRLAX_ERROR_INVALID_ARGS;
+    int init_trace = getenv("HYPRLAX_INIT_TRACE") && *getenv("HYPRLAX_INIT_TRACE") ? 1 : 0;
+    if (init_trace) fprintf(stderr, "[INIT_TRACE] start\n");
 
     /* Parse arguments */
     if (parse_arguments(ctx, argc, argv) < 0) {
         return HYPRLAX_ERROR_INVALID_ARGS;
     }
+    if (init_trace) fprintf(stderr, "[INIT_TRACE] after parse_arguments\n");
 
     /* Apply environment overrides (CLI > ENV > Config > Defaults overall). We read ENV now,
      * and reapply CLI overrides right after to ensure CLI wins. */
     {
+        if (init_trace) fprintf(stderr, "[INIT_TRACE] before env overrides\n");
         const char *v;
         v = getenv("HYPRLAX_RENDER_FPS");
         if (v && *v) {
@@ -1166,35 +1213,33 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
             if (m != -2) ctx->config.render_overflow_mode = m;
         }
     }
+    if (init_trace) fprintf(stderr, "[INIT_TRACE] after env overrides\n");
 
     /* Reapply CLI overrides for keys that may be overridden by ENV above */
     {
+        if (init_trace) fprintf(stderr, "[INIT_TRACE] before CLI reapply\n");
         for (int i = 1; i < argc; i++) {
             const char *arg = argv[i];
             const char *valeq = NULL;
             const char *next = (i + 1 < argc) ? argv[i + 1] : NULL;
-            auto const char* get_val(const char *a, const char *n) {
-                const char *eq = strchr(a, '=');
-                return eq ? (eq + 1) : n;
-            }
             if (!arg) continue;
             if (!strcmp(arg, "-f") || !strcmp(arg, "--fps") || !strncmp(arg, "--fps=", 6)) {
-                valeq = get_val(arg, next);
+                valeq = arg_get_val_local(arg, next);
                 if (valeq) { int iv = atoi(valeq); if (iv > 0 && iv <= 240) ctx->config.target_fps = iv; }
-                if (arg == argv[i] && strchr(arg, '=')) { /* consumed inline */ }
+                if (!strncmp(arg, "--fps=", 6)) { /* inline consumed */ }
                 else if (next) i++;
             } else if (!strcmp(arg, "-s") || !strcmp(arg, "--shift") || !strncmp(arg, "--shift=", 8)) {
-                valeq = get_val(arg, next);
+                valeq = arg_get_val_local(arg, next);
                 if (valeq) { float f = atof(valeq); if (f >= 0.0f) ctx->config.shift_pixels = f; }
-                if (arg == argv[i] && strchr(arg, '=')) { } else if (next) i++;
+                if (!strncmp(arg, "--shift=", 8)) { } else if (next) i++;
             } else if (!strcmp(arg, "-d") || !strcmp(arg, "--duration") || !strncmp(arg, "--duration=", 11)) {
-                valeq = get_val(arg, next);
+                valeq = arg_get_val_local(arg, next);
                 if (valeq) { float f = atof(valeq); if (f > 0.0f) ctx->config.animation_duration = f; }
-                if (arg == argv[i] && strchr(arg, '=')) { } else if (next) i++;
+                if (!strncmp(arg, "--duration=", 11)) { } else if (next) i++;
             } else if (!strcmp(arg, "-e") || !strcmp(arg, "--easing") || !strncmp(arg, "--easing=", 10)) {
-                valeq = get_val(arg, next);
+                valeq = arg_get_val_local(arg, next);
                 if (valeq) { ctx->config.default_easing = easing_from_string(valeq); }
-                if (arg == argv[i] && strchr(arg, '=')) { } else if (next) i++;
+                if (!strncmp(arg, "--easing=", 10)) { } else if (next) i++;
             } else if (!strcmp(arg, "-V") || !strcmp(arg, "--vsync")) {
                 ctx->config.vsync = true;
             } else if (!strncmp(arg, "--overflow=", 12) || !strcmp(arg, "--overflow")) {
@@ -1236,9 +1281,12 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
             }
         }
     }
+    if (init_trace) fprintf(stderr, "[INIT_TRACE] after CLI reapply\n");
 
     /* Initialize logging system */
+    if (init_trace) fprintf(stderr, "[INIT_TRACE] before log_init\n");
     log_init(ctx->config.debug, ctx->config.debug_log_path);
+    if (init_trace) fprintf(stderr, "[INIT_TRACE] after log_init\n");
     /* Apply explicit log level (supports --trace and HYPRLAX_VERBOSE) */
     extern void log_set_level(log_level_t level);
     if (ctx->config.log_level >= 0) {
@@ -1843,6 +1891,10 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
                     ? (ctx->config.parallax_max_offset_x / (float)monitor->width) : 0.0f,
                 .auto_safe_norm_y = (ctx->config.parallax_max_offset_y > 0.0f && (eff_tile_y == 0) && (eff_over == 4))
                     ? (ctx->config.parallax_max_offset_y / (float)monitor->height) : 0.0f,
+                .tint_r = layer->tint_r,
+                .tint_g = layer->tint_g,
+                .tint_b = layer->tint_b,
+                .tint_strength = layer->tint_strength,
             };
             ctx->renderer->ops->draw_layer_ex(
                 &tex,
@@ -2517,3 +2569,9 @@ __attribute__((weak)) int layer_list_count(parallax_layer_t *head) {
     int c=0; for (; head; head=head->next) c++; return c;
 }
 #endif
+/* Helper to read either --opt=value or --opt value */
+static inline const char* arg_get_val_local(const char *arg, const char *next) {
+    if (!arg) return NULL;
+    const char *eq = strchr(arg, '=');
+    return eq ? (eq + 1) : next;
+}

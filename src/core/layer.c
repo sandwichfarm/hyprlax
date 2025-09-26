@@ -59,6 +59,12 @@ parallax_layer_t* layer_create(const char *image_path, float shift_multiplier, f
     layer->tile_x = -1;
     layer->tile_y = -1;
 
+    /* Tint defaults: no tint */
+    layer->tint_r = 1.0f;
+    layer->tint_g = 1.0f;
+    layer->tint_b = 1.0f;
+    layer->tint_strength = 0.0f;
+
     layer->next = NULL;
 
     return layer;

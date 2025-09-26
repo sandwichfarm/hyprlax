@@ -96,6 +96,12 @@ typedef struct parallax_layer {
     int tile_x;                   /* -1 inherit, 0 off, 1 on */
     int tile_y;                   /* -1 inherit, 0 off, 1 on */
 
+    /* Per-layer tint */
+    float tint_r;                 /* 0..1 */
+    float tint_g;                 /* 0..1 */
+    float tint_b;                 /* 0..1 */
+    float tint_strength;          /* 0..1: 0=no tint, 1=full */
+
     /* Linked list */
     struct parallax_layer *next;
 } parallax_layer_t;

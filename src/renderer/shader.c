@@ -28,13 +28,17 @@ const char *shader_fragment_basic =
     "uniform sampler2D u_texture;\n"
     "uniform float u_opacity;\n"
     "uniform vec2 u_mask_outside;\n"
+    "uniform vec3 u_tint;\n"
+    "uniform float u_tint_strength;\n"
     "void main() {\n"
     "    if ((u_mask_outside.x > 0.5 && (v_texcoord.x < 0.0 || v_texcoord.x > 1.0)) ||\n"
     "        (u_mask_outside.y > 0.5 && (v_texcoord.y < 0.0 || v_texcoord.y > 1.0))) discard;\n"
     "    vec4 color = texture2D(u_texture, v_texcoord);\n"
+    "    vec3 effective = mix(vec3(1.0), u_tint, clamp(u_tint_strength, 0.0, 1.0));\n"
+    "    vec3 rgb = color.rgb * effective;\n"
     "    // Premultiply alpha for correct blending\n"
     "    float final_alpha = color.a * u_opacity;\n"
-    "    gl_FragColor = vec4(color.rgb * final_alpha, final_alpha);\n"
+    "    gl_FragColor = vec4(rgb * final_alpha, final_alpha);\n"
     "}\n";
 
 /* Variant with texcoord offset uniform in vertex shader */
@@ -52,7 +56,7 @@ const char *shader_vertex_basic_offset =
 /* Shader constants */
 #define BLUR_KERNEL_SIZE 5.0f
 #define BLUR_WEIGHT_FALLOFF 0.15f
-#define SHADER_BUFFER_SIZE 2048
+#define SHADER_BUFFER_SIZE 4096
 
 /* Blur shader template */
 static const char *shader_fragment_blur_template =
@@ -63,6 +67,8 @@ static const char *shader_fragment_blur_template =
     "uniform vec2 u_resolution;\n"
     "uniform float u_blur_amount;\n"
     "uniform vec2 u_mask_outside;\n"
+    "uniform vec3 u_tint;\n"
+    "uniform float u_tint_strength;\n"
     "\n"
     "void main() {\n"
     "    if ((u_mask_outside.x > 0.5 && (v_texcoord.x < 0.0 || v_texcoord.x > 1.0)) ||\n"
@@ -83,8 +89,10 @@ static const char *shader_fragment_blur_template =
     "    }\n"
     "    \n"
     "    result /= total_weight;\n"
+    "    vec3 effective = mix(vec3(1.0), u_tint, clamp(u_tint_strength, 0.0, 1.0));\n"
+    "    vec3 rgb = result.rgb * effective;\n"
     "    float final_alpha = result.a * u_opacity;\n"
-    "    gl_FragColor = vec4(result.rgb * final_alpha, final_alpha);\n"
+    "    gl_FragColor = vec4(rgb * final_alpha, final_alpha);\n"
     "}\n";
 
 /* Separable blur fragment shader (directional) */
@@ -97,6 +105,8 @@ static const char *shader_fragment_blur_separable =
     "uniform float u_blur_amount;\n"
     "uniform vec2 u_direction;\n"
     "uniform vec2 u_mask_outside;\n"
+    "uniform vec3 u_tint;\n"
+    "uniform float u_tint_strength;\n"
     "\n"
     "void main() {\n"
     "    if ((u_mask_outside.x > 0.5 && (v_texcoord.x < 0.0 || v_texcoord.x > 1.0)) ||\n"
@@ -114,8 +124,10 @@ static const char *shader_fragment_blur_separable =
     "        total += w;\n"
     "    }\n"
     "    vec4 result = sum / total;\n"
+    "    vec3 effective = mix(vec3(1.0), u_tint, clamp(u_tint_strength, 0.0, 1.0));\n"
+    "    vec3 rgb = result.rgb * effective;\n"
     "    float final_alpha = result.a * u_opacity;\n"
-    "    gl_FragColor = vec4(result.rgb * final_alpha, final_alpha);\n"
+    "    gl_FragColor = vec4(rgb * final_alpha, final_alpha);\n"
     "}\n";
 
 /* Create a new shader program */

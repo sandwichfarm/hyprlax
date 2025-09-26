@@ -34,7 +34,6 @@ easing = "expo"
 [[global.layers]]
 path = "bg.jpg"
 shift_multiplier = { x = 0.50, y = 0.25 }
-scale = 1.0
 opacity = 0.9
 blur = 2.0
 fit = "cover"
@@ -44,7 +43,6 @@ margin_px = { x = 100, y = 100 }
 [[global.layers]]
 path = "fg.png"
 fit = "contain"
-scale = 1.12
 align = { x = 1.2, y = 0.5 }
 shift_multiplier = { x = 1.0, y = 1.0 }
 opacity = 1.0

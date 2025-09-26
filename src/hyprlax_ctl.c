@@ -12,6 +12,8 @@
 #include <sys/un.h>
 #include <errno.h>
 #include <pwd.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include "ipc.h"
 
 /* Note: socket operations are blocking for simplicity; timeout not used */
@@ -58,6 +60,43 @@ static int connect_to_daemon(void) {
             return sock;
         }
         /* Fallback to legacy path if preferred path not available */
+    }
+
+    /* If signature-based path not available, try scanning XDG_RUNTIME_DIR for a matching socket */
+    {
+        char runtime_dir[256] = {0};
+        if (xdg && *xdg) {
+            strncpy(runtime_dir, xdg, sizeof(runtime_dir) - 1);
+        } else {
+            /* Fallback to /run/user/<uid> */
+            snprintf(runtime_dir, sizeof(runtime_dir), "/run/user/%d", (int)getuid());
+        }
+        DIR *d = opendir(runtime_dir);
+        if (d) {
+            struct dirent *de;
+            while ((de = readdir(d)) != NULL) {
+                const char *name = de->d_name;
+                /* Look for hyprlax-<user>-*.sock */
+                char prefix[128];
+                snprintf(prefix, sizeof(prefix), "hyprlax-%s-", user);
+                size_t plen = strlen(prefix);
+                size_t nlen = strlen(name);
+                if (nlen > plen + 5 && strncmp(name, prefix, plen) == 0) {
+                    if (strcmp(name + nlen - 5, ".sock") == 0) {
+                        /* Candidate found; try connecting */
+                        char cand[sizeof(addr.sun_path)] = {0};
+                        snprintf(cand, sizeof(cand), "%s/%s", runtime_dir, name);
+                        struct sockaddr_un a2; memset(&a2, 0, sizeof(a2)); a2.sun_family = AF_UNIX;
+                        strncpy(a2.sun_path, cand, sizeof(a2.sun_path) - 1);
+                        if (connect(sock, (struct sockaddr*)&a2, sizeof(a2)) == 0) {
+                            closedir(d);
+                            return sock;
+                        }
+                    }
+                }
+            }
+            closedir(d);
+        }
     }
 
     snprintf(addr.sun_path, sizeof(addr.sun_path), "%s%s%s.sock", IPC_SOCKET_PATH_PREFIX, user, suffix);
@@ -186,7 +225,8 @@ static void print_ctl_help(const char *prog) {
     printf("  modify <id> <property> <value>\n");
     printf("      Modify a layer property\n");
     printf("      Properties: scale, opacity, x, y, z, visible, hidden, blur,\n");
-    printf("                  fit, content_scale, align_x, align_y, overflow, tile.x, tile.y, margin.x, margin.y\n");
+    printf("                  fit, content_scale, align_x, align_y, overflow, tile.x, tile.y, margin.x, margin.y,\n");
+    printf("                  tint (format: #RRGGBB[:strength] or none)\n");
     printf("        - x, y are UV pan offsets (normalized),\n");
     printf("          typical range: -0.10 .. 0.10 (1.00 = full texture width/height)\n\n");
 
@@ -296,8 +336,12 @@ static void help_modify(void) {
     printf("  tile.x <bool>       true/false\n");
     printf("  tile.y <bool>       true/false\n");
     printf("  margin.x <px>       Margin in pixels (effective with overflow)\n");
-    printf("  margin.y <px>       Margin in pixels (effective with overflow)\n\n");
-    printf("Examples:\n  hyprlax ctl modify 1 opacity 0.6\n  hyprlax ctl modify 3 z 12\n");
+    printf("  margin.y <px>       Margin in pixels (effective with overflow)\n");
+    printf("  tint <value>        Layer tint; value formats:\n");
+    printf("                     - none                      (clear tint)\n");
+    printf("                     - '#RRGGBB'                (quote the # value)\n");
+    printf("                     - '#RRGGBB:strength'       (strength 0.0..1.0)\n\n");
+    printf("Examples:\n  hyprlax ctl modify 1 opacity 0.6\n  hyprlax ctl modify 3 z 12\n  hyprlax ctl modify 2 tint 'none'\n  hyprlax ctl modify 2 tint '#88aaff'\n  hyprlax ctl modify 2 tint '#88aaff:0.5'\n");
 }
 
 static void help_list(void) {
