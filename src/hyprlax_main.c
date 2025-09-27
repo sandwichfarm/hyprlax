@@ -675,6 +675,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
         {"parallax", required_argument, 0, 1005},
         {"mouse-weight", required_argument, 0, 1006},
         {"workspace-weight", required_argument, 0, 1007},
+        {"default-sbc", required_argument, 0, 1017},
         {0, 0, 0, 0}
     };
 
@@ -705,6 +706,8 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 printf("      --parallax <mode>     Parallax mode: workspace|cursor|hybrid\n");
                 printf("      --mouse-weight <w>    Weight of cursor source (0..1)\n");
                 printf("      --workspace-weight <w> Weight of workspace source (0..1)\n");
+                printf("      --default-sbc s,b,c   Default saturation,brightness,contrast for layers (neutral if omitted)\n");
+                printf("      --sbc s,b,c           Apply SBC to the most recent --layer (sat>=0, con>=0)\n");
                 printf("  --idle-poll-rate <hz>     Polling rate when idle (default: 2.0 Hz)\n");
                 printf("\nRender options:\n");
                 printf("      --overflow <mode>     repeat_edge|repeat|repeat_x|repeat_y|none\n");
@@ -892,6 +895,27 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
             case 1016: /* --margin-px-y */
                 ctx->config.render_margin_px_y = atof(optarg); break;
 
+            case 1017: { /* --default-sbc sat,bri,con */
+                float sat = 1.0f, bri = 0.0f, con = 1.0f;
+                const char *s = optarg;
+                if (!s || !*s) { LOG_WARN("--default-sbc requires 'sat,bri,con'"); break; }
+                char buf[128]; memset(buf, 0, sizeof(buf));
+                strncpy(buf, s, sizeof(buf)-1);
+                char *p1 = strtok(buf, ",");
+                char *p2 = p1 ? strtok(NULL, ",") : NULL;
+                char *p3 = p2 ? strtok(NULL, ",") : NULL;
+                if (!p1 || !p2 || !p3) { LOG_ERROR("invalid --default-sbc, expected 'sat,bri,con'"); break; }
+                sat = (float)atof(p1);
+                bri = (float)atof(p2);
+                con = (float)atof(p3);
+                if (sat < 0.0f) { LOG_ERROR("saturation must be >= 0.0"); break; }
+                if (con < 0.0f) { LOG_ERROR("contrast must be >= 0.0"); break; }
+                ctx->config.sbc_default_enabled = true;
+                ctx->config.sbc_default_saturation = sat;
+                ctx->config.sbc_default_brightness = bri;
+                ctx->config.sbc_default_contrast = con;
+                break; }
+
             case 1004:  /* --disable-monitor */
                 /* TODO: Add monitor to exclusion list */
                 LOG_DEBUG("Excluding monitor: %s", optarg);
@@ -952,6 +976,33 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                     }
                 }
             }
+        } else if (strcmp(argv[i], "--sbc") == 0 && i + 1 < argc) {
+            /* Apply SBC to the most recently added layer */
+            const char *spec = argv[++i];
+            char buf[128]; memset(buf, 0, sizeof(buf));
+            strncpy(buf, spec, sizeof(buf)-1);
+            char *p1 = strtok(buf, ",");
+            char *p2 = p1 ? strtok(NULL, ",") : NULL;
+            char *p3 = p2 ? strtok(NULL, ",") : NULL;
+            if (!p1 || !p2 || !p3) {
+                LOG_ERROR("invalid --sbc, expected 'sat,bri,con'");
+                return -1;
+            }
+            float sat = (float)atof(p1);
+            float bri = (float)atof(p2);
+            float con = (float)atof(p3);
+            if (sat < 0.0f) { LOG_ERROR("--sbc: saturation must be >= 0.0"); return -1; }
+            if (con < 0.0f) { LOG_ERROR("--sbc: contrast must be >= 0.0"); return -1; }
+            parallax_layer_t *last = ctx->layers;
+            while (last && last->next) last = last->next;
+            if (!last) {
+                LOG_ERROR("--sbc must follow a --layer specification");
+                return -1;
+            }
+            last->sbc_enabled = true;
+            last->saturation = sat;
+            last->brightness = bri;
+            last->contrast = con;
         } else {
             /* Legacy: treat as image path */
             /* Check if file exists first */
@@ -1486,6 +1537,14 @@ int hyprlax_add_layer(hyprlax_context_t *ctx, const char *image_path,
     }
     new_layer->blur_amount = blur;
 
+    /* Apply default SBC if configured */
+    if (ctx->config.sbc_default_enabled) {
+        new_layer->sbc_enabled = true;
+        new_layer->saturation = ctx->config.sbc_default_saturation;
+        new_layer->brightness = ctx->config.sbc_default_brightness;
+        new_layer->contrast = ctx->config.sbc_default_contrast;
+    }
+
     /* Assign default z-index if not explicitly set elsewhere:
      * - First layer is assigned z=0
      * - Subsequent layers get max_z + 10
@@ -1895,6 +1954,10 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
                 .tint_g = layer->tint_g,
                 .tint_b = layer->tint_b,
                 .tint_strength = layer->tint_strength,
+                .sbc_enabled = layer->sbc_enabled ? 1 : 0,
+                .saturation = layer->saturation,
+                .brightness = layer->brightness,
+                .contrast = layer->contrast,
             };
             ctx->renderer->ops->draw_layer_ex(
                 &tex,
@@ -2423,6 +2486,23 @@ int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, c
             return 0;
         }
         if (strcmp(leaf, "blur") == 0) { layer->blur_amount = atof(value); return 0; }
+        if (strcmp(leaf, "sbc") == 0) {
+            /* value format: sat,bri,con */
+            char buf[128]; memset(buf, 0, sizeof(buf));
+            strncpy(buf, value, sizeof(buf)-1);
+            char *p1 = strtok(buf, ",");
+            char *p2 = p1 ? strtok(NULL, ",") : NULL;
+            char *p3 = p2 ? strtok(NULL, ",") : NULL;
+            if (!p1 || !p2 || !p3) return -1;
+            float sat = (float)atof(p1);
+            float bri = (float)atof(p2);
+            float con = (float)atof(p3);
+            if (sat < 0.0f || con < 0.0f) return -1;
+            layer->sbc_enabled = true; layer->saturation = sat; layer->brightness = bri; layer->contrast = con; return 0;
+        }
+        if (strcmp(leaf, "saturation") == 0) { float v = atof(value); if (v < 0.0f) return -1; layer->sbc_enabled = true; layer->saturation = v; return 0; }
+        if (strcmp(leaf, "brightness") == 0) { layer->sbc_enabled = true; layer->brightness = atof(value); return 0; }
+        if (strcmp(leaf, "contrast") == 0) { float v = atof(value); if (v < 0.0f) return -1; layer->sbc_enabled = true; layer->contrast = v; return 0; }
         if (strcmp(leaf, "fit") == 0) { int m = fit_from_string_local(value); if (m < 0) return -1; layer->fit_mode = m; return 0; }
         if (strcmp(leaf, "content_scale") == 0) { layer->content_scale = atof(value); return 0; }
         if (strcmp(leaf, "align.x") == 0) { layer->align_x = atof(value); if (layer->align_x<0) layer->align_x=0; if (layer->align_x>1) layer->align_x=1; return 0; }
@@ -2507,6 +2587,11 @@ int hyprlax_runtime_get_property(hyprlax_context_t *ctx, const char *property, c
         if (!layer) return -1;
         if (strcmp(leaf, "hidden") == 0) { W("%s", layer->hidden?"true":"false"); return 0; }
         if (strcmp(leaf, "blur") == 0) { W("%.2f", layer->blur_amount); return 0; }
+        if (strcmp(leaf, "sbc") == 0) { W("%.3f,%.3f,%.3f", layer->saturation, layer->brightness, layer->contrast); return 0; }
+        if (strcmp(leaf, "sbc.enabled") == 0) { W("%s", layer->sbc_enabled?"true":"false"); return 0; }
+        if (strcmp(leaf, "saturation") == 0) { W("%.3f", layer->saturation); return 0; }
+        if (strcmp(leaf, "brightness") == 0) { W("%.3f", layer->brightness); return 0; }
+        if (strcmp(leaf, "contrast") == 0) { W("%.3f", layer->contrast); return 0; }
         if (strcmp(leaf, "fit") == 0) { W("%s", fit_to_string_local(layer->fit_mode)); return 0; }
         if (strcmp(leaf, "content_scale") == 0) { W("%.3f", layer->content_scale); return 0; }
         if (strcmp(leaf, "align.x") == 0) { W("%.3f", layer->align_x); return 0; }

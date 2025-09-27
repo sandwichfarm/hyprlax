@@ -65,6 +65,8 @@ hyprlax ctl <COMMAND> [ARGS...]
 | Short | Long | Type | Description |
 |-------|------|------|-------------|
 | | `--layer` | string | Add layer: `image:shift:opacity[:blur]` |
+| | `--sbc` | string | Apply to most recent `--layer`: `sat,bri,con` (sat>=0, con>=0) |
+| | `--default-sbc` | string | Set default SBC for new layers: `sat,bri,con` |
 
 ### Layer Format
 ```bash
@@ -72,6 +74,17 @@ hyprlax ctl <COMMAND> [ARGS...]
 #       └─ image path ─────┘ │   │   └─ blur (optional)
 #                           │   └─ opacity (0.0-1.0)
 #                           └─ shift multiplier (0.0-2.0)
+
+SBC examples:
+```bash
+hyprlax --layer bg.jpg:0.3:1.0 --sbc 0.2,0.00,1.0 \
+        --layer fg.png:1.0:0.9 --sbc 1.2,0.08,1.25
+
+# Set defaults then override foreground only
+hyprlax --default-sbc 0.8,0.00,1.1 \
+        --layer bg.jpg:0.3:1.0 \
+        --layer fg.png:1.0:0.9 --sbc 1.1,0.05,1.2
+```
 ```
 
 ## Easing Functions

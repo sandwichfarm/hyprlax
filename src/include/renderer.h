@@ -64,6 +64,12 @@ typedef struct renderer_layer_params {
     float tint_g;
     float tint_b;
     float tint_strength;
+
+    /* Per-layer Saturation/Brightness/Contrast (SBC) */
+    int sbc_enabled;     /* 0/1; when 0, values are ignored */
+    float saturation;    /* >=0, neutral 1.0 */
+    float brightness;    /* additive, neutral 0.0 */
+    float contrast;      /* >=0, neutral 1.0 */
 } renderer_layer_params_t;
 
 /* Renderer operations interface */

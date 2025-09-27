@@ -20,6 +20,7 @@ Learn how to configure hyprlax
 Quick lookup for commands and options
 - [CLI Reference](reference/cli.md) - Command-line options
 - [IPC Commands](reference/ipc-commands.md) - Runtime control commands
+- [Color Filters (SBC)](guides/filters.md) - Saturation/Brightness/Contrast per-layer
 - [Easing Functions](reference/easing-functions.md) - Animation easing types
 
 ### 📚 [Guides](guides/)

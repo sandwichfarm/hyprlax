@@ -148,6 +148,29 @@ hyprlax ctl get easing
 # Output: easing=expo
 ```
 
+## Layer Runtime Properties
+
+Use `hyprlax ctl set`/`get` with canonical dotted keys:
+
+```
+# Set composite SBC on layer 3
+hyprlax ctl set layer.3.sbc 1.2,0.05,1.1
+
+# Set individual fields (also enables SBC)
+hyprlax ctl set layer.3.saturation 0.6
+hyprlax ctl set layer.3.brightness 0.10
+hyprlax ctl set layer.3.contrast 1.3
+
+# Query
+hyprlax ctl get layer.3.sbc
+hyprlax ctl get layer.3.sbc.enabled
+```
+
+Notes:
+- Neutral defaults are `saturation=1.0`, `brightness=0.0`, `contrast=1.0`.
+- When SBC is disabled or neutral, rendering is identical to current behavior.
+- `list` output includes `SBC: sat=.. bri=.. con=..` when enabled.
+
 ## System Commands
 
 ### status

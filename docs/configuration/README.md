@@ -66,6 +66,7 @@ Ready-to-use configurations are available in [examples/](examples/):
 - [Basic parallax](examples/basic.toml)
 - [Cursor tracking](examples/cursor-parallax.toml)  
 - [Multi-layer depth](examples/multi-layer.toml)
+- [SBC (Saturation/Brightness/Contrast) cookbook](examples/sbc-cookbook.toml)
 
 ## Getting Started
 

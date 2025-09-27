@@ -1,0 +1,34 @@
+[global]
+fps = 144
+duration = 1.5
+shift = 220
+easing = "expo"
+vsync = false
+
+[[global.layers]]
+# Background — desaturated, subtle depth
+path = "../mountains/layer0_sky.png"
+shift_multiplier = 0.2
+opacity = 1.0
+blur = 1.2
+# Composite SBC form: [saturation, brightness, contrast]
+sbc = [0.2, 0.0, 1.0]
+
+[[global.layers]]
+# Midground — slight brightness lift and contrast via individual keys
+path = "../mountains/layer3_mid_mountains.png"
+shift_multiplier = 0.6
+opacity = 1.0
+blur = 0.6
+saturation = 1.0
+brightness = 0.05
+contrast = 1.1
+
+[[global.layers]]
+# Foreground — boosted contrast and mild brightness
+path = "../mountains/layer5_foreground.png"
+shift_multiplier = 1.0
+opacity = 0.95
+blur = 0.0
+sbc = [1.2, 0.08, 1.25]
+

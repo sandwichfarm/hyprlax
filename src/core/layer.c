@@ -65,6 +65,12 @@ parallax_layer_t* layer_create(const char *image_path, float shift_multiplier, f
     layer->tint_b = 1.0f;
     layer->tint_strength = 0.0f;
 
+    /* SBC defaults: neutral and disabled */
+    layer->sbc_enabled = false;
+    layer->saturation = 1.0f;
+    layer->brightness = 0.0f;
+    layer->contrast = 1.0f;
+
     layer->next = NULL;
 
     return layer;

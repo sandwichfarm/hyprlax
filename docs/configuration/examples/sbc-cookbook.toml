@@ -1,0 +1,37 @@
+# SBC Cookbook Example (Saturation / Brightness / Contrast)
+
+[global]
+fps = 144
+duration = 1.5
+shift = 220
+easing = "expo"
+
+# Optional global default SBC for layers without overrides
+# default_sbc = [1.0, 0.00, 1.05]
+
+# Background — desaturated to push it back
+[[global.layers]]
+path = "../../examples/mountains/layer0_sky.png"
+shift_multiplier = 0.2
+opacity = 1.0
+blur = 1.2
+sbc = [0.2, 0.00, 1.0]
+
+# Midground — mild brightness and contrast via individual keys
+[[global.layers]]
+path = "../../examples/mountains/layer3_mid_mountains.png"
+shift_multiplier = 0.6
+opacity = 1.0
+blur = 0.6
+saturation = 1.0
+brightness = 0.05
+contrast = 1.1
+
+# Foreground — boosted contrast for pop, slight brightness lift
+[[global.layers]]
+path = "../../examples/mountains/layer5_foreground.png"
+shift_multiplier = 1.0
+opacity = 0.95
+blur = 0.0
+sbc = [1.2, 0.08, 1.25]
+

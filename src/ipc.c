@@ -1150,9 +1150,17 @@ char* ipc_list_layers(ipc_context_t* ctx) {
     if (!app->layers) return NULL;
     char *out = malloc(IPC_MAX_MESSAGE_SIZE); if (!out) return NULL; out[0] = '\0'; size_t off = 0;
                 int guard2 = 0; for (parallax_layer_t *it = app->layers; it && guard2 < (app->layer_count + 4); it = it->next, guard2++) {
-                    int w = snprintf(out + off, IPC_MAX_MESSAGE_SIZE - off,
+                    int w = 0;
+                    if (it->sbc_enabled) {
+                        w = snprintf(out + off, IPC_MAX_MESSAGE_SIZE - off,
+                         "ID: %u | Path: %s | Shift: %.2f | Opacity: %.2f | Z: %d | SBC: sat=%.2f bri=%.2f con=%.2f\n",
+                         it->id, it->image_path ? it->image_path : "<memory>", it->shift_multiplier, it->opacity, it->z_index,
+                         it->saturation, it->brightness, it->contrast);
+                    } else {
+                        w = snprintf(out + off, IPC_MAX_MESSAGE_SIZE - off,
                          "ID: %u | Path: %s | Shift: %.2f | Opacity: %.2f | Z: %d\n",
                          it->id, it->image_path ? it->image_path : "<memory>", it->shift_multiplier, it->opacity, it->z_index);
+                    }
         if (w < 0 || off + (size_t)w >= IPC_MAX_MESSAGE_SIZE)
             break;
         off += (size_t)w;

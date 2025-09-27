@@ -57,6 +57,12 @@ void config_set_defaults(config_t *cfg) {
     cfg->cursor_anim_duration = 0.0; /* disabled by default (low-latency) */
     cfg->cursor_easing = EASE_CUBIC_OUT;
     cfg->cursor_follow_global = true; /* default: animate even when cursor isn’t over background */
+
+    /* SBC defaults: neutral and disabled */
+    cfg->sbc_default_enabled = false;
+    cfg->sbc_default_saturation = 1.0f;
+    cfg->sbc_default_brightness = 0.0f;
+    cfg->sbc_default_contrast = 1.0f;
 }
 
 /* Parse command-line arguments */

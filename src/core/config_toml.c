@@ -66,6 +66,25 @@ static void parse_global_table(toml_table_t *global, config_t *cfg)
     d = toml_double_in(global, "idle_poll_rate");
     if (d.ok) cfg->idle_poll_rate = (float)d.u.d;
 
+    /* Optional default SBC for layers: default_sbc = [sat, bri, con] */
+    toml_array_t *def_sbc = toml_array_in(global, "default_sbc");
+    if (def_sbc && toml_array_nelem(def_sbc) == 3) {
+        toml_datum_t a0 = toml_double_at(def_sbc, 0);
+        toml_datum_t a1 = toml_double_at(def_sbc, 1);
+        toml_datum_t a2 = toml_double_at(def_sbc, 2);
+        if (a0.ok && a1.ok && a2.ok) {
+            float sat = (float)a0.u.d;
+            float bri = (float)a1.u.d;
+            float con = (float)a2.u.d;
+            if (sat >= 0.0f && con >= 0.0f) {
+                cfg->sbc_default_enabled = true;
+                cfg->sbc_default_saturation = sat;
+                cfg->sbc_default_brightness = bri;
+                cfg->sbc_default_contrast = con;
+            }
+        }
+    }
+
     /* Parallax: [global.parallax] */
     toml_table_t *parallax = toml_table_in(global, "parallax");
     if (parallax) {
@@ -305,6 +324,40 @@ int config_apply_toml_to_context(hyprlax_context_t *ctx, const char *path)
                             while (last->next) last = last->next;
                             /* Apply tint if provided */
                             last->tint_r = tint_r; last->tint_g = tint_g; last->tint_b = tint_b; last->tint_strength = tint_strength;
+                            /* Per-layer SBC via composite array or individual keys */
+                            toml_array_t *sbc = toml_array_in(lt, "sbc");
+                            if (sbc && toml_array_nelem(sbc) == 3) {
+                                toml_datum_t a0 = toml_double_at(sbc, 0);
+                                toml_datum_t a1 = toml_double_at(sbc, 1);
+                                toml_datum_t a2 = toml_double_at(sbc, 2);
+                                if (a0.ok && a1.ok && a2.ok) {
+                                    float sat = (float)a0.u.d;
+                                    float bri = (float)a1.u.d;
+                                    float con = (float)a2.u.d;
+                                    if (sat >= 0.0f && con >= 0.0f) {
+                                        last->sbc_enabled = true;
+                                        last->saturation = sat;
+                                        last->brightness = bri;
+                                        last->contrast = con;
+                                    }
+                                }
+                            } else {
+                                toml_datum_t dsat = toml_double_in(lt, "saturation");
+                                toml_datum_t dbri = toml_double_in(lt, "brightness");
+                                toml_datum_t dcon = toml_double_in(lt, "contrast");
+                                bool any = (dsat.ok || dbri.ok || dcon.ok);
+                                if (any) {
+                                    float sat = dsat.ok ? (float)dsat.u.d : last->saturation;
+                                    float bri = dbri.ok ? (float)dbri.u.d : last->brightness;
+                                    float con = dcon.ok ? (float)dcon.u.d : last->contrast;
+                                    if (sat < 0.0f) sat = 0.0f;
+                                    if (con < 0.0f) con = 0.0f;
+                                    last->sbc_enabled = true;
+                                    last->saturation = sat;
+                                    last->brightness = bri;
+                                    last->contrast = con;
+                                }
+                            }
                             if (shift_x >= 0.0f) last->shift_multiplier_x = shift_x;
                             if (shift_y >= 0.0f) last->shift_multiplier_y = shift_y;
                             /* Optional per-layer inversion */

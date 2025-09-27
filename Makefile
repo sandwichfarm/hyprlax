@@ -303,6 +303,9 @@ tests/test_compositor_ops: tests/test_compositor_ops.c \
 tests/test_toml_config: tests/test_toml_config.c src/core/config_toml.c src/core/config.c src/core/parallax.c src/core/log.c src/core/easing.c src/vendor/toml.c
 	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) -o $@
 
+tests/test_toml_layers_sbc: tests/test_toml_layers_sbc.c src/core/config_toml.c src/core/config.c src/core/parallax.c src/core/log.c src/core/easing.c src/core/layer.c src/vendor/toml.c src/hyprlax_main.c
+	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) $(PKG_LIBS) -o $@
+
 tests/test_runtime_properties: tests/test_runtime_properties.c src/hyprlax_main.c src/core/parallax.c src/core/log.c src/core/config.c
 	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) $(PKG_LIBS) -o $@
 

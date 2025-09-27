@@ -102,6 +102,12 @@ typedef struct parallax_layer {
     float tint_b;                 /* 0..1 */
     float tint_strength;          /* 0..1: 0=no tint, 1=full */
 
+    /* Per-layer color adjustments (SBC) */
+    bool sbc_enabled;             /* false unless explicitly set */
+    float saturation;             /* 0..inf, default 1.0 */
+    float brightness;             /* additive, default 0.0 */
+    float contrast;               /* 0..inf, default 1.0 */
+
     /* Linked list */
     struct parallax_layer *next;
 } parallax_layer_t;
@@ -167,6 +173,12 @@ typedef struct {
     double cursor_anim_duration;      /* seconds; 0 disables easing */
     easing_type_t cursor_easing;      /* easing for cursor animation */
     bool cursor_follow_global;        /* true: animate even off background via compositor/global cursor */
+
+    /* SBC defaults (optional, neutral by default) */
+    bool sbc_default_enabled;
+    float sbc_default_saturation;
+    float sbc_default_brightness;
+    float sbc_default_contrast;
 } config_t;
 
 /* Easing functions - pure math, no side effects */

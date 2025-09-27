@@ -647,6 +647,29 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
         }
     }
 
+    /* Per-layer SBC uniforms (apply after tint in fragment shader) */
+    {
+        float enabled = 0.0f;
+        float sat = 1.0f, bri = 0.0f, con = 1.0f;
+        if (using_params) {
+            /* Treat as enabled when flag set or values deviate from neutral */
+            enabled = (params->sbc_enabled || params->saturation != 1.0f || params->brightness != 0.0f || params->contrast != 1.0f) ? 1.0f : 0.0f;
+            sat = params->saturation; if (sat < 0.0f) sat = 0.0f;
+            bri = params->brightness;
+            con = params->contrast; if (con < 0.0f) con = 0.0f;
+        }
+        GLint loc_en = shader_get_uniform_location(shader, "u_sbc_enabled");
+        GLint loc_sa = shader_get_uniform_location(shader, "u_saturation");
+        GLint loc_br = shader_get_uniform_location(shader, "u_brightness");
+        GLint loc_co = shader_get_uniform_location(shader, "u_contrast");
+        if (loc_en != -1) glUniform1f(loc_en, enabled);
+        if (enabled > 0.5f) {
+            if (loc_sa != -1) glUniform1f(loc_sa, sat);
+            if (loc_br != -1) glUniform1f(loc_br, bri);
+            if (loc_co != -1) glUniform1f(loc_co, con);
+        }
+    }
+
     /* Legacy blur uniforms */
     if (shader == g_gles2_data->blur_shader) {
         shader_set_uniform_float(shader, "u_blur_amount", blur_amount);
