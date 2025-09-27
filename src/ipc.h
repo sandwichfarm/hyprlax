@@ -43,6 +43,11 @@ typedef struct {
     float y_offset;
     int z_index;
     bool visible;
+    /* Optional tint for fallback mode */
+    float tint_r;
+    float tint_g;
+    float tint_b;
+    float tint_strength;
     uint32_t id;
 } layer_t;
 

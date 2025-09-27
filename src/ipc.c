@@ -46,6 +46,45 @@ static int str_to_bool(const char *v) {
     if (!v) return 0;
     return (!strcmp(v, "1") || !strcasecmp(v, "true") || !strcasecmp(v, "on") || !strcasecmp(v, "yes")) ? 1 : 0;
 }
+
+/* --- Tint parsing helpers --- */
+static int parse_hex_rgb_ipc(const char *s, float *r, float *g, float *b) {
+    if (!s || s[0] != '#' || strlen(s) != 7) return 0;
+    char cr[3] = {s[1], s[2], 0};
+    char cg[3] = {s[3], s[4], 0};
+    char cb[3] = {s[5], s[6], 0};
+    char *end = NULL;
+    long rv = strtol(cr, &end, 16); if (end && *end) return 0;
+    long gv = strtol(cg, &end, 16); if (end && *end) return 0;
+    long bv = strtol(cb, &end, 16); if (end && *end) return 0;
+    if (r) *r = (float)rv / 255.0f;
+    if (g) *g = (float)gv / 255.0f;
+    if (b) *b = (float)bv / 255.0f;
+    return 1;
+}
+/* Accepts: 'none' or '#RRGGBB' or '#RRGGBB:0.5' or '#RRGGBB,0.5' */
+static int parse_tint_value_ipc(const char *value, float *r, float *g, float *b, float *strength) {
+    if (!value || !*value) return 0;
+    if (!strcmp(value, "none")) {
+        if (r) *r = 1.0f; if (g) *g = 1.0f; if (b) *b = 1.0f; if (strength) *strength = 0.0f; return 1;
+    }
+    char buf[128];
+    if (strlen(value) >= sizeof(buf)) return 0;
+    /* Safe copy: avoid flagged unsafe copy; value length already validated */
+    snprintf(buf, sizeof(buf), "%s", value);
+    char *sep = strchr(buf, ':'); if (!sep) sep = strchr(buf, ',');
+    float tr=1.0f, tg=1.0f, tb=1.0f, ts=1.0f;
+    if (sep) {
+        *sep = '\0';
+        if (!parse_hex_rgb_ipc(buf, &tr, &tg, &tb)) return 0;
+        ts = (float)atof(sep + 1); if (ts < 0.0f) ts = 0.0f; if (ts > 1.0f) ts = 1.0f;
+    } else {
+        if (!parse_hex_rgb_ipc(buf, &tr, &tg, &tb)) return 0;
+        ts = 1.0f;
+    }
+    if (r) *r = tr; if (g) *g = tg; if (b) *b = tb; if (strength) *strength = ts;
+    return 1;
+}
 static int overflow_from_string(const char *s) {
     if (!s) return -2;
     if (!strcmp(s, "inherit")) return -1;
@@ -115,6 +154,11 @@ static int apply_layer_property(hyprlax_context_t *app, parallax_layer_t *layer,
         layer->hidden = str_to_bool(value) ? true : false; return 1;
     } else if (strcmp(property, "visible") == 0) {
         bool vis = str_to_bool(value) ? true : false; layer->hidden = !vis; return 1;
+    }
+    else if (strcmp(property, "tint") == 0) {
+        float tr, tg, tb, ts;
+        if (!parse_tint_value_ipc(value, &tr, &tg, &tb, &ts)) { ipc_errorf(response, response_sz, 1259, "invalid tint value\n"); return 0; }
+        layer->tint_r = tr; layer->tint_g = tg; layer->tint_b = tb; layer->tint_strength = ts; return 1;
     }
     ipc_errorf(response, response_sz, 1201, "Invalid property '%s'\n", property);
     return 0;
@@ -423,6 +467,15 @@ bool ipc_process_commands(ipc_context_t* ctx) {
     }
 
     ipc_command_t command = parse_command(cmd);
+    if (getenv("HYPRLAX_DEBUG")) {
+        hyprlax_context_t *app_dbg = (hyprlax_context_t*)ctx->app_context;
+        void *head = app_dbg ? (void*)app_dbg->layers : NULL;
+        int lcount = app_dbg ? app_dbg->layer_count : ctx->layer_count;
+        fprintf(stderr, "[DEBUG] IPC command: %s (enum=%d), layers=%d head=%p\n", cmd, (int)command, lcount, head);
+        if (head && app_dbg && app_dbg->layers) {
+            fprintf(stderr, "[DEBUG]   head.id=%u head.next=%p\n", app_dbg->layers->id, (void*)app_dbg->layers->next);
+        }
+    }
     char response[IPC_MAX_MESSAGE_SIZE];
     bool success = false;
 
@@ -573,6 +626,10 @@ bool ipc_process_commands(ipc_context_t* ctx) {
         }
 
         case IPC_CMD_LIST_LAYERS: {
+            if (getenv("HYPRLAX_DEBUG")) {
+                hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+                fprintf(stderr, "[DEBUG] IPC LIST entering: app=%p layers=%p count=%d\n", (void*)app, app? (void*)app->layers:NULL, app?app->layer_count:ctx->layer_count);
+            }
             hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
             if (!app || !app->layers) { snprintf(response, sizeof(response), "No layers\n"); success = true; break; }
 
@@ -601,7 +658,10 @@ bool ipc_process_commands(ipc_context_t* ctx) {
             if (json) {
                 off += snprintf(response + off, sizeof(response) - off, "[");
                 bool first = true;
-                for (parallax_layer_t *it = app->layers; it; it = it->next) {
+                int guard = 0; for (parallax_layer_t *it = app->layers; it && guard < (app->layer_count + 4); it = it->next, guard++) {
+                    if (getenv("HYPRLAX_DEBUG") && guard == 0) {
+                        fprintf(stderr, "[DEBUG]   LIST head: id=%u next=%p\n", it->id, (void*)it->next);
+                    }
                     if (filter_id >= 0 && (int)it->id != filter_id) continue;
                     if (filter_hidden >= 0 && (it->hidden ? 1 : 0) != filter_hidden) continue;
                     if (filter_path && (!it->image_path || !strstr(it->image_path, filter_path))) continue;
@@ -624,10 +684,11 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                     const char *fit_s = (it->fit_mode==LAYER_FIT_STRETCH?"stretch": it->fit_mode==LAYER_FIT_COVER?"cover": it->fit_mode==LAYER_FIT_CONTAIN?"contain": it->fit_mode==LAYER_FIT_WIDTH?"fit_width":"fit_height");
                     char esc[512]; json_escape(it->image_path ? it->image_path : "<memory>", esc, sizeof(esc));
                     int w = snprintf(response + off, sizeof(response) - off,
-                        "{\"id\":%u,\"path\":\"%s\",\"shift\":%.3f,\"opacity\":%.3f,\"z\":%d,\"uv\":[%.4f,%.4f],\"fit\":\"%s\",\"align\":[%.3f,%.3f],\"content_scale\":%.3f,\"blur\":%.3f,\"overflow\":\"%s\",\"tile\":[%s,%s],\"margin\":[%.1f,%.1f],\"hidden\":%s}",
+                        "{\"id\":%u,\"path\":\"%s\",\"shift\":%.3f,\"opacity\":%.3f,\"z\":%d,\"uv\":[%.4f,%.4f],\"fit\":\"%s\",\"align\":[%.3f,%.3f],\"content_scale\":%.3f,\"blur\":%.3f,\"overflow\":\"%s\",\"tile\":[%s,%s],\"margin\":[%.1f,%.1f],\"hidden\":%s,\"tint\":[%.3f,%.3f,%.3f,%.3f]}",
                         it->id, esc, it->shift_multiplier, it->opacity, it->z_index,
                         it->base_uv_x, it->base_uv_y, fit_s, it->align_x, it->align_y, it->content_scale, it->blur_amount,
-                        over_s, eff_tile_x?"true":"false", eff_tile_y?"true":"false", eff_mx, eff_my, it->hidden?"true":"false");
+                        over_s, eff_tile_x?"true":"false", eff_tile_y?"true":"false", eff_mx, eff_my, it->hidden?"true":"false",
+                        it->tint_r, it->tint_g, it->tint_b, it->tint_strength);
                     if (w < 0 || off + (size_t)w >= sizeof(response)) { break; }
                     off += (size_t)w;
                 }
@@ -654,7 +715,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                     float eff_my = (it->margin_px_x != 0.0f || it->margin_px_y != 0.0f) ? it->margin_px_y : app->config.render_margin_px_y;
                     const char *fit_s = (it->fit_mode==LAYER_FIT_STRETCH?"stretch": it->fit_mode==LAYER_FIT_COVER?"cover": it->fit_mode==LAYER_FIT_CONTAIN?"contain": it->fit_mode==LAYER_FIT_WIDTH?"fit_width":"fit_height");
                     int w = snprintf(response + off, sizeof(response) - off,
-                                     "ID: %u | Path: %s | Shift Multiplier: %.2f | Opacity: %.2f | Z: %d | UV Offset: %.3f,%.3f | Fit: %s | Align: %.2f,%.2f | Content Scale: %.2f | Blur: %.2f | Overflow: %s | Tile: %s/%s | Margin Px: %.1f,%.1f | Visible: %s | Tex: %u | Size: %dx%d\n",
+                                     "ID: %u | Path: %s | Shift Multiplier: %.2f | Opacity: %.2f | Z: %d | UV Offset: %.3f,%.3f | Fit: %s | Align: %.2f,%.2f | Content Scale: %.2f | Blur: %.2f | Overflow: %s | Tile: %s/%s | Margin Px: %.1f,%.1f | Visible: %s | Tex: %u | Size: %dx%d | Tint: #%02x%02x%02x:%.2f\n",
                                      it->id, it->image_path ? it->image_path : "<memory>",
                                      it->shift_multiplier, it->opacity, it->z_index,
                                      it->base_uv_x, it->base_uv_y,
@@ -664,7 +725,8 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                                      eff_tile_x?"true":"false", eff_tile_y?"true":"false",
                                      eff_mx, eff_my,
                                      it->hidden?"yes":"no",
-                                     (unsigned int)it->texture_id, it->width, it->height);
+                                     (unsigned int)it->texture_id, it->width, it->height,
+                                     (int)(it->tint_r*255.0f+0.5f), (int)(it->tint_g*255.0f+0.5f), (int)(it->tint_b*255.0f+0.5f), it->tint_strength);
                     if (w < 0 || off + (size_t)w >= sizeof(response)) { break; }
                     off += (size_t)w;
                 }
@@ -1087,8 +1149,8 @@ char* ipc_list_layers(ipc_context_t* ctx) {
     hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
     if (!app->layers) return NULL;
     char *out = malloc(IPC_MAX_MESSAGE_SIZE); if (!out) return NULL; out[0] = '\0'; size_t off = 0;
-    for (parallax_layer_t *it = app->layers; it; it = it->next) {
-        int w = snprintf(out + off, IPC_MAX_MESSAGE_SIZE - off,
+                int guard2 = 0; for (parallax_layer_t *it = app->layers; it && guard2 < (app->layer_count + 4); it = it->next, guard2++) {
+                    int w = snprintf(out + off, IPC_MAX_MESSAGE_SIZE - off,
                          "ID: %u | Path: %s | Shift: %.2f | Opacity: %.2f | Z: %d\n",
                          it->id, it->image_path ? it->image_path : "<memory>", it->shift_multiplier, it->opacity, it->z_index);
         if (w < 0 || off + (size_t)w >= IPC_MAX_MESSAGE_SIZE)

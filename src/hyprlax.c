@@ -62,6 +62,9 @@ struct layer {
     double animation_start;  // When this layer's animation started
     int animating;          // Is this layer currently animating
     float blur_amount;      // Blur amount for depth (0.0 = no blur)
+    // Per-layer tint (multiply color)
+    float tint_color[3];    // RGB in 0..1
+    float tint_strength;    // 0.0=no tint, 1.0=full
 };
 
 // Configuration
@@ -116,12 +119,16 @@ struct {
     // Standard shader uniforms
     GLint u_opacity;  // Uniform location for opacity
     GLint u_texture;  // Uniform location for texture
+    GLint u_tint;     // vec3 tint color
+    GLint u_tint_strength; // float tint strength
 
     // Blur shader uniforms
     GLint blur_u_texture;  // Uniform location for texture in blur shader
     GLint blur_u_opacity;  // Uniform location for opacity in blur shader
     GLint blur_u_blur_amount;  // Uniform location for blur amount
     GLint blur_u_resolution;  // Uniform location for resolution
+    GLint blur_u_tint;     // vec3 tint color (blur shader)
+    GLint blur_u_tint_strength; // float tint strength (blur shader)
 
     // Window dimensions
     int width, height;
@@ -175,15 +182,20 @@ const char *fragment_shader_src =
     "varying vec2 v_texcoord;\n"
     "uniform sampler2D u_texture;\n"
     "uniform float u_opacity;\n"
+    "uniform vec3 u_tint;\n"
+    "uniform float u_tint_strength;\n"
     "void main() {\n"
     "    vec4 color = texture2D(u_texture, v_texcoord);\n"
+    "    // Apply multiplicative tint\n"
+    "    vec3 effective = mix(vec3(1.0), u_tint, clamp(u_tint_strength, 0.0, 1.0));\n"
+    "    vec3 rgb = color.rgb * effective;\n"
     "    // Premultiply alpha for correct blending\n"
     "    float final_alpha = color.a * u_opacity;\n"
-    "    gl_FragColor = vec4(color.rgb * final_alpha, final_alpha);\n"
+    "    gl_FragColor = vec4(rgb * final_alpha, final_alpha);\n"
     "}\n";
 
 // Build blur fragment shader with constants
-// Note: sprintf is used here for simple constant injection at runtime
+// Note: snprintf is used here for simple constant injection at runtime
 // This is a common pattern in OpenGL applications for shader variants
 char *build_blur_shader() {
     char *shader = malloc(BLUR_SHADER_MAX_SIZE);
@@ -199,11 +211,15 @@ char *build_blur_shader() {
         "uniform float u_opacity;\n"
         "uniform float u_blur_amount;\n"
         "uniform vec2 u_resolution;\n"
+        "uniform vec3 u_tint;\n"
+        "uniform float u_tint_strength;\n"
         "void main() {\n"
         "    float blur = u_blur_amount;\n"
         "    if (blur < %.4f) {\n"  // BLUR_MIN_THRESHOLD
         "        vec4 color = texture2D(u_texture, v_texcoord);\n"
-        "        gl_FragColor = vec4(color.rgb, color.a * u_opacity);\n"
+        "        vec3 effective = mix(vec3(1.0), u_tint, clamp(u_tint_strength, 0.0, 1.0));\n"
+        "        vec3 rgb = color.rgb * effective;\n"
+        "        gl_FragColor = vec4(rgb, color.a * u_opacity);\n"
         "        return;\n"
         "    }\n"
         "    \n"
@@ -222,7 +238,9 @@ char *build_blur_shader() {
         "    }\n"
         "    \n"
         "    result /= samples;\n"
-        "    gl_FragColor = vec4(result.rgb, result.a * u_opacity);\n"
+        "    vec3 effective = mix(vec3(1.0), u_tint, clamp(u_tint_strength, 0.0, 1.0));\n"
+        "    vec3 rgb = result.rgb * effective;\n"
+        "    gl_FragColor = vec4(rgb, result.a * u_opacity);\n"
         "}\n",
         BLUR_MIN_THRESHOLD);
 
@@ -343,6 +361,14 @@ int init_gl() {
     if (state.u_opacity == -1) {
         fprintf(stderr, "Warning: Failed to find uniform 'u_opacity' in standard shader\n");
     }
+    state.u_tint = glGetUniformLocation(state.shader_program, "u_tint");
+    if (state.u_tint == -1 && config.debug) {
+        fprintf(stderr, "Warning: Failed to find uniform 'u_tint' in standard shader\n");
+    }
+    state.u_tint_strength = glGetUniformLocation(state.shader_program, "u_tint_strength");
+    if (state.u_tint_strength == -1 && config.debug) {
+        fprintf(stderr, "Warning: Failed to find uniform 'u_tint_strength' in standard shader\n");
+    }
 
     // Get uniform locations for blur shader with error checking
     glUseProgram(state.blur_shader_program);
@@ -361,6 +387,14 @@ int init_gl() {
     state.blur_u_resolution = glGetUniformLocation(state.blur_shader_program, "u_resolution");
     if (state.blur_u_resolution == -1) {
         fprintf(stderr, "Warning: Failed to find uniform 'u_resolution' in blur shader\n");
+    }
+    state.blur_u_tint = glGetUniformLocation(state.blur_shader_program, "u_tint");
+    if (state.blur_u_tint == -1 && config.debug) {
+        fprintf(stderr, "Warning: Failed to find uniform 'u_tint' in blur shader\n");
+    }
+    state.blur_u_tint_strength = glGetUniformLocation(state.blur_shader_program, "u_tint_strength");
+    if (state.blur_u_tint_strength == -1 && config.debug) {
+        fprintf(stderr, "Warning: Failed to find uniform 'u_tint_strength' in blur shader\n");
     }
 
     if (config.debug) {
@@ -474,6 +508,10 @@ int load_layer(struct layer *layer, const char *path, float shift_multiplier, fl
     layer->animation_start = 0.0;
     layer->animating = 0;
     layer->blur_amount = blur_amount;
+    layer->tint_color[0] = 1.0f;
+    layer->tint_color[1] = 1.0f;
+    layer->tint_color[2] = 1.0f;
+    layer->tint_strength = 0.0f;
 
     stbi_image_free(data);
 
@@ -768,6 +806,8 @@ void render_frame() {
                 glUniform1f(state.blur_u_opacity, layer->opacity);
                 glUniform1f(state.blur_u_blur_amount, layer->blur_amount);
                 glUniform2f(state.blur_u_resolution, (float)state.width, (float)state.height);
+                glUniform3f(state.blur_u_tint, layer->tint_color[0], layer->tint_color[1], layer->tint_color[2]);
+                glUniform1f(state.blur_u_tint_strength, layer->tint_strength);
 
             } else {
                 glUseProgram(state.shader_program);
@@ -776,6 +816,8 @@ void render_frame() {
                 glBindTexture(GL_TEXTURE_2D, layer->texture);
                 glUniform1i(state.u_texture, 0);
                 glUniform1f(state.u_opacity, layer->opacity);
+                glUniform3f(state.u_tint, layer->tint_color[0], layer->tint_color[1], layer->tint_color[2]);
+                glUniform1f(state.u_tint_strength, layer->tint_strength);
             }
 
             // Draw layer
@@ -815,6 +857,9 @@ void render_frame() {
         glBindTexture(GL_TEXTURE_2D, state.texture);
         glUniform1i(state.u_texture, 0);
         glUniform1f(state.u_opacity, 1.0f);
+        // No tint in single-image path by default
+        glUniform3f(state.u_tint, 1.0f, 1.0f, 1.0f);
+        glUniform1f(state.u_tint_strength, 0.0f);
 
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, state.ebo);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
@@ -1175,6 +1220,9 @@ void print_usage(const char *prog) {
     printf("                           duration: per-layer animation duration (optional)\n");
     printf("                           blur: blur amount for depth (0.0-10.0, default 0.0)\n");
     printf("  --config <file>          Load layers from config file\n");
+    printf("  --tint <spec>            Apply tint to the last declared layer\n");
+    printf("                           spec: #RRGGBB[:strength] or 'none'\n");
+    printf("                           ex: --layer fg.png:1.0:0.8 --tint #ffaa33:0.5\n");
     printf("\nExamples:\n");
     printf("  # Single image (classic mode)\n");
     printf("  %s wallpaper.jpg\n", prog);
@@ -1187,6 +1235,47 @@ void print_usage(const char *prog) {
 void print_version() {
     printf("hyprlax %s\n", HYPRLAX_VERSION);
     printf("Smooth parallax wallpaper animations for Hyprland\n");
+}
+
+// --- Tint parsing helpers ---
+static int parse_hex_rgb(const char *s, float rgb[3]) {
+    if (!s || s[0] != '#' || strlen(s) != 7) return -1;
+    char r[3] = {s[1], s[2], 0};
+    char g[3] = {s[3], s[4], 0};
+    char b[3] = {s[5], s[6], 0};
+    char *end = NULL;
+    long rv = strtol(r, &end, 16); if (end && *end) return -1;
+    long gv = strtol(g, &end, 16); if (end && *end) return -1;
+    long bv = strtol(b, &end, 16); if (end && *end) return -1;
+    rgb[0] = (float)rv / 255.0f;
+    rgb[1] = (float)gv / 255.0f;
+    rgb[2] = (float)bv / 255.0f;
+    return 0;
+}
+static int parse_tint_spec(const char *spec, float rgb[3], float *strength) {
+    if (!spec || !*spec) return -1;
+    if (!strcmp(spec, "none")) {
+        rgb[0] = rgb[1] = rgb[2] = 1.0f; if (strength) *strength = 0.0f; return 0;
+    }
+    char buf[128];
+    if (strlen(spec) >= sizeof(buf)) return -1;
+    /* Safe copy: avoid flagged unsafe copy; length validated above */
+    snprintf(buf, sizeof(buf), "%s", spec);
+    char *colon = strchr(buf, ':');
+    if (colon) {
+        *colon = '\0';
+        const char *color = buf;
+        const char *str = colon + 1;
+        if (parse_hex_rgb(color, rgb) != 0) return -1;
+        float s = (float)atof(str);
+        if (s < 0.0f) s = 0.0f; if (s > 1.0f) s = 1.0f;
+        if (strength) *strength = s;
+        return 0;
+    } else {
+        if (parse_hex_rgb(buf, rgb) != 0) return -1;
+        if (strength) *strength = 1.0f; // default when only color provided
+        return 0;
+    }
 }
 
 // Helper: Check if path is in a sensitive directory
@@ -1503,6 +1592,7 @@ int main(int argc, char *argv[]) {
         {"vsync", required_argument, 0, 'v'},
         {"fps", required_argument, 0, 0},
         {"layer", required_argument, 0, 0},
+        {"tint", required_argument, 0, 0},
         {"config", required_argument, 0, 0},
         {"debug", no_argument, 0, 0},
         {"version", no_argument, 0, 0},
@@ -1621,6 +1711,10 @@ int main(int argc, char *argv[]) {
                         }
                         layer->shift_multiplier = shift;
                         layer->opacity = opacity;
+                        layer->tint_color[0] = 1.0f;
+                        layer->tint_color[1] = 1.0f;
+                        layer->tint_color[2] = 1.0f;
+                        layer->tint_strength = 0.0f;
 
                         // Phase 3: Parse optional per-layer settings
                         layer->easing = config.easing;  // Default to global
@@ -1650,6 +1744,21 @@ int main(int argc, char *argv[]) {
                     if (parse_config_file(optarg) < 0) {
                         return 1;
                     }
+                } else if (strcmp(long_options[option_index].name, "tint") == 0) {
+                    if (!state.layers || state.layer_count <= 0) {
+                        fprintf(stderr, "Error: --tint must follow a --layer specification\n");
+                        return 1;
+                    }
+                    struct layer *last = &state.layers[state.layer_count - 1];
+                    float rgb[3]; float s = 0.0f;
+                    if (parse_tint_spec(optarg, rgb, &s) != 0) {
+                        fprintf(stderr, "Error: invalid tint spec '%s' (expected #RRGGBB[:strength] or 'none')\n", optarg);
+                        return 1;
+                    }
+                    last->tint_color[0] = rgb[0];
+                    last->tint_color[1] = rgb[1];
+                    last->tint_color[2] = rgb[2];
+                    last->tint_strength = s;
                 } else if (strcmp(long_options[option_index].name, "debug") == 0) {
                     config.debug = 1;
                 } else if (strcmp(long_options[option_index].name, "version") == 0) {
@@ -1691,11 +1800,16 @@ int main(int argc, char *argv[]) {
         if (config.multi_layer_mode) {
             printf("  Mode: Multi-layer (%d layers)\n", state.layer_count);
             for (int i = 0; i < state.layer_count; i++) {
-                printf("    Layer %d: %s (shift=%.2f, opacity=%.2f, blur=%.2f)\n",
-                       i, state.layers[i].image_path,
-                       state.layers[i].shift_multiplier,
-                       state.layers[i].opacity,
-                       state.layers[i].blur_amount);
+                struct layer *ly = &state.layers[i];
+                int r = (int)roundf(ly->tint_color[0] * 255.0f);
+                int g = (int)roundf(ly->tint_color[1] * 255.0f);
+                int b = (int)roundf(ly->tint_color[2] * 255.0f);
+                printf("    Layer %d: %s (shift=%.2f, opacity=%.2f, blur=%.2f, tint=#%02x%02x%02x:%.2f)\n",
+                       i, ly->image_path,
+                       ly->shift_multiplier,
+                       ly->opacity,
+                       ly->blur_amount,
+                       r, g, b, ly->tint_strength);
             }
         } else {
             printf("  Mode: Single image\n");
@@ -1942,4 +2056,3 @@ int main(int argc, char *argv[]) {
 
     return 0;
 }
-
