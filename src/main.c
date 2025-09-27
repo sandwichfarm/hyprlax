@@ -14,6 +14,7 @@
 #include <errno.h>
 #include "include/hyprlax.h"
 #include "include/hyprlax_internal.h"
+#include "include/config_legacy.h"
 
 /* Global context for signal handling */
 static hyprlax_context_t *g_ctx = NULL;
@@ -117,6 +118,114 @@ int main(int argc, char **argv) {
         }
     }
 
+    /* Early legacy config detection and conversion (before init) */
+    char **argv_effective = argv; int argc_effective = argc; int argv_modified = 0;
+    {
+        const char *config_arg = NULL; const char *config_val = NULL;
+        int yes = 0, do_continue = 0, do_convert = 0;
+        /* Env overrides for automation */
+        const char *assume_env = getenv("HYPRLAX_ASSUME_YES");
+        const char *nonint_env = getenv("HYPRLAX_NONINTERACTIVE");
+        if (assume_env && *assume_env && strcmp(assume_env, "0") != 0 && strcasecmp(assume_env, "false") != 0) yes = 1;
+        int force_noninteractive = (nonint_env && *nonint_env && strcmp(nonint_env, "0") != 0 && strcasecmp(nonint_env, "false") != 0);
+        for (int i = 1; i < argc; i++) {
+            const char *a = argv[i];
+            if (!strcmp(a, "--yes") || !strcmp(a, "-y")) yes = 1;
+            else if (!strcmp(a, "--continue")) do_continue = 1;
+            else if (!strcmp(a, "--convert-config")) do_convert = 1;
+            else if (!strcmp(a, "--non-interactive") || !strcmp(a, "--noninteractive") || !strcmp(a, "--batch")) { force_noninteractive = 1; setenv("HYPRLAX_NONINTERACTIVE", "1", 1); }
+            else if (!strcmp(a, "-c") || !strcmp(a, "--config")) {
+                config_arg = a;
+                if (i + 1 < argc) config_val = argv[i+1];
+            } else if (!strncmp(a, "--config=", 9)) {
+                config_arg = "--config";
+                config_val = a + 9;
+            }
+        }
+
+        char def_legacy[512] = {0}, def_toml[512] = {0};
+        legacy_paths_default(def_legacy, sizeof(def_legacy), def_toml, sizeof(def_toml));
+        int have_default_legacy = (def_legacy[0] && access(def_legacy, R_OK) == 0);
+
+        const char *legacy_src = NULL;
+        if (config_val) {
+            const char *ext = strrchr(config_val, '.');
+            if (ext && (strcmp(ext, ".conf") == 0 || strcmp(ext, ".CONF") == 0)) legacy_src = config_val;
+        } else if (have_default_legacy) {
+            legacy_src = def_legacy;
+        }
+
+        if (do_convert || legacy_src) {
+            /* Don't do interactive prompts in non-tty when not explicitly requested */
+            if (!do_convert && (force_noninteractive || !isatty(0)) && legacy_src) {
+                fprintf(stderr, "Found legacy config at %s. Convert with: hyprlax ctl convert-config %s %s --yes\n",
+                        legacy_src, legacy_src, def_toml);
+                return 3;
+            }
+
+            if (!legacy_src && do_convert) {
+                /* Try default path or fail clearly */
+                if (have_default_legacy) legacy_src = def_legacy;
+                else {
+                    fprintf(stderr, "No legacy config found. Usage: hyprlax ctl convert-config <legacy.conf> [dst.toml] [--yes]\n");
+                    return 2;
+                }
+            }
+
+            if (legacy_src) {
+                legacy_cfg_t lcfg; char err[256];
+                if (legacy_config_read(legacy_src, &lcfg, err, sizeof(err)) != 0) {
+                    fprintf(stderr, "Failed to read legacy config: %s\n", err[0]?err:"unknown error");
+                    return 2;
+                }
+                const char *dst = def_toml;
+                if (!yes && !force_noninteractive && isatty(0)) {
+                    fprintf(stderr, "Convert legacy config to TOML?\n  from: %s\n  to:   %s\nProceed? [y/N] ", legacy_src, dst);
+                    fflush(stderr);
+                    char line[16]; if (fgets(line, sizeof(line), stdin)) { if (line[0]=='y'||line[0]=='Y') yes=1; }
+                }
+                if (!yes && !do_convert) {
+                    fprintf(stderr, "Conversion aborted. To convert non-interactively: hyprlax ctl convert-config %s %s --yes\n", legacy_src, dst);
+                    legacy_config_free(&lcfg);
+                    return 3;
+                }
+                if (legacy_config_write_toml(&lcfg, dst, err, sizeof(err)) != 0) {
+                    fprintf(stderr, "Failed to write TOML: %s\n", err[0]?err:"unknown error");
+                    legacy_config_free(&lcfg);
+                    return 2;
+                }
+                legacy_config_free(&lcfg);
+                fprintf(stderr, "Converted to: %s\nRun: hyprlax --config %s\n", dst, dst);
+                if (!do_continue) return 0;
+                /* Build a cleaned argv without conversion flags and with --config dst */
+                char **alt = calloc((size_t)argc + 4, sizeof(char*));
+                if (!alt) return 0; /* fallback: just exit */
+                int na = 0; alt[na++] = argv[0];
+                int have_config = 0;
+                for (int i = 1; i < argc; i++) {
+                    const char *a = argv[i];
+                    if (!strcmp(a, "--convert-config") || !strcmp(a, "--continue") || !strcmp(a, "--yes") || !strcmp(a, "-y")) {
+                        continue;
+                    }
+                    if (!strcmp(a, "-c") || !strcmp(a, "--config")) {
+                        /* consume and replace value with dst */
+                        alt[na++] = "--config";
+                        if (i + 1 < argc) { i++; } /* skip original value */
+                        alt[na++] = (char*)dst; have_config = 1; continue;
+                    }
+                    if (!strncmp(a, "--config=", 9)) {
+                        alt[na++] = "--config"; alt[na++] = (char*)dst; have_config = 1; continue;
+                    }
+                    alt[na++] = argv[i];
+                }
+                if (!have_config) {
+                    alt[na++] = "--config"; alt[na++] = (char*)dst;
+                }
+                argv_effective = alt; argc_effective = na; argv_modified = 1;
+            }
+        }
+    }
+
     /* Create application context */
     if (startup_log) {
         fprintf(startup_log, "[MAIN] Creating application context\n");
@@ -152,13 +261,14 @@ int main(int argc, char **argv) {
         fprintf(startup_log, "[MAIN] Starting initialization\n");
         fflush(startup_log);
     }
-    int ret = hyprlax_init(ctx, argc, argv);
+    int ret = hyprlax_init(ctx, argc_effective, argv_effective);
     if (ret != 0) {
         if (startup_log) {
             fprintf(startup_log, "[MAIN] ERROR: Initialization failed with code %d\n", ret);
             fclose(startup_log);
         }
         hyprlax_destroy(ctx);
+        if (argv_modified) free(argv_effective);
         return 1;
     }
     if (startup_log) {
@@ -172,6 +282,7 @@ int main(int argc, char **argv) {
 
     /* Clean up */
     hyprlax_destroy(ctx);
+    if (argv_modified) free(argv_effective);
     g_ctx = NULL;
 
     return ret;

@@ -68,6 +68,10 @@ int platform_create(platform_t **out_platform, platform_type_t type) {
         case PLATFORM_WAYLAND:
             platform->ops = &platform_wayland_ops;
             platform->type = PLATFORM_WAYLAND;
+            platform->caps = P_CAP_LAYER_SHELL | P_CAP_MULTI_OUTPUT | P_CAP_EVENT_FD |
+                             P_CAP_WINDOW_SIZE_QUERY | P_CAP_SURFACE_COMMIT |
+                             P_CAP_GLOBAL_CURSOR | P_CAP_REALIZE_MONITORS |
+                             P_CAP_SET_CONTEXT;
             break;
 #endif
 
@@ -97,4 +101,19 @@ void platform_destroy(platform_t *platform) {
     }
 
     free(platform);
+}
+
+/* Name-based creation (keeps name mapping out of core) */
+int platform_create_by_name(platform_t **out_platform, const char *name) {
+    if (!name || strcmp(name, "auto") == 0) {
+        return platform_create(out_platform, PLATFORM_AUTO);
+    }
+    /* Map simple known names to types */
+#ifdef ENABLE_WAYLAND
+    if (strcasecmp(name, "wayland") == 0) {
+        return platform_create(out_platform, PLATFORM_WAYLAND);
+    }
+#endif
+    LOG_ERROR("Unknown platform backend: %s", name);
+    return HYPRLAX_ERROR_INVALID_ARGS;
 }

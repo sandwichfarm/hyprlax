@@ -156,6 +156,7 @@ int compositor_create(compositor_adapter_t **out_adapter, compositor_type_t type
         case COMPOSITOR_HYPRLAND:
             adapter->ops = &compositor_hyprland_ops;
             adapter->type = COMPOSITOR_HYPRLAND;
+            adapter->caps = C_CAP_GLOBAL_CURSOR | C_CAP_WS_GLOBAL_NUMERIC;
             break;
 #endif
 
@@ -163,6 +164,7 @@ int compositor_create(compositor_adapter_t **out_adapter, compositor_type_t type
         case COMPOSITOR_WAYFIRE:
             adapter->ops = &compositor_wayfire_ops;
             adapter->type = COMPOSITOR_WAYFIRE;
+            adapter->caps = C_CAP_WS_SET_BASED;
             break;
 #endif
 
@@ -170,6 +172,7 @@ int compositor_create(compositor_adapter_t **out_adapter, compositor_type_t type
         case COMPOSITOR_NIRI:
             adapter->ops = &compositor_niri_ops;
             adapter->type = COMPOSITOR_NIRI;
+            adapter->caps = C_CAP_WS_PER_OUTPUT_NUMERIC;
             break;
 #endif
 
@@ -177,6 +180,7 @@ int compositor_create(compositor_adapter_t **out_adapter, compositor_type_t type
         case COMPOSITOR_SWAY:
             adapter->ops = &compositor_sway_ops;
             adapter->type = COMPOSITOR_SWAY;
+            adapter->caps = C_CAP_WS_GLOBAL_NUMERIC;
             break;
 #endif
 
@@ -184,6 +188,7 @@ int compositor_create(compositor_adapter_t **out_adapter, compositor_type_t type
         case COMPOSITOR_RIVER:
             adapter->ops = &compositor_river_ops;
             adapter->type = COMPOSITOR_RIVER;
+            adapter->caps = C_CAP_WS_TAG_BASED;
             break;
 #endif
 
@@ -191,6 +196,7 @@ int compositor_create(compositor_adapter_t **out_adapter, compositor_type_t type
         case COMPOSITOR_GENERIC_WAYLAND:
             adapter->ops = &compositor_generic_wayland_ops;
             adapter->type = COMPOSITOR_GENERIC_WAYLAND;
+            adapter->caps = C_CAP_WS_GLOBAL_NUMERIC;
             break;
 #endif
 
@@ -223,4 +229,32 @@ void compositor_destroy(compositor_adapter_t *adapter) {
     }
 
     free(adapter);
+}
+
+/* Name-based creation: map names to types within compositor module */
+int compositor_create_by_name(compositor_adapter_t **out_adapter, const char *name) {
+    if (!name || strcmp(name, "auto") == 0) {
+        return compositor_create(out_adapter, COMPOSITOR_AUTO);
+    }
+#ifdef ENABLE_HYPRLAND
+    if (strcasecmp(name, "hyprland") == 0) return compositor_create(out_adapter, COMPOSITOR_HYPRLAND);
+#endif
+#ifdef ENABLE_SWAY
+    if (strcasecmp(name, "sway") == 0) return compositor_create(out_adapter, COMPOSITOR_SWAY);
+#endif
+#ifdef ENABLE_WAYFIRE
+    if (strcasecmp(name, "wayfire") == 0) return compositor_create(out_adapter, COMPOSITOR_WAYFIRE);
+#endif
+#ifdef ENABLE_NIRI
+    if (strcasecmp(name, "niri") == 0) return compositor_create(out_adapter, COMPOSITOR_NIRI);
+#endif
+#ifdef ENABLE_RIVER
+    if (strcasecmp(name, "river") == 0) return compositor_create(out_adapter, COMPOSITOR_RIVER);
+#endif
+#ifdef ENABLE_GENERIC_WAYLAND
+    if (strcasecmp(name, "generic") == 0 || strcasecmp(name, "generic-wayland") == 0 || strcasecmp(name, "wayland") == 0)
+        return compositor_create(out_adapter, COMPOSITOR_GENERIC_WAYLAND);
+#endif
+    LOG_ERROR("Unknown compositor backend: %s", name);
+    return HYPRLAX_ERROR_INVALID_ARGS;
 }

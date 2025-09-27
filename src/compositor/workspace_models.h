@@ -18,6 +18,7 @@
 /* Forward declarations */
 typedef struct monitor_instance monitor_instance_t;
 typedef struct hyprlax_context hyprlax_context_t;
+typedef struct compositor_adapter compositor_adapter_t;
 
 /* Workspace model types */
 typedef enum {
@@ -108,6 +109,9 @@ typedef struct workspace_policy {
 workspace_model_t workspace_detect_model(int compositor_type);
 bool workspace_detect_capabilities(int compositor_type,
                                   compositor_capabilities_t *caps);
+
+/* Capability-based detection (core-friendly: no type leakage) */
+workspace_model_t workspace_detect_model_for_adapter(const compositor_adapter_t *adapter);
 
 /* Context comparison and conversion */
 bool workspace_context_equal(const workspace_context_t *a,

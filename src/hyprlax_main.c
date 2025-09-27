@@ -219,32 +219,18 @@ static bool process_cursor_event(hyprlax_context_t *ctx) {
 
     double x = 0.0, y = 0.0;
     bool got_pos = false;
-    if (ctx->config.cursor_follow_global &&
-        ctx->compositor && ctx->compositor->ops && ctx->compositor->ops->send_command &&
-        ctx->compositor->type == COMPOSITOR_HYPRLAND) {
-        /* Only Hyprland exposes a global cursor IPC we use here. */
-        char resp[512] = {0};
-        int rc = ctx->compositor->ops->send_command("j/cursorpos", resp, sizeof(resp));
-        if (rc != HYPRLAX_SUCCESS || resp[0] == '\0') {
-            rc = ctx->compositor->ops->send_command("j/cursor", resp, sizeof(resp));
-        }
-        if (rc == HYPRLAX_SUCCESS && resp[0] != '\0') {
-            char *px = strstr(resp, "\"x\"");
-            char *py = strstr(resp, "\"y\"");
-            if (px && py) {
-                char *pcolon;
-                pcolon = strchr(px, ':'); if (pcolon) x = strtod(pcolon + 1, NULL);
-                pcolon = strchr(py, ':'); if (pcolon) y = strtod(pcolon + 1, NULL);
-                got_pos = true;
-                LOG_TRACE("Hyprland cursor IPC: x=%.1f, y=%.1f", x, y);
-            }
+    if (ctx->config.cursor_follow_global && ctx->compositor && ctx->compositor->ops && ctx->compositor->ops->get_cursor_position) {
+        double cx = 0.0, cy = 0.0;
+        if (ctx->compositor->ops->get_cursor_position(&cx, &cy) == HYPRLAX_SUCCESS) {
+            x = cx; y = cy; got_pos = true;
+            LOG_TRACE("Compositor cursor: x=%.1f, y=%.1f", x, y);
         }
     }
-    if (!got_pos && ctx->platform && ctx->platform->type == PLATFORM_WAYLAND) {
-        extern bool wayland_get_cursor_global(double *x, double *y);
-        if (wayland_get_cursor_global(&x, &y)) {
-            got_pos = true;
-            LOG_TRACE("Wayland pointer fallback: x=%.1f, y=%.1f", x, y);
+    if (!got_pos && ctx->platform && ctx->platform->ops && ctx->platform->ops->get_cursor_global) {
+        double px = 0.0, py = 0.0;
+        if (ctx->platform->ops->get_cursor_global(&px, &py)) {
+            x = px; y = py; got_pos = true;
+            LOG_TRACE("Platform pointer: x=%.1f, y=%.1f", x, y);
         }
     }
     if (!got_pos) return false;
@@ -377,8 +363,7 @@ static void process_workspace_event(hyprlax_context_t *ctx, const compositor_eve
         }
 
         if (target_monitor) {
-            workspace_model_t model = workspace_detect_model(
-                ctx->compositor ? ctx->compositor->type : COMPOSITOR_AUTO);
+            workspace_model_t model = workspace_detect_model_for_adapter(ctx->compositor);
             workspace_context_t new_context;
             new_context.model = model;
             if (model == WS_MODEL_PER_OUTPUT_NUMERIC) {
@@ -595,7 +580,7 @@ static int parse_config_file(hyprlax_context_t *ctx, const char *filename) {
     return 0;
 }
 
-/* Reload configuration (TOML or legacy) and re-apply layers */
+/* Reload configuration (TOML only) and re-apply layers */
 int hyprlax_reload_config(hyprlax_context_t *ctx) {
     if (!ctx) return HYPRLAX_ERROR_INVALID_ARGS;
     const char *path = ctx->config.config_path;
@@ -617,15 +602,14 @@ int hyprlax_reload_config(hyprlax_context_t *ctx) {
         uint32_t id = ctx->layers->id;
         hyprlax_remove_layer(ctx, id);
     }
-    /* TOML vs legacy */
+    /* TOML only */
     const char *ext = strrchr(path, '.');
     if (ext && strcasecmp(ext, ".toml") == 0) {
         int rc = config_apply_toml_to_context(ctx, path);
         return (rc == HYPRLAX_SUCCESS) ? HYPRLAX_SUCCESS : HYPRLAX_ERROR_INVALID_ARGS;
-    } else {
-        int rc = parse_config_file(ctx, path);
-        return (rc == 0) ? HYPRLAX_SUCCESS : HYPRLAX_ERROR_INVALID_ARGS;
     }
+    LOG_ERROR("Legacy config detected (%s). Please convert: hyprlax ctl convert-config %s ~/.config/hyprlax/hyprlax.toml --yes", path, path);
+    return HYPRLAX_ERROR_INVALID_ARGS;
 }
 
 /* Parse command-line arguments */
@@ -675,6 +659,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
         {"parallax", required_argument, 0, 1005},
         {"mouse-weight", required_argument, 0, 1006},
         {"workspace-weight", required_argument, 0, 1007},
+        {"non-interactive", no_argument, 0, 1030},
         {0, 0, 0, 0}
     };
 
@@ -738,27 +723,21 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 ctx->config.default_easing = easing_from_string(optarg);
                 break;
 
-            case 'c':
+            case 'c': {
                 ctx->config.config_path = strdup(optarg);
                 if (getenv("HYPRLAX_INIT_TRACE")) fprintf(stderr, "[INIT_TRACE] parse_arguments: --config %s\n", optarg);
-                /* If TOML, use TOML parser; otherwise legacy parser */
                 const char *ext = strrchr(optarg, '.');
-                if (ext && (strcmp(ext, ".toml") == 0 || strcmp(ext, ".TOML") == 0)) {
-                    if (getenv("HYPRLAX_INIT_TRACE")) fprintf(stderr, "[INIT_TRACE] parse_arguments: loading TOML\n");
-                    if (config_apply_toml_to_context(ctx, ctx->config.config_path) != HYPRLAX_SUCCESS) {
-                        LOG_ERROR("Failed to load TOML config: %s", optarg);
-                        return -1;
-                    }
-                    if (getenv("HYPRLAX_INIT_TRACE")) fprintf(stderr, "[INIT_TRACE] parse_arguments: TOML loaded\n");
-                } else {
-                    if (getenv("HYPRLAX_INIT_TRACE")) fprintf(stderr, "[INIT_TRACE] parse_arguments: loading legacy config\n");
-                    if (parse_config_file(ctx, ctx->config.config_path) < 0) {
-                        LOG_ERROR("Failed to load config file: %s", optarg);
-                        return -1;
-                    }
-                    if (getenv("HYPRLAX_INIT_TRACE")) fprintf(stderr, "[INIT_TRACE] parse_arguments: legacy config loaded\n");
+                if (!(ext && (strcasecmp(ext, ".toml") == 0))) {
+                    LOG_ERROR("Legacy config detected: %s. Convert with: hyprlax ctl convert-config %s ~/.config/hyprlax/hyprlax.toml --yes", optarg, optarg);
+                    return -1;
                 }
-                break;
+                if (getenv("HYPRLAX_INIT_TRACE")) fprintf(stderr, "[INIT_TRACE] parse_arguments: loading TOML\n");
+                if (config_apply_toml_to_context(ctx, ctx->config.config_path) != HYPRLAX_SUCCESS) {
+                    LOG_ERROR("Failed to load TOML config: %s", optarg);
+                    return -1;
+                }
+                if (getenv("HYPRLAX_INIT_TRACE")) fprintf(stderr, "[INIT_TRACE] parse_arguments: TOML loaded\n");
+                break; }
 
             case 'D':
                 ctx->config.debug = true;
@@ -897,6 +876,8 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 LOG_DEBUG("Excluding monitor: %s", optarg);
                 break;
 
+            case 1030: /* --non-interactive: handled in early main, ignore here */
+                break;
             default:
                 return -1;
         }
@@ -971,14 +952,8 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
 int hyprlax_init_platform(hyprlax_context_t *ctx) {
     if (!ctx) return HYPRLAX_ERROR_INVALID_ARGS;
 
-    /* Determine platform type */
-    platform_type_t platform_type = PLATFORM_AUTO;
-    if (strcmp(ctx->backends.platform_backend, "wayland") == 0) {
-        platform_type = PLATFORM_WAYLAND;
-    }
-
-    /* Create platform instance */
-    int ret = platform_create(&ctx->platform, platform_type);
+    /* Create platform instance via name mapping inside platform module */
+    int ret = platform_create_by_name(&ctx->platform, ctx->backends.platform_backend);
     if (ret != HYPRLAX_SUCCESS) {
         LOG_ERROR("Failed to create platform adapter");
         return ret;
@@ -1003,8 +978,8 @@ int hyprlax_init_platform(hyprlax_context_t *ctx) {
     }
 
     /* Share context with platform for monitor detection */
-    if (ctx->platform->type == PLATFORM_WAYLAND) {
-        wayland_set_context(ctx);
+    if (ctx->platform->ops && ctx->platform->ops->set_context) {
+        ctx->platform->ops->set_context(ctx);
     }
 
     LOG_DEBUG("Platform: %s", ctx->platform->ops->get_name());
@@ -1016,18 +991,8 @@ int hyprlax_init_platform(hyprlax_context_t *ctx) {
 int hyprlax_init_compositor(hyprlax_context_t *ctx) {
     if (!ctx) return HYPRLAX_ERROR_INVALID_ARGS;
 
-    /* Determine compositor type */
-    compositor_type_t compositor_type = COMPOSITOR_AUTO;
-    if (strcmp(ctx->backends.compositor_backend, "hyprland") == 0) {
-        compositor_type = COMPOSITOR_HYPRLAND;
-    } else if (strcmp(ctx->backends.compositor_backend, "sway") == 0) {
-        compositor_type = COMPOSITOR_SWAY;
-    } else if (strcmp(ctx->backends.compositor_backend, "generic") == 0) {
-        compositor_type = COMPOSITOR_GENERIC_WAYLAND;
-    }
-
-    /* Create compositor adapter */
-    int ret = compositor_create(&ctx->compositor, compositor_type);
+    /* Create compositor adapter via name mapping inside compositor module */
+    int ret = compositor_create_by_name(&ctx->compositor, ctx->backends.compositor_backend);
     if (ret != HYPRLAX_SUCCESS) {
         LOG_ERROR("Failed to create compositor adapter");
         return ret;
@@ -1080,10 +1045,9 @@ int hyprlax_init_renderer(hyprlax_context_t *ctx) {
     int actual_width = 1920;   /* Default fallback */
     int actual_height = 1080;
 
-    if (ctx->platform->type == PLATFORM_WAYLAND) {
-        extern void wayland_get_window_size(int *width, int *height);
-        wayland_get_window_size(&actual_width, &actual_height);
-        LOG_DEBUG("[INIT] Got window size from Wayland: %dx%d", actual_width, actual_height);
+    if (ctx->platform && ctx->platform->ops && ctx->platform->ops->get_window_size) {
+        ctx->platform->ops->get_window_size(&actual_width, &actual_height);
+        LOG_DEBUG("[INIT] Window size: %dx%d", actual_width, actual_height);
     }
 
     /* Initialize renderer with native handles */
@@ -1341,8 +1305,8 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
 
     /* Cursor follow note for compositors without global cursor IPC */
     if (ctx->config.debug && ctx->config.cursor_follow_global && ctx->compositor) {
-        if (ctx->compositor->type == COMPOSITOR_NIRI || ctx->compositor->type == COMPOSITOR_RIVER) {
-            LOG_INFO("Cursor follow: using Wayland pointer fallback (no global cursor IPC)");
+        if (!(ctx->compositor->ops && ctx->compositor->ops->get_cursor_position)) {
+            LOG_INFO("Cursor follow: no compositor provider; using platform pointer if available");
         }
     }
 
@@ -1384,10 +1348,9 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
 
     /* 6. Create EGL surfaces for all monitors now that renderer exists */
     LOG_INFO("[INIT] Step 6: Creating EGL surfaces for monitors");
-    /* Ensure monitors are realized if Wayland outputs are already known */
-    if (ctx->platform && ctx->platform->type == PLATFORM_WAYLAND) {
-        extern void wayland_realize_monitors_now(void);
-        wayland_realize_monitors_now();
+    /* Ensure monitors are realized if outputs are already known */
+    if (ctx->platform && ctx->platform->ops && ctx->platform->ops->realize_monitors) {
+        ctx->platform->ops->realize_monitors();
     }
     if (ctx->monitors) {
         monitor_instance_t *monitor = ctx->monitors->head;
@@ -1939,10 +1902,8 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
     }
 
     /* Commit the Wayland surface to make the frame visible */
-    if (monitor->wl_surface) {
-        /* Need platform to commit the surface */
-        extern void wayland_commit_monitor_surface(monitor_instance_t *monitor);
-        wayland_commit_monitor_surface(monitor);
+    if (monitor->wl_surface && ctx->platform && ctx->platform->ops && ctx->platform->ops->commit_monitor_surface) {
+        ctx->platform->ops->commit_monitor_surface(monitor);
         /* Commit debug - commented out for performance
         LOG_TRACE("Committed surface for monitor %s", monitor->name); */
     }

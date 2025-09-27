@@ -107,6 +107,24 @@ static bool detect_split_monitor_plugin(void) {
     return false;
 }
 
+/* Optional: get global cursor position via Hyprland IPC */
+static int hyprland_get_cursor_position(double *x, double *y) {
+    if (!x || !y) return HYPRLAX_ERROR_INVALID_ARGS;
+    char resp[512] = {0};
+    if (hyprland_send_command("j/cursorpos", resp, sizeof(resp)) != HYPRLAX_SUCCESS || resp[0] == '\0') {
+        if (hyprland_send_command("j/cursor", resp, sizeof(resp)) != HYPRLAX_SUCCESS || resp[0] == '\0') {
+            return HYPRLAX_ERROR_NO_DATA;
+        }
+    }
+    char *px = strstr(resp, "\"x\"");
+    char *py = strstr(resp, "\"y\"");
+    if (!px || !py) return HYPRLAX_ERROR_NO_DATA;
+    char *pcolon;
+    pcolon = strchr(px, ':'); if (pcolon) *x = strtod(pcolon + 1, NULL); else return HYPRLAX_ERROR_NO_DATA;
+    pcolon = strchr(py, ':'); if (pcolon) *y = strtod(pcolon + 1, NULL); else return HYPRLAX_ERROR_NO_DATA;
+    return HYPRLAX_SUCCESS;
+}
+
 /* Get Hyprland socket paths */
 static bool get_hyprland_socket_paths(char *cmd_path, char *event_path, size_t size) {
     const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
@@ -596,6 +614,7 @@ const compositor_ops_t compositor_hyprland_ops = {
     .poll_events = hyprland_poll_events,
     .send_command = hyprland_send_command,
     .get_event_fd = hyprland_get_event_fd,
+    .get_cursor_position = hyprland_get_cursor_position,
     .supports_blur = hyprland_supports_blur,
     .supports_transparency = hyprland_supports_transparency,
     .supports_animations = hyprland_supports_animations,

@@ -39,6 +39,18 @@ workspace_model_t workspace_detect_model(int compositor_type) {
     }
 }
 
+workspace_model_t workspace_detect_model_for_adapter(const compositor_adapter_t *adapter) {
+    if (!adapter) return WS_MODEL_GLOBAL_NUMERIC;
+    /* Prefer explicit capability bits if set */
+    uint64_t c = adapter->caps;
+    if (c & C_CAP_WS_TAG_BASED) return WS_MODEL_TAG_BASED;
+    if (c & C_CAP_WS_SET_BASED) return WS_MODEL_SET_BASED;
+    if (c & C_CAP_WS_PER_OUTPUT_NUMERIC) return WS_MODEL_PER_OUTPUT_NUMERIC;
+    if (c & C_CAP_WS_GLOBAL_NUMERIC) return WS_MODEL_GLOBAL_NUMERIC;
+    /* Fallback to type-based detection (within compositor module only) */
+    return workspace_detect_model(adapter->type);
+}
+
 /* Detect compositor capabilities */
 bool workspace_detect_capabilities(int compositor_type,
                                   compositor_capabilities_t *caps) {

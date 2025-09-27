@@ -23,6 +23,15 @@ typedef enum {
     COMPOSITOR_AUTO,             /* Auto-detect */
 } compositor_type_t;
 
+/* Compositor capability flags */
+typedef enum {
+    C_CAP_GLOBAL_CURSOR            = 1 << 0,  /* Provides global cursor position */
+    C_CAP_WS_GLOBAL_NUMERIC        = 1 << 1,  /* Global numeric workspaces */
+    C_CAP_WS_PER_OUTPUT_NUMERIC    = 1 << 2,  /* Per-output numeric workspaces */
+    C_CAP_WS_TAG_BASED             = 1 << 3,  /* Tag-based workspace model */
+    C_CAP_WS_SET_BASED             = 1 << 4,  /* Wayfire workspace sets */
+} compositor_caps_t;
+
 /* Layer positions for layer-shell */
 typedef enum {
     LAYER_BACKGROUND,
@@ -137,12 +146,15 @@ typedef struct compositor_ops {
     bool (*supports_animations)(void);
     int (*set_blur)(float amount);
     int (*set_wallpaper_offset)(float x, float y);
+    /* Optional global cursor provider */
+    int (*get_cursor_position)(double *x, double *y);
 } compositor_ops_t;
 
 /* Compositor adapter instance */
 typedef struct compositor_adapter {
     const compositor_ops_t *ops;
     compositor_type_t type;
+    uint64_t caps; /* compositor_caps_t bits */
     void *private_data;
     bool initialized;
     bool connected;
@@ -151,6 +163,8 @@ typedef struct compositor_adapter {
 /* Global compositor management */
 int compositor_create(compositor_adapter_t **adapter, compositor_type_t type);
 void compositor_destroy(compositor_adapter_t *adapter);
+/* Name-based creation (keeps name mapping inside compositor module) */
+int compositor_create_by_name(compositor_adapter_t **adapter, const char *name);
 
 /* Utility function for socket connection with retry (for startup readiness) */
 int compositor_connect_socket_with_retry(const char *socket_path,

@@ -15,6 +15,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include "ipc.h"
+#include "include/config_legacy.h"
 
 /* Note: socket operations are blocking for simplicity; timeout not used */
 
@@ -244,6 +245,8 @@ static void print_ctl_help(const char *prog) {
     printf("      Show daemon status and statistics\n\n");
     printf("  reload\n");
     printf("      Reload configuration file\n\n");
+    printf("  convert-config <legacy.conf> [dst.toml] [--yes]\n");
+    printf("      Convert legacy config to TOML. Doesn't require daemon.\n\n");
 
     printf("Runtime Settings Commands:\n");
     printf("  set <property> <value>\n");
@@ -487,6 +490,58 @@ int hyprlax_ctl_main(int argc, char **argv) {
             else print_ctl_help("hyprlax");
             return 0;
         }
+    }
+
+    /* Local commands that do not require daemon */
+    if (strcmp(cleanv[0], "convert-config") == 0 || strcmp(cleanv[0], "convert") == 0) {
+        /* Usage: convert-config SRC [DST] [--yes] */
+        const char *src = NULL; const char *dst = NULL; int yes = 0;
+        const char *assume_env = getenv("HYPRLAX_ASSUME_YES");
+        if (assume_env && *assume_env && strcmp(assume_env, "0") != 0 && strcasecmp(assume_env, "false") != 0) yes = 1;
+        for (int i = 1; i < cleanc; i++) {
+            if (!strcmp(cleanv[i], "--yes") || !strcmp(cleanv[i], "-y") ||
+                !strcmp(cleanv[i], "--non-interactive") || !strcmp(cleanv[i], "--noninteractive") || !strcmp(cleanv[i], "--batch")) { yes = 1; continue; }
+            if (!src) { src = cleanv[i]; continue; }
+            if (!dst) { dst = cleanv[i]; continue; }
+        }
+        if (!src) {
+            fprintf(stderr, "Usage: hyprlax ctl convert-config <legacy.conf> [dst.toml] [--yes]\n");
+            return 2;
+        }
+        /* pick default dst if missing */
+        char def_legacy[512] = {0}, def_toml[512] = {0};
+        legacy_paths_default(def_legacy, sizeof(def_legacy), def_toml, sizeof(def_toml));
+        if (!dst) dst = def_toml;
+        legacy_cfg_t cfg; char err[256];
+        if (legacy_config_read(src, &cfg, err, sizeof(err)) != 0) {
+            fprintf(stderr, "Failed to read legacy config: %s\n", err[0]?err:"unknown error");
+            return 2;
+        }
+        /* If dst exists and not --yes, prompt */
+        int overwrite = yes;
+        if (!overwrite) {
+            if (access(dst, F_OK) == 0 && isatty(0)) {
+                fprintf(stderr, "Destination %s exists. Overwrite? [y/N] ", dst);
+                fflush(stderr);
+                char line[16]; if (fgets(line, sizeof(line), stdin)) {
+                    if (line[0] == 'y' || line[0] == 'Y') overwrite = 1;
+                }
+            } else if (access(dst, F_OK) == 0) {
+                fprintf(stderr, "Destination exists: %s (use --yes to overwrite)\n", dst);
+                legacy_config_free(&cfg);
+                return 3;
+            }
+        }
+        (void)overwrite; /* we always overwrite in write_toml as we opened with "w" */
+        if (legacy_config_write_toml(&cfg, dst, err, sizeof(err)) != 0) {
+            fprintf(stderr, "Failed to write TOML: %s\n", err[0]?err:"unknown error");
+            legacy_config_free(&cfg);
+            return 2;
+        }
+        legacy_config_free(&cfg);
+        printf("Converted to: %s\n", dst);
+        printf("Run: hyprlax --config %s\n", dst);
+        return 0;
     }
 
     /* Connect to daemon */

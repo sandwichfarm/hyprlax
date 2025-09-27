@@ -152,7 +152,7 @@ void wayland_set_context(hyprlax_context_t *ctx) {
                     monitor_apply_config(mon, config);
 
                     if (g_wayland_data->ctx->compositor) {
-                        workspace_model_t model = workspace_detect_model(g_wayland_data->ctx->compositor->type);
+                        workspace_model_t model = workspace_detect_model_for_adapter(g_wayland_data->ctx->compositor);
                         mon->current_context.model = model;
                         mon->current_context.data.workspace_id = COMPOSITOR_GET_WORKSPACE(g_wayland_data->ctx->compositor);
                         mon->previous_context = mon->current_context;
@@ -815,7 +815,7 @@ void wayland_realize_monitors_now(void) {
                     config_t *config = monitor_resolve_config(mon, &wl_data->ctx->config);
                     monitor_apply_config(mon, config);
                     if (wl_data->ctx->compositor) {
-                        workspace_model_t model = workspace_detect_model(wl_data->ctx->compositor->type);
+                        workspace_model_t model = workspace_detect_model_for_adapter(wl_data->ctx->compositor);
                         mon->current_context.model = model;
                         mon->current_context.data.workspace_id = COMPOSITOR_GET_WORKSPACE(wl_data->ctx->compositor);
                         mon->previous_context = mon->current_context;
@@ -1144,6 +1144,11 @@ const platform_ops_t platform_wayland_ops = {
     .get_event_fd = wayland_get_event_fd,
     .get_native_display = wayland_get_native_display,
     .get_native_window = wayland_get_native_window,
+    .get_window_size = wayland_get_window_size,
+    .commit_monitor_surface = wayland_commit_monitor_surface,
+    .get_cursor_global = wayland_get_cursor_global,
+    .realize_monitors = wayland_realize_monitors_now,
+    .set_context = wayland_set_context,
     .supports_transparency = wayland_supports_transparency,
     .supports_blur = wayland_supports_blur,
     .get_name = wayland_get_name,

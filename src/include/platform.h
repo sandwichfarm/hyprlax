@@ -11,12 +11,25 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "hyprlax_internal.h"
+#include "../core/monitor.h"
 
 /* Platform types */
 typedef enum {
     PLATFORM_WAYLAND,
     PLATFORM_AUTO,  /* Auto-detect */
 } platform_type_t;
+
+/* Platform capability flags */
+typedef enum {
+    P_CAP_LAYER_SHELL        = 1ull << 0,
+    P_CAP_MULTI_OUTPUT       = 1ull << 1,
+    P_CAP_EVENT_FD           = 1ull << 2,
+    P_CAP_WINDOW_SIZE_QUERY  = 1ull << 3,
+    P_CAP_SURFACE_COMMIT     = 1ull << 4,
+    P_CAP_GLOBAL_CURSOR      = 1ull << 5,
+    P_CAP_REALIZE_MONITORS   = 1ull << 6,
+    P_CAP_SET_CONTEXT        = 1ull << 7,
+} platform_caps_t;
 
 /* Platform events */
 typedef enum {
@@ -83,6 +96,12 @@ typedef struct platform_ops {
     /* Native handles for renderer */
     void* (*get_native_display)(void);
     void* (*get_native_window)(void);
+    /* Optional helpers */
+    void (*get_window_size)(int *width, int *height);
+    void (*commit_monitor_surface)(monitor_instance_t *monitor);
+    bool (*get_cursor_global)(double *x, double *y);
+    void (*realize_monitors)(void);
+    void (*set_context)(struct hyprlax_context *ctx);
 
     /* Platform-specific features */
     bool (*supports_transparency)(void);
@@ -97,6 +116,7 @@ typedef struct platform_ops {
 typedef struct platform {
     const platform_ops_t *ops;
     platform_type_t type;
+    uint64_t caps; /* platform_caps_t bits */
     void *private_data;
     bool initialized;
     bool connected;
@@ -105,6 +125,8 @@ typedef struct platform {
 /* Global platform management */
 int platform_create(platform_t **platform, platform_type_t type);
 void platform_destroy(platform_t *platform);
+/* Name-based creation (keeps name mapping inside platform module) */
+int platform_create_by_name(platform_t **platform, const char *name);
 
 /* Auto-detect best platform */
 platform_type_t platform_detect(void);
