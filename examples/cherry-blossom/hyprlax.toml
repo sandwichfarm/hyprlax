@@ -1,0 +1,49 @@
+[global]
+fps = 144
+debug = false
+duration = 3.0
+shift = 100
+vsync = false
+easing = "expo"
+
+[global.parallax]
+mode = "cursor"
+
+[global.parallax.sources]
+workspace.weight = 1.0
+cursor.weight = 1.0
+
+[global.parallax.invert.cursor]
+x = false
+y = true
+
+[global.parallax.max_offset_px]
+x = 220
+y = 80
+
+[global.input.cursor]
+follow_global = true
+normalize_to = "monitor"
+sensitivity_x = 0.5
+sensitivity_y = 0.5
+deadzone_px = 3
+ema_alpha = 0.25
+animation_duration = 1.0
+easing = "expo" 
+
+[[global.layers]]
+path = "bg.jpg"
+shift_multiplier = { x = 0.50, y = 0.25 }
+opacity = 0.9
+blur = 2.0
+fit = "cover"
+align = { x = 0.1, y = 0.1 }
+margin_px = { x = 100, y = 100 }
+
+[[global.layers]]
+path = "fg.png"
+fit = "contain"
+align = { x = 1.2, y = 0.5 }
+shift_multiplier = { x = 1.0, y = 1.0 }
+opacity = 1.0
+blur = 0.0

@@ -5,6 +5,9 @@ hyprlax-ctl
 *.a
 *.so
 
+# Version file (generated at build time)
+VERSION
+
 # Generated protocol files
 protocols/*.c
 protocols/*.h
@@ -17,9 +20,14 @@ protocols/*.h
 .idea/
 
 # Debug files
-core
+# Core dumps but not src/core directory
+/core
 vgcore.*
 *.log
+
+# Valgrind output files
+*.valgrind.log.*
+*.valgrind.log.core.*
 
 # Test files
 tests/test_hyprlax
@@ -31,3 +39,6 @@ test_config/
 *.tar.gz
 *.zip
 dist/
+
+#Python (examples)
+**/__pycache__

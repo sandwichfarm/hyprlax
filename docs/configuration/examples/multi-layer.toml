@@ -1,0 +1,76 @@
+# Multi-layer depth parallax
+# Creates a rich depth effect with multiple layers
+
+[global]
+fps = 144
+debug = false
+duration = 1.2
+shift = 250
+vsync = true
+easing = "expo"
+
+# Optional: Add subtle cursor influence
+[global.parallax]
+mode = "hybrid"
+
+[global.parallax.sources]
+workspace.weight = 0.8    # Primarily workspace-driven
+cursor.weight = 0.2       # Subtle cursor influence
+
+[global.input.cursor]
+sensitivity_x = 0.5
+sensitivity_y = 0.3
+ema_alpha = 0.35          # Heavy smoothing
+
+# Layer 1: Far background (sky/stars)
+[[global.layers]]
+path = "~/walls/layer1_sky.jpg"
+shift_multiplier = 0.1    # Almost static
+opacity = 1.0
+blur = 4.0                # Heavy blur for distance
+fit = "cover"
+scale = 1.3               # Overscale to prevent edges
+
+# Layer 2: Distant mountains
+[[global.layers]]
+path = "~/walls/layer2_mountains.png"
+shift_multiplier = 0.3
+opacity = 0.95
+blur = 2.0
+fit = "cover"
+scale = 1.2
+
+# Layer 3: Mid-ground hills
+[[global.layers]]
+path = "~/walls/layer3_hills.png"
+shift_multiplier = 0.5
+opacity = 0.95
+blur = 1.0
+fit = "cover"
+scale = 1.15
+
+# Layer 4: Near trees
+[[global.layers]]
+path = "~/walls/layer4_trees.png"
+shift_multiplier = 0.8
+opacity = 1.0
+blur = 0.3
+fit = "cover"
+scale = 1.1
+
+# Layer 5: Foreground elements
+[[global.layers]]
+path = "~/walls/layer5_foreground.png"
+shift_multiplier = 1.2    # Faster than normal
+opacity = 1.0
+blur = 0.0                # Sharp foreground
+fit = "contain"
+align = { x = 0.5, y = 1.0 }  # Bottom-aligned
+
+# Layer 6: Overlay effects (optional)
+# [[global.layers]]
+# path = "~/walls/layer6_particles.png"
+# shift_multiplier = { x = 1.5, y = 0.5 }  # Different X/Y speeds
+# opacity = 0.3
+# blur = 0.0
+# fit = "cover"

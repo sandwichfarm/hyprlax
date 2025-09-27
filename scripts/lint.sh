@@ -85,9 +85,10 @@ if command -v cppcheck &> /dev/null; then
                                --suppress=missingIncludeSystem \
                                --suppress=unusedFunction \
                                --suppress=constVariablePointer \
+                               --suppress=normalCheckLevelMaxBranches \
                                --inline-suppr \
                                --quiet \
-                               src/ipc.c src/hyprlax-ctl.c 2>&1 || true)
+                               src/ipc.c src/hyprlax_ctl.c 2>&1 || true)
     
     if [ -z "$CPPCHECK_OUTPUT" ]; then
         echo -e "${GREEN}OK${NC}"

@@ -1,24 +1,42 @@
 # Hyprlax Documentation
 
-Welcome to the hyprlax documentation! This directory contains comprehensive guides for using and developing hyprlax.
+Welcome to hyprlax - a modular, multi-compositor wallpaper engine with advanced parallax effects.
 
-## 📚 User Guides
+## Quick Navigation
 
-### Getting Started
-- **[Installation Guide](installation.md)** - How to install hyprlax on your system
-- **[Configuration Guide](configuration.md)** - Setting up hyprlax with Hyprland
+### 🚀 [Getting Started](getting-started/)
+New to hyprlax? Start here!
+- [Installation](getting-started/installation.md) - Install hyprlax on your system
+- [Quick Start](getting-started/quick-start.md) - Get up and running in minutes
+- [Compatibility](getting-started/compatibility.md) - Supported compositors and features
 
-### Features
-- **[Multi-Layer Parallax](multi-layer.md)** - Create stunning depth effects with multiple layers
-- **[Animation Guide](animation.md)** - Master easing functions and animation timing
-- **[Examples](examples.md)** - Ready-to-use configurations for various themes
+### ⚙️ [Configuration](configuration/)
+Learn how to configure hyprlax
+- [Configuration Overview](configuration/README.md) - Configuration options and formats
+- [TOML Reference](configuration/toml-reference.md) - Complete TOML configuration guide
+- [Examples](configuration/examples/) - Ready-to-use configurations
 
-### Help
-- **[Troubleshooting](troubleshooting.md)** - Solutions to common issues
+### 📖 [Reference](reference/)
+Quick lookup for commands and options
+- [CLI Reference](reference/cli.md) - Command-line options
+- [IPC Commands](reference/ipc-commands.md) - Runtime control commands
+- [Easing Functions](reference/easing-functions.md) - Animation easing types
 
-## 🔧 Developer Documentation
+### 📚 [Guides](guides/)
+In-depth guides for specific features
+- [Multi-Layer Parallax](guides/multi-layer.md) - Create depth effects
+- [Animation](guides/animation.md) - Master animation timing
+- [Cursor Tracking](guides/cursor-tracking.md) - Mouse-driven parallax
+- [Performance](guides/performance.md) - Optimization tips
+- [Troubleshooting](guides/troubleshooting.md) - Solve common issues
+- [IPC Overview](guides/ipc-overview.md) - Runtime control and workflows
 
-- **[Development Guide](development.md)** - Building, modifying, and contributing to hyprlax
+### 🔧 [Development](development/)
+For contributors and developers
+- [Building](development/building.md) - Build from source
+- [Architecture](development/architecture.md) - System design
+- [Contributing](development/contributing.md) - How to contribute
+- [Testing](development/testing.md) - Run tests
 
 ## Quick Links
 
@@ -26,28 +44,8 @@ Welcome to the hyprlax documentation! This directory contains comprehensive guid
 - [Issue Tracker](https://github.com/sandwichfarm/hyprlax/issues)
 - [Releases](https://github.com/sandwichfarm/hyprlax/releases)
 
-## Example Configurations
+## Getting Help
 
-Looking for inspiration? Check out our [examples](examples.md) for:
-- Cityscape parallax
-- Forest scenes
-- Space themes
-- Underwater effects
-- Seasonal wallpapers
-- Time-of-day transitions
-
-## Support
-
-If you encounter issues not covered in the documentation:
-1. Check the [troubleshooting guide](troubleshooting.md)
+1. Check [Troubleshooting Guide](guides/troubleshooting.md)
 2. Search [existing issues](https://github.com/sandwichfarm/hyprlax/issues)
-3. Open a new issue with debug information
-
-## Contributing
-
-Interested in contributing? See our [development guide](development.md) for:
-- Building from source
-- Project architecture
-- Adding features
-- Code style guidelines
-- Pull request process
+3. Open a new issue with debug information (`hyprlax --debug`)
