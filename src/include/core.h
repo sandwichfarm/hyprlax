@@ -65,6 +65,8 @@ typedef struct parallax_layer {
     bool invert_workspace_y;
     bool invert_cursor_x;
     bool invert_cursor_y;
+    bool invert_window_x;
+    bool invert_window_y;
     bool hidden;                /* dedicated visibility flag */
 
     /* Animation state */
@@ -149,6 +151,8 @@ typedef struct {
     bool invert_workspace_y;
     bool invert_cursor_x;
     bool invert_cursor_y;
+    bool invert_window_x;
+    bool invert_window_y;
     float parallax_max_offset_x;      /* pixel clamp after blend */
     float parallax_max_offset_y;
 

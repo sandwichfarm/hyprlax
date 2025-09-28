@@ -231,6 +231,7 @@ int config_apply_toml_to_context(hyprlax_context_t *ctx, const char *path)
     /* Load globals into ctx->config first */
     int rc = config_load_toml(&ctx->config, path);
     if (rc != HYPRLAX_SUCCESS) return rc;
+    input_manager_apply_config(&ctx->input, &ctx->config);
     if (getenv("HYPRLAX_INIT_TRACE")) fprintf(stderr, "[INIT_TRACE] TOML: globals loaded\n");
 
     /* Re-open to parse layers (keep separation of concerns above) */

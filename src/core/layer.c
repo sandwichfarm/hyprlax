@@ -35,6 +35,8 @@ parallax_layer_t* layer_create(const char *image_path, float shift_multiplier, f
     layer->invert_workspace_y = false;
     layer->invert_cursor_x = false;
     layer->invert_cursor_y = false;
+    layer->invert_window_x = false;
+    layer->invert_window_y = false;
     layer->hidden = false;
 
     layer->current_x = 0.0f;

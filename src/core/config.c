@@ -42,6 +42,8 @@ void config_set_defaults(config_t *cfg) {
     cfg->invert_workspace_y = false;
     cfg->invert_cursor_x = false;
     cfg->invert_cursor_y = false;
+    cfg->invert_window_x = false;
+    cfg->invert_window_y = false;
     cfg->parallax_max_offset_x = 100000.0f; /* effectively no clamp by default */
     cfg->parallax_max_offset_y = 100000.0f;
     /* Render overflow defaults */

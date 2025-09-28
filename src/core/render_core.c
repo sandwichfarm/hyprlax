@@ -50,7 +50,7 @@ GLuint load_texture(const char *path, int *width, int *height) {
     return texture;
 }
 
-static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *monitor) {
+static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *monitor, double now_time) {
     if (!ctx || !ctx->renderer || !monitor) {
         LOG_TRACE("Skipping render: ctx=%p, renderer=%p, monitor=%p", ctx, ctx ? ctx->renderer : NULL, monitor);
         return;
@@ -86,6 +86,8 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
         }
     }
 
+    input_manager_tick(&ctx->input, monitor, now_time, NULL, NULL);
+
     parallax_layer_t *layer = ctx->layers;
     while (layer) {
         if (layer->hidden || layer->texture_id == 0) { layer = layer->next; continue; }
@@ -95,32 +97,35 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
         float workspace_y = (layer->offset_y + layer->current_y);
 
         /* Apply optional workspace inversion (global xor layer) */
-        if (ctx->config.invert_workspace_x ^ layer->invert_workspace_x) workspace_x = -workspace_x;
-        if (ctx->config.invert_workspace_y ^ layer->invert_workspace_y) workspace_y = -workspace_y;
+        bool workspace_invert_x = ctx->config.invert_workspace_x ^ layer->invert_workspace_x;
+        bool workspace_invert_y = ctx->config.invert_workspace_y ^ layer->invert_workspace_y;
+        if (workspace_invert_x) workspace_x = -workspace_x;
+        if (workspace_invert_y) workspace_y = -workspace_y;
 
         /* Cursor-driven offsets (normalized -> pixels) */
-        float cursor_x_px = ctx->cursor_eased_x * ctx->config.parallax_max_offset_x * layer->shift_multiplier_x;
-        float cursor_y_px = ctx->cursor_eased_y * ctx->config.parallax_max_offset_y * layer->shift_multiplier_y;
-        if (ctx->config.invert_cursor_x ^ layer->invert_cursor_x) cursor_x_px = -cursor_x_px;
-        if (ctx->config.invert_cursor_y ^ layer->invert_cursor_y) cursor_y_px = -cursor_y_px;
+        float cursor_weight = ctx->input.weights[INPUT_CURSOR];
+        float cursor_x_px = 0.0f;
+        float cursor_y_px = 0.0f;
+        if (cursor_weight > 0.0f) {
+            input_sample_t cursor_sample;
+            bool have_cursor_sample = input_manager_last_source(&ctx->input, monitor, INPUT_CURSOR, &cursor_sample);
+            if (!have_cursor_sample || !cursor_sample.valid) {
+                cursor_sample.x = ctx->cursor_eased_x * ctx->config.parallax_max_offset_x;
+                cursor_sample.y = ctx->cursor_eased_y * ctx->config.parallax_max_offset_y;
+                cursor_sample.valid = true;
+            }
+            cursor_x_px = cursor_sample.x * layer->shift_multiplier_x;
+            cursor_y_px = cursor_sample.y * layer->shift_multiplier_y;
+            bool cursor_invert_x = ctx->config.invert_cursor_x ^ layer->invert_cursor_x;
+            bool cursor_invert_y = ctx->config.invert_cursor_y ^ layer->invert_cursor_y;
+            if (cursor_invert_x) cursor_x_px = -cursor_x_px;
+            if (cursor_invert_y) cursor_y_px = -cursor_y_px;
+        }
 
         /* Blend according to selected mode */
-        float offset_x = 0.0f, offset_y = 0.0f;
-        switch (ctx->config.parallax_mode) {
-            case PARALLAX_WORKSPACE:
-                offset_x = workspace_x; offset_y = workspace_y; break;
-            case PARALLAX_CURSOR:
-                offset_x = cursor_x_px * ctx->config.parallax_cursor_weight;
-                offset_y = cursor_y_px * ctx->config.parallax_cursor_weight;
-                break;
-            case PARALLAX_HYBRID:
-            default:
-                offset_x = workspace_x * ctx->config.parallax_workspace_weight +
-                           cursor_x_px * ctx->config.parallax_cursor_weight;
-                offset_y = workspace_y * ctx->config.parallax_workspace_weight +
-                           cursor_y_px * ctx->config.parallax_cursor_weight;
-                break;
-        }
+        float workspace_weight = ctx->input.weights[INPUT_WORKSPACE];
+        float offset_x = workspace_x * workspace_weight + cursor_x_px * cursor_weight;
+        float offset_y = workspace_y * workspace_weight + cursor_y_px * cursor_weight;
 
         texture_t tex = {
             .id = (uint32_t)layer->texture_id,
@@ -216,7 +221,7 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
     }
     monitor_instance_t *monitor = ctx->monitors->head;
     while (monitor) {
-        hyprlax_render_monitor(ctx, monitor);
+        hyprlax_render_monitor(ctx, monitor, now_time);
         monitor = monitor->next;
     }
 }

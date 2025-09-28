@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include "hyprlax_internal.h"
 #include "core.h"
+#include "core/input/input_manager.h"
 #include "renderer.h"
 #include "platform.h"
 #include "compositor.h"
@@ -41,6 +42,7 @@ typedef struct hyprlax_context {
     renderer_t *renderer;
     platform_t *platform;
     compositor_adapter_t *compositor;
+    input_manager_t input;
 
     /* Application state */
     app_state_t state;
