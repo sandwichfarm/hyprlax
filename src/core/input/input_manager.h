@@ -32,6 +32,13 @@ typedef struct input_monitor_cache_entry {
     bool source_valid[INPUT_MAX];
 } input_monitor_cache_entry_t;
 
+typedef struct input_source_selection {
+    bool seen[INPUT_MAX];
+    bool explicit_weight[INPUT_MAX];
+    float weights[INPUT_MAX];
+    bool modified;
+} input_source_selection_t;
+
 typedef struct input_manager {
     struct hyprlax_context *ctx;
     const config_t *config;
@@ -67,6 +74,11 @@ bool input_manager_last_source(const input_manager_t *manager,
                                const monitor_instance_t *monitor,
                                input_id_t id,
                                input_sample_t *out);
+
+void input_source_selection_init(input_source_selection_t *selection);
+int  input_source_selection_add_spec(input_source_selection_t *selection, const char *spec);
+bool input_source_selection_modified(const input_source_selection_t *selection);
+void input_source_selection_commit(input_source_selection_t *selection, config_t *cfg);
 
 #ifdef __cplusplus
 }

@@ -1,5 +1,7 @@
+#include <ctype.h>
 #include <math.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "core/input/input_manager.h"
@@ -11,6 +13,154 @@
 #endif
 
 static const input_provider_ops_t *g_provider_registry[INPUT_MAX];
+
+static void trim_whitespace(char *s) {
+    if (!s) return;
+    char *start = s;
+    while (*start && isspace((unsigned char)*start)) start++;
+    if (start != s) memmove(s, start, strlen(start) + 1);
+    size_t len = strlen(s);
+    while (len > 0 && isspace((unsigned char)s[len - 1])) {
+        s[len - 1] = '\0';
+        len--;
+    }
+}
+
+static input_id_t input_id_from_name(const char *name) {
+    if (!name) return INPUT_MAX;
+    if (strcasecmp(name, "workspace") == 0) return INPUT_WORKSPACE;
+    if (strcasecmp(name, "cursor") == 0) return INPUT_CURSOR;
+    if (strcasecmp(name, "window") == 0) return INPUT_WINDOW;
+    return INPUT_MAX;
+}
+
+void input_source_selection_init(input_source_selection_t *selection) {
+    if (!selection) return;
+    memset(selection, 0, sizeof(*selection));
+}
+
+static void selection_set_seen(input_source_selection_t *selection, input_id_t id, bool explicit_weight, float weight) {
+    if (!selection || id < 0 || id >= INPUT_MAX) return;
+    selection->seen[id] = true;
+    if (explicit_weight) {
+        if (weight < 0.0f) weight = 0.0f;
+        if (weight > 1.0f) weight = 1.0f;
+        selection->explicit_weight[id] = true;
+        selection->weights[id] = weight;
+    } else if (!selection->explicit_weight[id]) {
+        selection->weights[id] = 0.0f;
+    }
+    selection->modified = true;
+}
+
+int input_source_selection_add_spec(input_source_selection_t *selection, const char *spec) {
+    if (!selection || !spec) return HYPRLAX_ERROR_INVALID_ARGS;
+
+    char *copy = strdup(spec);
+    if (!copy) return HYPRLAX_ERROR_NO_MEMORY;
+
+    char *saveptr = NULL;
+    char *token = strtok_r(copy, ",", &saveptr);
+    while (token) {
+        trim_whitespace(token);
+        if (*token != '\0') {
+            char *colon = strchr(token, ':');
+            float weight = 0.0f;
+            bool has_weight = false;
+            if (colon) {
+                *colon = '\0';
+                char *weight_str = colon + 1;
+                trim_whitespace(weight_str);
+                if (*weight_str) {
+                    weight = strtof(weight_str, NULL);
+                    has_weight = true;
+                }
+            }
+
+            trim_whitespace(token);
+            input_id_t id = input_id_from_name(token);
+            if (id == INPUT_MAX) {
+                LOG_WARN("input manager: unknown input source '%s'", token);
+            } else if (id == INPUT_WINDOW) {
+                LOG_WARN("input manager: window input source requires window provider support (ignored)");
+            } else {
+                selection_set_seen(selection, id, has_weight, weight);
+            }
+        }
+        token = strtok_r(NULL, ",", &saveptr);
+    }
+
+    free(copy);
+    return HYPRLAX_SUCCESS;
+}
+
+bool input_source_selection_modified(const input_source_selection_t *selection) {
+    return selection && selection->modified;
+}
+
+void input_source_selection_commit(input_source_selection_t *selection, config_t *cfg) {
+    if (!selection || !cfg || !selection->modified) return;
+
+    float final_weights[INPUT_MAX] = {0.0f};
+    bool any_seen = false;
+    float sum_explicit = 0.0f;
+    int unspecified_count = 0;
+
+    for (int i = 0; i < INPUT_MAX; ++i) {
+        if (selection->seen[i]) {
+            any_seen = true;
+            if (selection->explicit_weight[i]) {
+                float w = selection->weights[i];
+                if (w < 0.0f) w = 0.0f;
+                if (w > 1.0f) w = 1.0f;
+                final_weights[i] = w;
+                sum_explicit += w;
+            } else {
+                unspecified_count++;
+            }
+        }
+    }
+
+    if (any_seen) {
+        float remaining = 1.0f - sum_explicit;
+        if (remaining < 0.0f) remaining = 0.0f;
+
+        bool workspace_unspecified = selection->seen[INPUT_WORKSPACE] && !selection->explicit_weight[INPUT_WORKSPACE];
+        bool cursor_unspecified = selection->seen[INPUT_CURSOR] && !selection->explicit_weight[INPUT_CURSOR];
+
+        if (workspace_unspecified && cursor_unspecified && unspecified_count == 2) {
+            final_weights[INPUT_WORKSPACE] = 0.7f;
+            final_weights[INPUT_CURSOR] = 0.3f;
+            remaining = 0.0f;
+            unspecified_count = 0;
+        }
+
+        if (unspecified_count > 0) {
+            float per = (unspecified_count > 0 && remaining > 0.0f) ? (remaining / (float)unspecified_count) : 0.0f;
+            for (int i = 0; i < INPUT_MAX; ++i) {
+                if (selection->seen[i] && !selection->explicit_weight[i]) {
+                    final_weights[i] = per;
+                }
+            }
+        }
+
+        cfg->parallax_workspace_weight = selection->seen[INPUT_WORKSPACE] ? final_weights[INPUT_WORKSPACE] : 0.0f;
+        cfg->parallax_cursor_weight = selection->seen[INPUT_CURSOR] ? final_weights[INPUT_CURSOR] : 0.0f;
+
+        bool workspace_enabled = cfg->parallax_workspace_weight > 0.0f;
+        bool cursor_enabled = cfg->parallax_cursor_weight > 0.0f;
+
+        if (workspace_enabled && !cursor_enabled) {
+            cfg->parallax_mode = PARALLAX_WORKSPACE;
+        } else if (!workspace_enabled && cursor_enabled) {
+            cfg->parallax_mode = PARALLAX_CURSOR;
+        } else if (workspace_enabled || cursor_enabled) {
+            cfg->parallax_mode = PARALLAX_HYBRID;
+        }
+    }
+
+    input_source_selection_init(selection);
+}
 
 void input_clear_provider_registry(void) {
     memset(g_provider_registry, 0, sizeof(g_provider_registry));

@@ -69,6 +69,8 @@ static void parse_global_table(toml_table_t *global, config_t *cfg)
     /* Parallax: [global.parallax] */
     toml_table_t *parallax = toml_table_in(global, "parallax");
     if (parallax) {
+        input_source_selection_t selection;
+        input_source_selection_init(&selection);
         d = toml_string_in(parallax, "mode");
         if (d.ok) {
             cfg->parallax_mode = parallax_mode_from_string(d.u.s);
@@ -97,12 +99,38 @@ static void parse_global_table(toml_table_t *global, config_t *cfg)
             toml_table_t *ws = toml_table_in(sources, "workspace");
             if (ws) {
                 d = toml_double_in(ws, "weight");
-                if (d.ok) cfg->parallax_workspace_weight = (float)d.u.d;
+                if (d.ok) {
+                    cfg->parallax_workspace_weight = (float)d.u.d;
+                    char buf[32]; snprintf(buf, sizeof(buf), "workspace:%.6f", (float)d.u.d);
+                    input_source_selection_add_spec(&selection, buf);
+                }
             }
             toml_table_t *cur = toml_table_in(sources, "cursor");
             if (cur) {
                 d = toml_double_in(cur, "weight");
-                if (d.ok) cfg->parallax_cursor_weight = (float)d.u.d;
+                if (d.ok) {
+                    cfg->parallax_cursor_weight = (float)d.u.d;
+                    char buf[32]; snprintf(buf, sizeof(buf), "cursor:%.6f", (float)d.u.d);
+                    input_source_selection_add_spec(&selection, buf);
+                }
+            }
+        }
+
+        toml_array_t *input_arr = toml_array_in(parallax, "input");
+        if (input_arr) {
+            int input_count = toml_array_nelem(input_arr);
+            for (int i = 0; i < input_count; ++i) {
+                toml_datum_t val = toml_string_at(input_arr, i);
+                if (val.ok && val.u.s) {
+                    input_source_selection_add_spec(&selection, val.u.s);
+                    free(val.u.s);
+                }
+            }
+        } else {
+            toml_datum_t input_str = toml_string_in(parallax, "input");
+            if (input_str.ok && input_str.u.s) {
+                input_source_selection_add_spec(&selection, input_str.u.s);
+                free(input_str.u.s);
             }
         }
 
@@ -122,6 +150,10 @@ static void parse_global_table(toml_table_t *global, config_t *cfg)
                 d = toml_bool_in(icur, "y");
                 if (d.ok) cfg->invert_cursor_y = d.u.b;
             }
+        }
+
+        if (input_source_selection_modified(&selection)) {
+            input_source_selection_commit(&selection, cfg);
         }
 
         toml_table_t *maxoff = toml_table_in(parallax, "max_offset_px");
@@ -231,7 +263,6 @@ int config_apply_toml_to_context(hyprlax_context_t *ctx, const char *path)
     /* Load globals into ctx->config first */
     int rc = config_load_toml(&ctx->config, path);
     if (rc != HYPRLAX_SUCCESS) return rc;
-    input_manager_apply_config(&ctx->input, &ctx->config);
     if (getenv("HYPRLAX_INIT_TRACE")) fprintf(stderr, "[INIT_TRACE] TOML: globals loaded\n");
 
     /* Re-open to parse layers (keep separation of concerns above) */
