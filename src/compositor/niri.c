@@ -19,9 +19,15 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <ctype.h>
+#include <time.h>
+#include <inttypes.h>
 #include "../include/compositor.h"
 #include "../include/hyprlax_internal.h"
 #include "../include/log.h"
+
+#define NIRI_CACHE_BUFFER 16384
+#define NIRI_GEOM_CACHE_TTL 0.05
+#define NIRI_METADATA_CACHE_TTL 0.25
 
 /* Niri configuration */
 
@@ -45,6 +51,17 @@ typedef struct {
 
     /* Debug tracking */
     bool debug_enabled;
+
+    /* Geometry and metadata caches */
+    window_geometry_t geometry_cache;
+    double geometry_cache_time;
+    bool geometry_cache_valid;
+    char outputs_cache[NIRI_CACHE_BUFFER];
+    double outputs_cache_time;
+    bool outputs_cache_valid;
+    char workspaces_cache[NIRI_CACHE_BUFFER];
+    double workspaces_cache_time;
+    bool workspaces_cache_valid;
 
     /* JSON parsing buffer */
     char parse_buffer[8192];
@@ -111,6 +128,9 @@ static int niri_init(void *platform_data) {
     g_niri_data->windows = NULL;
     g_niri_data->window_count = 0;
     g_niri_data->window_capacity = 0;
+    g_niri_data->geometry_cache_valid = false;
+    g_niri_data->outputs_cache_valid = false;
+    g_niri_data->workspaces_cache_valid = false;
 
     LOG_DEBUG("Niri adapter initialized");
 
@@ -574,6 +594,674 @@ static int niri_poll_events(compositor_event_t *event) {
 
     return HYPRLAX_ERROR_NO_DATA;
 }
+static double niri_monotonic_time(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        return 0.0;
+    }
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+static const char *skip_ws(const char *p) {
+    while (p && *p && isspace((unsigned char)*p)) {
+        p++;
+    }
+    return p;
+}
+
+static const char *find_matching_brace(const char *start) {
+    if (!start || *start != '{') {
+        return NULL;
+    }
+    int depth = 0;
+    const char *p = start;
+    while (*p) {
+        if (*p == '"') {
+            p++;
+            while (*p) {
+                if (*p == '"' && *(p - 1) != '\\') {
+                    break;
+                }
+                p++;
+            }
+        }
+        if (*p == '{') {
+            depth++;
+        } else if (*p == '}') {
+            depth--;
+            if (depth == 0) {
+                return p;
+            }
+        }
+        if (*p == '\0') {
+            break;
+        }
+        p++;
+    }
+    return NULL;
+}
+
+static const char *find_matching_bracket(const char *start) {
+    if (!start || *start != '[') {
+        return NULL;
+    }
+    int depth = 0;
+    const char *p = start;
+    while (*p) {
+        if (*p == '"') {
+            p++;
+            while (*p) {
+                if (*p == '"' && *(p - 1) != '\\') {
+                    break;
+                }
+                p++;
+            }
+        }
+        if (*p == '[') {
+            depth++;
+        } else if (*p == ']') {
+            depth--;
+            if (depth == 0) {
+                return p;
+            }
+        }
+        if (*p == '\0') {
+            break;
+        }
+        p++;
+    }
+    return NULL;
+}
+
+static bool parse_double_field(const char *json, const char *key, double *out) {
+    if (!json || !key || !out) {
+        return false;
+    }
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *pos = strstr(json, pattern);
+    if (!pos) {
+        return false;
+    }
+    pos = strchr(pos, ':');
+    if (!pos) {
+        return false;
+    }
+    pos++;
+    pos = skip_ws(pos);
+    if (!pos || *pos == '\0' || strncmp(pos, "null", 4) == 0) {
+        return false;
+    }
+    char *endptr = NULL;
+    double value = strtod(pos, &endptr);
+    if (endptr == pos) {
+        return false;
+    }
+    *out = value;
+    return true;
+}
+
+static bool parse_uint64_field(const char *json, const char *key, uint64_t *out) {
+    if (!json || !key || !out) {
+        return false;
+    }
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *pos = strstr(json, pattern);
+    if (!pos) {
+        return false;
+    }
+    pos = strchr(pos, ':');
+    if (!pos) {
+        return false;
+    }
+    pos++;
+    pos = skip_ws(pos);
+    if (!pos || *pos == '\0' || strncmp(pos, "null", 4) == 0) {
+        return false;
+    }
+    char *endptr = NULL;
+    unsigned long long value = strtoull(pos, &endptr, 10);
+    if (endptr == pos) {
+        return false;
+    }
+    *out = (uint64_t)value;
+    return true;
+}
+
+static bool parse_bool_field(const char *json, const char *key, bool *out) {
+    if (!json || !key || !out) {
+        return false;
+    }
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *pos = strstr(json, pattern);
+    if (!pos) {
+        return false;
+    }
+    pos = strchr(pos, ':');
+    if (!pos) {
+        return false;
+    }
+    pos++;
+    pos = skip_ws(pos);
+    if (!pos) {
+        return false;
+    }
+    if (strncmp(pos, "true", 4) == 0) {
+        *out = true;
+        return true;
+    }
+    if (strncmp(pos, "false", 5) == 0) {
+        *out = false;
+        return true;
+    }
+    return false;
+}
+
+static bool parse_string_field(const char *json, const char *key, char *out, size_t out_sz) {
+    if (!json || !key || !out || out_sz == 0) {
+        return false;
+    }
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *pos = strstr(json, pattern);
+    if (!pos) {
+        return false;
+    }
+    pos = strchr(pos, ':');
+    if (!pos) {
+        return false;
+    }
+    pos++;
+    pos = skip_ws(pos);
+    if (!pos || *pos == '\0' || strncmp(pos, "null", 4) == 0) {
+        return false;
+    }
+    if (*pos != '"') {
+        return false;
+    }
+    pos++;
+    size_t i = 0;
+    while (*pos) {
+        if (*pos == '"' && *(pos - 1) != '\\') {
+            break;
+        }
+        if (*pos == '\\' && *(pos + 1) != '\0') {
+            pos++;
+        }
+        if (i + 1 < out_sz) {
+            out[i++] = *pos;
+        }
+        pos++;
+    }
+    out[i] = '\0';
+    return true;
+}
+
+static bool parse_double_pair(const char *json, const char *key, double *out_x, double *out_y) {
+    if (!json || !key || !out_x || !out_y) {
+        return false;
+    }
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *pos = strstr(json, pattern);
+    if (!pos) {
+        return false;
+    }
+    pos = strchr(pos, ':');
+    if (!pos) {
+        return false;
+    }
+    pos++;
+    pos = skip_ws(pos);
+    if (!pos || *pos == '\0' || strncmp(pos, "null", 4) == 0) {
+        return false;
+    }
+    if (*pos != '[') {
+        return false;
+    }
+    const char *end = find_matching_bracket(pos);
+    if (!end) {
+        return false;
+    }
+    char buffer[256];
+    size_t len = (size_t)(end - pos + 1);
+    if (len >= sizeof(buffer)) {
+        len = sizeof(buffer) - 1;
+    }
+    memcpy(buffer, pos, len);
+    buffer[len] = '\0';
+    char *ptr = buffer + 1;
+    ptr = (char *)skip_ws(ptr);
+    char *local_end = NULL;
+    double first = strtod(ptr, &local_end);
+    if (local_end == ptr) {
+        return false;
+    }
+    ptr = (char *)skip_ws(local_end);
+    if (*ptr != ',') {
+        return false;
+    }
+    ptr++;
+    ptr = (char *)skip_ws(ptr);
+    double second = strtod(ptr, &local_end);
+    if (local_end == ptr) {
+        return false;
+    }
+    *out_x = first;
+    *out_y = second;
+    return true;
+}
+
+static bool parse_int_pair(const char *json, const char *key, int *out_x, int *out_y) {
+    if (!out_x || !out_y) {
+        return false;
+    }
+    double dx = 0.0;
+    double dy = 0.0;
+    if (!parse_double_pair(json, key, &dx, &dy)) {
+        return false;
+    }
+    *out_x = (int)lround(dx);
+    *out_y = (int)lround(dy);
+    return true;
+}
+
+static bool json_extract_object(const char *json, const char *key_with_quotes, char *out, size_t out_sz) {
+    if (!json || !key_with_quotes || !out || out_sz == 0) {
+        return false;
+    }
+    const char *pos = strstr(json, key_with_quotes);
+    if (!pos) {
+        return false;
+    }
+    pos = strchr(pos, '{');
+    if (!pos) {
+        return false;
+    }
+    const char *end = find_matching_brace(pos);
+    if (!end) {
+        return false;
+    }
+    size_t len = (size_t)(end - pos + 1);
+    if (len >= out_sz) {
+        len = out_sz - 1;
+    }
+    memcpy(out, pos, len);
+    out[len] = '\0';
+    return true;
+}
+
+static const char *niri_get_outputs_json(double now) {
+    if (!g_niri_data) {
+        return NULL;
+    }
+    if (g_niri_data->outputs_cache_valid &&
+        fabs(now - g_niri_data->outputs_cache_time) < NIRI_METADATA_CACHE_TTL) {
+        return g_niri_data->outputs_cache;
+    }
+    if (niri_send_command("msg --json outputs", g_niri_data->outputs_cache,
+                          sizeof(g_niri_data->outputs_cache)) != HYPRLAX_SUCCESS) {
+        g_niri_data->outputs_cache_valid = false;
+        return NULL;
+    }
+    g_niri_data->outputs_cache_valid = true;
+    g_niri_data->outputs_cache_time = now;
+    return g_niri_data->outputs_cache;
+}
+
+static const char *niri_get_workspaces_json(double now) {
+    if (!g_niri_data) {
+        return NULL;
+    }
+    if (g_niri_data->workspaces_cache_valid &&
+        fabs(now - g_niri_data->workspaces_cache_time) < NIRI_METADATA_CACHE_TTL) {
+        return g_niri_data->workspaces_cache;
+    }
+    if (niri_send_command("msg --json workspaces", g_niri_data->workspaces_cache,
+                          sizeof(g_niri_data->workspaces_cache)) != HYPRLAX_SUCCESS) {
+        g_niri_data->workspaces_cache_valid = false;
+        return NULL;
+    }
+    g_niri_data->workspaces_cache_valid = true;
+    g_niri_data->workspaces_cache_time = now;
+    return g_niri_data->workspaces_cache;
+}
+
+static bool niri_find_output_geometry(const char *json,
+                                      const char *output_name,
+                                      double *out_x,
+                                      double *out_y,
+                                      double *out_w,
+                                      double *out_h,
+                                      int *out_index) {
+    if (!json || !output_name || !*output_name) {
+        return false;
+    }
+    const char *p = json;
+    int index = 0;
+    size_t name_len = strlen(output_name);
+    while ((p = strchr(p, '"')) != NULL) {
+        const char *key_start = p + 1;
+        const char *key_end = key_start;
+        while (*key_end && !(*key_end == '"' && *(key_end - 1) != '\\')) {
+            key_end++;
+        }
+        if (*key_end == '\0') {
+            break;
+        }
+        size_t key_len = (size_t)(key_end - key_start);
+        const char *after_key = skip_ws(key_end + 1);
+        if (!after_key || *after_key != ':') {
+            p = key_end + 1;
+            continue;
+        }
+        after_key++;
+        after_key = skip_ws(after_key);
+        if (!after_key || *after_key != '{') {
+            p = after_key;
+            continue;
+        }
+        const char *obj_start = after_key;
+        const char *obj_end = find_matching_brace(obj_start);
+        if (!obj_end) {
+            break;
+        }
+        obj_end++;
+        bool matched = (key_len == name_len && strncmp(key_start, output_name, name_len) == 0);
+        if (matched) {
+            char object_buf[2048];
+            size_t len = (size_t)(obj_end - obj_start);
+            if (len >= sizeof(object_buf)) {
+                len = sizeof(object_buf) - 1;
+            }
+            memcpy(object_buf, obj_start, len);
+            object_buf[len] = '\0';
+            char logical_buf[1024];
+            if (!json_extract_object(object_buf, "\"logical\"", logical_buf, sizeof(logical_buf))) {
+                return false;
+            }
+            double lx = 0.0, ly = 0.0, lw = 0.0, lh = 0.0;
+            parse_double_field(logical_buf, "x", &lx);
+            parse_double_field(logical_buf, "y", &ly);
+            parse_double_field(logical_buf, "width", &lw);
+            parse_double_field(logical_buf, "height", &lh);
+            if (out_x) *out_x = lx;
+            if (out_y) *out_y = ly;
+            if (out_w) *out_w = lw;
+            if (out_h) *out_h = lh;
+            if (out_index) *out_index = index;
+            return true;
+        }
+        index++;
+        p = obj_end;
+    }
+    return false;
+}
+
+static bool niri_pick_first_output(const char *json,
+                                   double *out_x,
+                                   double *out_y,
+                                   double *out_w,
+                                   double *out_h,
+                                   int *out_index,
+                                   char *out_name,
+                                   size_t out_name_sz) {
+    if (!json) {
+        return false;
+    }
+    const char *p = strchr(json, '"');
+    if (!p) {
+        return false;
+    }
+    const char *key_start = p + 1;
+    const char *key_end = key_start;
+    while (*key_end && !(*key_end == '"' && *(key_end - 1) != '\\')) {
+        key_end++;
+    }
+    if (*key_end == '\0') {
+        return false;
+    }
+    size_t key_len = (size_t)(key_end - key_start);
+    if (out_name && out_name_sz > 0) {
+        size_t copy_len = key_len < (out_name_sz - 1) ? key_len : (out_name_sz - 1);
+        memcpy(out_name, key_start, copy_len);
+        out_name[copy_len] = '\0';
+    }
+    const char *after_key = skip_ws(key_end + 1);
+    if (!after_key || *after_key != ':') {
+        return false;
+    }
+    after_key++;
+    after_key = skip_ws(after_key);
+    if (!after_key || *after_key != '{') {
+        return false;
+    }
+    const char *obj_start = after_key;
+    const char *obj_end = find_matching_brace(obj_start);
+    if (!obj_end) {
+        return false;
+    }
+    obj_end++;
+    char object_buf[2048];
+    size_t len = (size_t)(obj_end - obj_start);
+    if (len >= sizeof(object_buf)) {
+        len = sizeof(object_buf) - 1;
+    }
+    memcpy(object_buf, obj_start, len);
+    object_buf[len] = '\0';
+    char logical_buf[1024];
+    if (!json_extract_object(object_buf, "\"logical\"", logical_buf, sizeof(logical_buf))) {
+        return false;
+    }
+    double lx = 0.0, ly = 0.0, lw = 0.0, lh = 0.0;
+    parse_double_field(logical_buf, "x", &lx);
+    parse_double_field(logical_buf, "y", &ly);
+    parse_double_field(logical_buf, "width", &lw);
+    parse_double_field(logical_buf, "height", &lh);
+    if (out_x) *out_x = lx;
+    if (out_y) *out_y = ly;
+    if (out_w) *out_w = lw;
+    if (out_h) *out_h = lh;
+    if (out_index) *out_index = 0;
+    return true;
+}
+
+static bool niri_workspace_output(uint64_t workspace_id,
+                                  double now,
+                                  char *out,
+                                  size_t out_sz) {
+    if (!out || out_sz == 0) {
+        return false;
+    }
+    const char *json = niri_get_workspaces_json(now);
+    if (!json) {
+        return false;
+    }
+    const char *p = json;
+    while ((p = strchr(p, '{')) != NULL) {
+        const char *obj_start = p;
+        const char *obj_end = find_matching_brace(obj_start);
+        if (!obj_end) {
+            break;
+        }
+        obj_end++;
+        char object_buf[1024];
+        size_t len = (size_t)(obj_end - obj_start);
+        if (len >= sizeof(object_buf)) {
+            len = sizeof(object_buf) - 1;
+        }
+        memcpy(object_buf, obj_start, len);
+        object_buf[len] = '\0';
+        uint64_t id = 0;
+        if (parse_uint64_field(object_buf, "id", &id) && id == workspace_id) {
+            if (parse_string_field(object_buf, "output", out, out_sz)) {
+                return true;
+            }
+            return false;
+        }
+        p = obj_end;
+    }
+    return false;
+}
+
+static int niri_get_active_window_geometry(window_geometry_t *out) {
+    if (!out) {
+        return HYPRLAX_ERROR_INVALID_ARGS;
+    }
+    if (!g_niri_data) {
+        if (niri_init(NULL) != HYPRLAX_SUCCESS || !g_niri_data) {
+            return HYPRLAX_ERROR_NO_DATA;
+        }
+    }
+    double now = niri_monotonic_time();
+    if (g_niri_data->geometry_cache_valid &&
+        fabs(now - g_niri_data->geometry_cache_time) < NIRI_GEOM_CACHE_TTL) {
+        *out = g_niri_data->geometry_cache;
+        return HYPRLAX_SUCCESS;
+    }
+
+    char response[8192];
+    if (niri_send_command("msg --json focused-window", response, sizeof(response)) != HYPRLAX_SUCCESS) {
+        g_niri_data->geometry_cache_valid = false;
+        return HYPRLAX_ERROR_NO_DATA;
+    }
+    if (response[0] == '\0' || strstr(response, "\"id\"") == NULL) {
+        g_niri_data->geometry_cache_valid = false;
+        return HYPRLAX_ERROR_NO_DATA;
+    }
+
+    bool is_floating = false;
+    parse_bool_field(response, "is_floating", &is_floating);
+
+    uint64_t workspace_id = 0;
+    bool has_workspace = parse_uint64_field(response, "workspace_id", &workspace_id);
+
+    double window_w = 0.0;
+    double window_h = 0.0;
+    if (!parse_double_pair(response, "window_size", &window_w, &window_h) ||
+        window_w <= 0.0 || window_h <= 0.0) {
+        g_niri_data->geometry_cache_valid = false;
+        return HYPRLAX_ERROR_NO_DATA;
+    }
+
+    double window_off_x = 0.0;
+    double window_off_y = 0.0;
+    parse_double_pair(response, "window_offset_in_tile", &window_off_x, &window_off_y);
+
+    double tile_pos_x = 0.0;
+    double tile_pos_y = 0.0;
+    bool has_tile_pos = parse_double_pair(response, "tile_pos_in_workspace_view", &tile_pos_x, &tile_pos_y);
+
+    double tile_size_x = 0.0;
+    double tile_size_y = 0.0;
+    parse_double_pair(response, "tile_size", &tile_size_x, &tile_size_y);
+
+    int col_idx = 0;
+    int row_idx = 0;
+    bool has_indices = parse_int_pair(response, "pos_in_scrolling_layout", &col_idx, &row_idx);
+
+    char output_name[64];
+    output_name[0] = '\0';
+    if (has_workspace) {
+        if (!niri_workspace_output(workspace_id, now, output_name, sizeof(output_name))) {
+            output_name[0] = '\0';
+        }
+    }
+
+    double monitor_x = 0.0;
+    double monitor_y = 0.0;
+    double monitor_w = 0.0;
+    double monitor_h = 0.0;
+    int monitor_index = 0;
+    const char *outputs_json = niri_get_outputs_json(now);
+    bool have_monitor = false;
+    if (outputs_json) {
+        if (output_name[0] != '\0') {
+            have_monitor = niri_find_output_geometry(outputs_json, output_name,
+                                                     &monitor_x, &monitor_y,
+                                                     &monitor_w, &monitor_h,
+                                                     &monitor_index);
+        }
+        if (!have_monitor) {
+            if (niri_pick_first_output(outputs_json, &monitor_x, &monitor_y,
+                                       &monitor_w, &monitor_h, &monitor_index,
+                                       output_name, sizeof(output_name))) {
+                have_monitor = true;
+            }
+        }
+    }
+    if (!have_monitor || monitor_w <= 0.0 || monitor_h <= 0.0) {
+        monitor_x = 0.0;
+        monitor_y = 0.0;
+        monitor_w = 1920.0;
+        monitor_h = 1080.0;
+        monitor_index = 0;
+        if (output_name[0] == '\0') {
+            strncpy(output_name, "default", sizeof(output_name) - 1);
+            output_name[sizeof(output_name) - 1] = '\0';
+        }
+    }
+
+    double tile_origin_x = 0.0;
+    double tile_origin_y = 0.0;
+    if (has_tile_pos) {
+        tile_origin_x = tile_pos_x;
+        tile_origin_y = tile_pos_y;
+    } else if (has_indices) {
+        if (tile_size_x > 0.0) {
+            tile_origin_x = (double)(col_idx - 1) * tile_size_x;
+        }
+        if (tile_size_y > 0.0) {
+            tile_origin_y = (double)(row_idx - 1) * tile_size_y;
+        }
+    } else {
+        tile_origin_x = (monitor_w - window_w) * 0.5;
+        tile_origin_y = (monitor_h - window_h) * 0.5;
+    }
+
+    double top_left_x = tile_origin_x + window_off_x;
+    double top_left_y = tile_origin_y + window_off_y;
+
+    double global_x = monitor_x + top_left_x;
+    double global_y = monitor_y + top_left_y;
+
+    double monitor_right = monitor_x + monitor_w;
+    double monitor_bottom = monitor_y + monitor_h;
+    if (global_x + window_w > monitor_right) {
+        global_x = monitor_right - window_w;
+    }
+    if (global_y + window_h > monitor_bottom) {
+        global_y = monitor_bottom - window_h;
+    }
+    if (global_x < monitor_x) {
+        global_x = monitor_x;
+    }
+    if (global_y < monitor_y) {
+        global_y = monitor_y;
+    }
+
+    memset(out, 0, sizeof(*out));
+    out->x = global_x;
+    out->y = global_y;
+    out->width = window_w;
+    out->height = window_h;
+    out->workspace_id = has_workspace ? (int)workspace_id : -1;
+    out->monitor_id = monitor_index;
+    if (output_name[0] != '\0') {
+        strncpy(out->monitor_name, output_name, sizeof(out->monitor_name) - 1);
+        out->monitor_name[sizeof(out->monitor_name) - 1] = '\0';
+    }
+    out->floating = is_floating;
+
+    g_niri_data->geometry_cache = *out;
+    g_niri_data->geometry_cache_time = now;
+    g_niri_data->geometry_cache_valid = true;
+
+    return HYPRLAX_SUCCESS;
+}
+
 /* Send IPC command via niri msg */
 static int niri_send_command(const char *command, char *response,
                             size_t response_size) {
@@ -707,4 +1395,5 @@ const compositor_ops_t compositor_niri_ops = {
     .supports_animations = niri_supports_animations,
     .set_blur = niri_set_blur,
     .set_wallpaper_offset = niri_set_wallpaper_offset,
+    .get_active_window_geometry = niri_get_active_window_geometry,
 };

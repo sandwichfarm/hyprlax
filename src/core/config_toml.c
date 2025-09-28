@@ -228,6 +228,18 @@ static void parse_global_table(toml_table_t *global, config_t *cfg)
             toml_datum_t fg = toml_bool_in(cursor, "follow_global");
             if (fg.ok) cfg->cursor_follow_global = fg.u.b;
         }
+
+        toml_table_t *window = toml_table_in(input, "window");
+        if (window) {
+            d = toml_double_in(window, "sensitivity_x");
+            if (d.ok) cfg->window_sensitivity_x = (float)d.u.d;
+            d = toml_double_in(window, "sensitivity_y");
+            if (d.ok) cfg->window_sensitivity_y = (float)d.u.d;
+            d = toml_double_in(window, "deadzone_px");
+            if (d.ok) cfg->window_deadzone_px = (float)d.u.d;
+            d = toml_double_in(window, "ema_alpha");
+            if (d.ok) cfg->window_ema_alpha = (float)d.u.d;
+        }
     }
 }
 

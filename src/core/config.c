@@ -38,6 +38,7 @@ void config_set_defaults(config_t *cfg) {
     cfg->parallax_mode = PARALLAX_WORKSPACE;
     cfg->parallax_workspace_weight = 1.0f;
     cfg->parallax_cursor_weight = 0.0f;
+    cfg->parallax_window_weight = 0.0f;
     cfg->invert_workspace_x = false; /* Default: match legacy hyprlax scroll */
     cfg->invert_workspace_y = false;
     cfg->invert_cursor_x = false;
@@ -61,6 +62,10 @@ void config_set_defaults(config_t *cfg) {
     cfg->cursor_anim_duration = 0.0; /* disabled by default (low-latency) */
     cfg->cursor_easing = EASE_CUBIC_OUT;
     cfg->cursor_follow_global = true; /* default: animate even when cursor isn’t over background */
+    cfg->window_sensitivity_x = 1.0f;
+    cfg->window_sensitivity_y = 1.0f;
+    cfg->window_deadzone_px = 6.0f;
+    cfg->window_ema_alpha = 0.25f;
 }
 
 /* Parse command-line arguments */

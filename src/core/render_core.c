@@ -104,6 +104,7 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
 
         /* Cursor-driven offsets (normalized -> pixels) */
         float cursor_weight = ctx->input.weights[INPUT_CURSOR];
+        float window_weight = ctx->input.weights[INPUT_WINDOW];
         float cursor_x_px = 0.0f;
         float cursor_y_px = 0.0f;
         if (cursor_weight > 0.0f) {
@@ -122,10 +123,25 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
             if (cursor_invert_y) cursor_y_px = -cursor_y_px;
         }
 
+        float window_x_px = 0.0f;
+        float window_y_px = 0.0f;
+        if (window_weight > 0.0f) {
+            input_sample_t window_sample;
+            bool have_window_sample = input_manager_last_source(&ctx->input, monitor, INPUT_WINDOW, &window_sample);
+            if (have_window_sample && window_sample.valid) {
+                window_x_px = window_sample.x * layer->shift_multiplier_x;
+                window_y_px = window_sample.y * layer->shift_multiplier_y;
+                bool window_invert_x = ctx->config.invert_window_x ^ layer->invert_window_x;
+                bool window_invert_y = ctx->config.invert_window_y ^ layer->invert_window_y;
+                if (window_invert_x) window_x_px = -window_x_px;
+                if (window_invert_y) window_y_px = -window_y_px;
+            }
+        }
+
         /* Blend according to selected mode */
         float workspace_weight = ctx->input.weights[INPUT_WORKSPACE];
-        float offset_x = workspace_x * workspace_weight + cursor_x_px * cursor_weight;
-        float offset_y = workspace_y * workspace_weight + cursor_y_px * cursor_weight;
+        float offset_x = workspace_x * workspace_weight + cursor_x_px * cursor_weight + window_x_px * window_weight;
+        float offset_y = workspace_y * workspace_weight + cursor_y_px * cursor_weight + window_y_px * window_weight;
 
         texture_t tex = {
             .id = (uint32_t)layer->texture_id,

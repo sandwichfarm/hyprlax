@@ -58,6 +58,17 @@ typedef struct {
     int x, y;  /* Grid position for 2D workspace layouts */
 } workspace_info_t;
 
+typedef struct {
+    double x;
+    double y;
+    double width;
+    double height;
+    int workspace_id;
+    int monitor_id;
+    char monitor_name[64];
+    bool floating;
+} window_geometry_t;
+
 /* Monitor information */
 typedef struct {
     int id;
@@ -148,6 +159,7 @@ typedef struct compositor_ops {
     int (*set_wallpaper_offset)(float x, float y);
     /* Optional global cursor provider */
     int (*get_cursor_position)(double *x, double *y);
+    int (*get_active_window_geometry)(window_geometry_t *out);
 } compositor_ops_t;
 
 /* Compositor adapter instance */

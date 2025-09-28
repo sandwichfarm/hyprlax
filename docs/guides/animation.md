@@ -9,6 +9,8 @@ Hyprlax combines one or more **input sources** to drive layer movement:
 - `cursor`: driven by smoothed cursor motion
 - `window` *(planned)*: will track the active window position
 
+> The `window` source is currently implemented for Hyprland. Other compositors ignore it gracefully until native support is added.
+
 Configure sources via CLI or TOML:
 
 ```bash

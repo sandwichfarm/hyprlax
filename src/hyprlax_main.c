@@ -921,6 +921,10 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
         if (v && *v) {
             float f = atof(v); if (f < 0.0f) f = 0.0f; if (f > 1.0f) f = 1.0f; ctx->config.parallax_workspace_weight = f;
         }
+        v = getenv("HYPRLAX_PARALLAX_SOURCES_WINDOW_WEIGHT");
+        if (v && *v) {
+            float f = atof(v); if (f < 0.0f) f = 0.0f; if (f > 1.0f) f = 1.0f; ctx->config.parallax_window_weight = f;
+        }
         v = getenv("HYPRLAX_RENDER_OVERFLOW");
         if (v && *v) {
             /* Map to overflow mode if recognized */
@@ -1527,6 +1531,13 @@ int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, c
         hyprlax_update_cursor_provider(ctx);
         return 0;
     }
+    if (strcmp(property, "parallax.sources.window.weight") == 0) {
+        ctx->config.parallax_window_weight = atof(value);
+        if (ctx->config.parallax_window_weight < 0.0f) ctx->config.parallax_window_weight = 0.0f;
+        if (ctx->config.parallax_window_weight > 1.0f) ctx->config.parallax_window_weight = 1.0f;
+        input_manager_apply_config(&ctx->input, &ctx->config);
+        return 0;
+    }
     if (strcmp(property, "parallax.invert.cursor.x") == 0) {
         ctx->config.invert_cursor_x = parse_bool(value); return 0;
     }
@@ -1538,6 +1549,12 @@ int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, c
     }
     if (strcmp(property, "parallax.invert.workspace.y") == 0) {
         ctx->config.invert_workspace_y = parse_bool(value); return 0;
+    }
+    if (strcmp(property, "parallax.invert.window.x") == 0) {
+        ctx->config.invert_window_x = parse_bool(value); return 0;
+    }
+    if (strcmp(property, "parallax.invert.window.y") == 0) {
+        ctx->config.invert_window_y = parse_bool(value); return 0;
     }
     if (strcmp(property, "parallax.max_offset_px.x") == 0) {
         ctx->config.parallax_max_offset_x = atof(value); return 0;
@@ -1557,6 +1574,10 @@ int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, c
     if (strcmp(property, "input.cursor.deadzone_px") == 0) {
         ctx->config.cursor_deadzone_px = atof(value); return 0;
     }
+    if (strcmp(property, "input.window.sensitivity_x") == 0) { ctx->config.window_sensitivity_x = atof(value); return 0; }
+    if (strcmp(property, "input.window.sensitivity_y") == 0) { ctx->config.window_sensitivity_y = atof(value); return 0; }
+    if (strcmp(property, "input.window.deadzone_px") == 0) { ctx->config.window_deadzone_px = atof(value); return 0; }
+    if (strcmp(property, "input.window.ema_alpha") == 0) { ctx->config.window_ema_alpha = atof(value); return 0; }
     /* Render properties (global) */
     if (strcmp(property, "render.overflow") == 0) {
         int m = overflow_from_string_local(value);
@@ -1619,7 +1640,8 @@ int hyprlax_runtime_get_property(hyprlax_context_t *ctx, const char *property, c
         size_t len = 0;
         struct { const char *name; float weight; } entries[] = {
             {"workspace", ctx->config.parallax_workspace_weight},
-            {"cursor", ctx->config.parallax_cursor_weight}
+            {"cursor", ctx->config.parallax_cursor_weight},
+            {"window", ctx->config.parallax_window_weight}
         };
         for (size_t i = 0; i < sizeof(entries)/sizeof(entries[0]); ++i) {
             if (entries[i].weight <= 0.0f) continue;
@@ -1636,16 +1658,23 @@ int hyprlax_runtime_get_property(hyprlax_context_t *ctx, const char *property, c
     }
     if (strcmp(property, "parallax.sources.cursor.weight") == 0) { W("%.3f", ctx->config.parallax_cursor_weight); return 0; }
     if (strcmp(property, "parallax.sources.workspace.weight") == 0) { W("%.3f", ctx->config.parallax_workspace_weight); return 0; }
+    if (strcmp(property, "parallax.sources.window.weight") == 0) { W("%.3f", ctx->config.parallax_window_weight); return 0; }
     if (strcmp(property, "parallax.invert.cursor.x") == 0) { W("%s", ctx->config.invert_cursor_x?"true":"false"); return 0; }
     if (strcmp(property, "parallax.invert.cursor.y") == 0) { W("%s", ctx->config.invert_cursor_y?"true":"false"); return 0; }
     if (strcmp(property, "parallax.invert.workspace.x") == 0) { W("%s", ctx->config.invert_workspace_x?"true":"false"); return 0; }
     if (strcmp(property, "parallax.invert.workspace.y") == 0) { W("%s", ctx->config.invert_workspace_y?"true":"false"); return 0; }
+    if (strcmp(property, "parallax.invert.window.x") == 0) { W("%s", ctx->config.invert_window_x?"true":"false"); return 0; }
+    if (strcmp(property, "parallax.invert.window.y") == 0) { W("%s", ctx->config.invert_window_y?"true":"false"); return 0; }
     if (strcmp(property, "parallax.max_offset_px.x") == 0) { W("%.1f", ctx->config.parallax_max_offset_x); return 0; }
     if (strcmp(property, "parallax.max_offset_px.y") == 0) { W("%.1f", ctx->config.parallax_max_offset_y); return 0; }
     if (strcmp(property, "input.cursor.sensitivity_x") == 0) { W("%.3f", ctx->config.cursor_sensitivity_x); return 0; }
     if (strcmp(property, "input.cursor.sensitivity_y") == 0) { W("%.3f", ctx->config.cursor_sensitivity_y); return 0; }
     if (strcmp(property, "input.cursor.ema_alpha") == 0) { W("%.3f", ctx->config.cursor_ema_alpha); return 0; }
     if (strcmp(property, "input.cursor.deadzone_px") == 0) { W("%.1f", ctx->config.cursor_deadzone_px); return 0; }
+    if (strcmp(property, "input.window.sensitivity_x") == 0) { W("%.3f", ctx->config.window_sensitivity_x); return 0; }
+    if (strcmp(property, "input.window.sensitivity_y") == 0) { W("%.3f", ctx->config.window_sensitivity_y); return 0; }
+    if (strcmp(property, "input.window.deadzone_px") == 0) { W("%.1f", ctx->config.window_deadzone_px); return 0; }
+    if (strcmp(property, "input.window.ema_alpha") == 0) { W("%.3f", ctx->config.window_ema_alpha); return 0; }
     if (strcmp(property, "render.overflow") == 0) { W("%s", overflow_to_string_local(ctx->config.render_overflow_mode)); return 0; }
     if (strcmp(property, "render.tile.x") == 0) { W("%s", ctx->config.render_tile_x?"true":"false"); return 0; }
     if (strcmp(property, "render.tile.y") == 0) { W("%s", ctx->config.render_tile_y?"true":"false"); return 0; }

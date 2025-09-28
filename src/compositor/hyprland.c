@@ -125,6 +125,109 @@ static int hyprland_get_cursor_position(double *x, double *y) {
     return HYPRLAX_SUCCESS;
 }
 
+static bool parse_double_array(const char *json, const char *key, double *out_x, double *out_y) {
+    if (!json || !key || !out_x || !out_y) return false;
+    char *pos = strstr((char*)json, key);
+    if (!pos) return false;
+    pos = strchr(pos, '[');
+    if (!pos) return false;
+    char *endptr = NULL;
+    double v1 = strtod(pos + 1, &endptr);
+    if (!endptr) return false;
+    while (*endptr && *endptr != ',') endptr++;
+    if (*endptr != ',') return false;
+    double v2 = strtod(endptr + 1, &endptr);
+    *out_x = v1;
+    *out_y = v2;
+    return true;
+}
+
+static bool parse_int_field(const char *json, const char *key, int *out_value) {
+    if (!json || !key || !out_value) return false;
+    char *pos = strstr((char*)json, key);
+    if (!pos) return false;
+    pos = strchr(pos, ':');
+    if (!pos) return false;
+    *out_value = (int)strtol(pos + 1, NULL, 10);
+    return true;
+}
+
+static bool parse_bool_field(const char *json, const char *key, bool *out_value) {
+    if (!json || !key || !out_value) return false;
+    char *pos = strstr((char*)json, key);
+    if (!pos) return false;
+    pos = strchr(pos, ':');
+    if (!pos) return false;
+    pos++;
+    while (*pos == ' ' || *pos == '\t') pos++;
+    if (strncmp(pos, "true", 4) == 0) { *out_value = true; return true; }
+    if (strncmp(pos, "false", 5) == 0) { *out_value = false; return true; }
+    return false;
+}
+
+static bool parse_string_field(const char *json, const char *key, char *out, size_t out_sz) {
+    if (!json || !key || !out || out_sz == 0) return false;
+    char *pos = strstr((char*)json, key);
+    if (!pos) return false;
+    pos = strchr(pos, ':');
+    if (!pos) return false;
+    pos++;
+    while (*pos == ' ' || *pos == '\t') pos++;
+    if (*pos != '"') return false;
+    pos++;
+    size_t i = 0;
+    while (*pos && *pos != '"' && i + 1 < out_sz) {
+        out[i++] = *pos++;
+    }
+    out[i] = '\0';
+    return true;
+}
+
+static int hyprland_get_active_window_geometry(window_geometry_t *out) {
+    if (!out) return HYPRLAX_ERROR_INVALID_ARGS;
+    char resp[2048] = {0};
+    if (hyprland_send_command(HYPRLAND_IPC_GET_ACTIVE_WINDOW, resp, sizeof(resp)) != HYPRLAX_SUCCESS || resp[0] == '\0') {
+        return HYPRLAX_ERROR_NO_DATA;
+    }
+    if (strstr(resp, "\"class\"") == NULL) {
+        return HYPRLAX_ERROR_NO_DATA;
+    }
+
+    double at_x = 0.0, at_y = 0.0;
+    double size_w = 0.0, size_h = 0.0;
+    if (!parse_double_array(resp, "\"at\"", &at_x, &at_y)) {
+        return HYPRLAX_ERROR_NO_DATA;
+    }
+    if (!parse_double_array(resp, "\"size\"", &size_w, &size_h)) {
+        return HYPRLAX_ERROR_NO_DATA;
+    }
+
+    memset(out, 0, sizeof(*out));
+    out->x = at_x;
+    out->y = at_y;
+    out->width = size_w;
+    out->height = size_h;
+
+    int ws_id = 0;
+    char *workspace_block = strstr(resp, "\"workspace\"");
+    if (workspace_block && parse_int_field(workspace_block, "\"id\"", &ws_id)) {
+        out->workspace_id = ws_id;
+    }
+
+    int monitor_id = 0;
+    if (parse_int_field(resp, "\"monitor\"", &monitor_id)) {
+        out->monitor_id = monitor_id;
+    }
+    parse_string_field(resp, "\"monitorName\"", out->monitor_name, sizeof(out->monitor_name));
+
+    bool floating = false;
+    if (parse_bool_field(resp, "\"floating\"", &floating)) {
+        out->floating = floating;
+    }
+
+    return HYPRLAX_SUCCESS;
+}
+
 /* Get Hyprland socket paths */
 static bool get_hyprland_socket_paths(char *cmd_path, char *event_path, size_t size) {
     const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
@@ -615,6 +718,7 @@ const compositor_ops_t compositor_hyprland_ops = {
     .send_command = hyprland_send_command,
     .get_event_fd = hyprland_get_event_fd,
     .get_cursor_position = hyprland_get_cursor_position,
+    .get_active_window_geometry = hyprland_get_active_window_geometry,
     .supports_blur = hyprland_supports_blur,
     .supports_transparency = hyprland_supports_transparency,
     .supports_animations = hyprland_supports_animations,

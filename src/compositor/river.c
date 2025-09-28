@@ -59,6 +59,7 @@ typedef struct {
     int tag_count;
     river_tag_policy_t tag_policy;
     bool animate_on_tag_change;
+    bool geometry_warned;
     /* Event queue for batching */
     bool tags_changed;
     uint32_t new_focused_tags;
@@ -282,6 +283,7 @@ static int river_init(void *platform_data) {
     g_river_data->tag_count = RIVER_DEFAULT_TAGS;
     g_river_data->tag_policy = TAG_POLICY_LOWEST;  /* Default policy */
     g_river_data->animate_on_tag_change = true;
+    g_river_data->geometry_warned = false;
     g_river_data->tags_changed = false;
     g_river_data->new_focused_tags = 1;
 
@@ -718,6 +720,27 @@ static int river_set_blur(float amount) {
     return HYPRLAX_ERROR_INVALID_ARGS;  /* Not supported */
 }
 
+static int river_get_active_window_geometry(window_geometry_t *out) {
+    if (!out) {
+        return HYPRLAX_ERROR_INVALID_ARGS;
+    }
+    if (!g_river_data) {
+        return HYPRLAX_ERROR_NO_DATA;
+    }
+    if (!g_river_data->geometry_warned) {
+        LOG_WARN("river: active window geometry not available; window input source disabled");
+        g_river_data->geometry_warned = true;
+    }
+    memset(out, 0, sizeof(*out));
+    out->workspace_id = -1;
+    out->monitor_id = g_river_data->current_output;
+    if (g_river_data->current_output_name[0] != '\0') {
+        strncpy(out->monitor_name, g_river_data->current_output_name, sizeof(out->monitor_name) - 1);
+        out->monitor_name[sizeof(out->monitor_name) - 1] = '\0';
+    }
+    return HYPRLAX_ERROR_NO_DATA;
+}
+
 /* Set wallpaper offset */
 static int river_set_wallpaper_offset(float x, float y) {
     (void)x;
@@ -895,4 +918,5 @@ const compositor_ops_t compositor_river_ops = {
     .supports_animations = river_supports_animations,
     .set_blur = river_set_blur,
     .set_wallpaper_offset = river_set_wallpaper_offset,
+    .get_active_window_geometry = river_get_active_window_geometry,
 };

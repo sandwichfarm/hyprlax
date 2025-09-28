@@ -81,8 +81,6 @@ int input_source_selection_add_spec(input_source_selection_t *selection, const c
             input_id_t id = input_id_from_name(token);
             if (id == INPUT_MAX) {
                 LOG_WARN("input manager: unknown input source '%s'", token);
-            } else if (id == INPUT_WINDOW) {
-                LOG_WARN("input manager: window input source requires window provider support (ignored)");
             } else {
                 selection_set_seen(selection, id, has_weight, weight);
             }
@@ -154,9 +152,11 @@ void input_source_selection_commit(input_source_selection_t *selection, config_t
             cfg->parallax_mode = PARALLAX_WORKSPACE;
         } else if (!workspace_enabled && cursor_enabled) {
             cfg->parallax_mode = PARALLAX_CURSOR;
-        } else if (workspace_enabled || cursor_enabled) {
+        } else if (workspace_enabled || cursor_enabled || selection->seen[INPUT_WINDOW]) {
             cfg->parallax_mode = PARALLAX_HYBRID;
         }
+
+        cfg->parallax_window_weight = selection->seen[INPUT_WINDOW] ? final_weights[INPUT_WINDOW] : 0.0f;
     }
 
     input_source_selection_init(selection);
@@ -230,7 +230,7 @@ static void prime_weights_from_config(input_manager_t *manager, const config_t *
 
     manager->weights[INPUT_WORKSPACE] = INPUT_MANAGER_CLAMP01(cfg->parallax_workspace_weight);
     manager->weights[INPUT_CURSOR] = INPUT_MANAGER_CLAMP01(cfg->parallax_cursor_weight);
-    manager->weights[INPUT_WINDOW] = 0.0f; /* default off until configured */
+    manager->weights[INPUT_WINDOW] = INPUT_MANAGER_CLAMP01(cfg->parallax_window_weight);
 
     manager->enabled_mask = 0;
     if (manager->weights[INPUT_WORKSPACE] > 0.0f) {

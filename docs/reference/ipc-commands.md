@@ -129,6 +129,8 @@ Additional structured keys:
 - `parallax.input` — comma/array list of enabled sources (e.g. `workspace,cursor:0.3`)
 - `parallax.sources.cursor.weight`, `parallax.sources.workspace.weight` — legacy knobs (kept for compatibility)
 - `parallax.mode` — legacy alias that maps to the equivalent `parallax.input`
+- `parallax.sources.window.weight` — weight for the window source (Hyprland only at present)
+- `input.window.sensitivity_x/y`, `input.window.deadzone_px`, `input.window.ema_alpha` — window provider tuning knobs
 
 **Examples:**
 ```bash

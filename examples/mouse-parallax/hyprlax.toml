@@ -12,7 +12,9 @@ easing = expo
 mode = "cursor"           # Mouse-driven parallax for focus-follow effect
 
 [global.parallax.sources]
-workspace.weight = 1.0     # disable workspace-driven movement
+# Only the cursor source should drive parallax in this preset.
+# Setting the workspace weight to 0 avoids large jumps when switching workspaces.
+workspace.weight = 0.0
 cursor.weight = 1.0
 
 # Invert X so layers shift opposite cursor (stronger depth feeling)
