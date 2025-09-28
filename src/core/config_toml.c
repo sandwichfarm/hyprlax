@@ -136,6 +136,13 @@ static void parse_global_table(toml_table_t *global, config_t *cfg)
     /* Render: [global.render] */
     toml_table_t *render = toml_table_in(global, "render");
     if (render) {
+        toml_datum_t acc = toml_bool_in(render, "accumulate");
+        if (acc.ok) cfg->render_accumulate = acc.u.b;
+        toml_datum_t ts = toml_double_in(render, "trail_strength");
+        if (ts.ok) {
+            float v = (float)ts.u.d; if (v < 0.0f) v = 0.0f; if (v > 1.0f) v = 1.0f;
+            cfg->render_trail_strength = v;
+        }
         toml_datum_t o = toml_string_in(render, "overflow");
         if (o.ok && o.u.s) {
             if (strcmp(o.u.s, "repeat_edge") == 0 || strcmp(o.u.s, "clamp") == 0) cfg->render_overflow_mode = 0;

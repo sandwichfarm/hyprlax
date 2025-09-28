@@ -41,6 +41,14 @@ const char *shader_fragment_basic =
     "    gl_FragColor = vec4(rgb * final_alpha, final_alpha);\n"
     "}\n";
 
+/* Solid color fragment shader (for fullscreen fades/trails) */
+const char *shader_fragment_fill =
+    "precision highp float;\n"
+    "uniform vec4 u_color;\n"
+    "void main() {\n"
+    "    gl_FragColor = u_color;\n"
+    "}\n";
+
 /* Variant with texcoord offset uniform in vertex shader */
 const char *shader_vertex_basic_offset =
     "precision highp float;\n"

@@ -84,6 +84,8 @@ typedef struct renderer_ops {
 
     /* Drawing operations */
     void (*clear)(float r, float g, float b, float a);
+    /* Optional: draw fullscreen color overlay with blending (for trails) */
+    void (*fade_frame)(float r, float g, float b, float a);
     void (*draw_layer)(const texture_t *texture, float x, float y,
                       float opacity, float blur_amount);
 
@@ -124,6 +126,8 @@ void renderer_destroy(renderer_t *renderer);
     ((r)->ops->present())
 #define RENDERER_CLEAR(r, red, green, blue, alpha) \
     ((r)->ops->clear((red), (green), (blue), (alpha)))
+#define RENDERER_FADE(r, red, green, blue, alpha) \
+    do { if ((r)->ops->fade_frame) (r)->ops->fade_frame((red), (green), (blue), (alpha)); } while(0)
 
 /* Available renderer backends */
 extern const renderer_ops_t renderer_gles2_ops;

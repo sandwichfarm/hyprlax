@@ -74,10 +74,13 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
     if (s_profile) t_draw_start = rc_get_time();
 
     RENDERER_BEGIN_FRAME(ctx->renderer);
-    /* Clear background to avoid accumulation/trails between frames.
-       Set HYPRLAX_ACCUMULATE=1 to skip clearing and get motion trails. */
-    const char *accum = getenv("HYPRLAX_ACCUMULATE");
-    if (!(accum && *accum && strcmp(accum, "0") != 0 && strcasecmp(accum, "false") != 0)) {
+    /* Frame prep: either clear (default) or fade previous frame for trails */
+    if (ctx->config.render_accumulate) {
+        float a = ctx->config.render_trail_strength;
+        if (a > 0.0f && ctx->renderer && ctx->renderer->ops && ctx->renderer->ops->fade_frame) {
+            ctx->renderer->ops->fade_frame(0.0f, 0.0f, 0.0f, a);
+        }
+    } else {
         if (ctx->renderer && ctx->renderer->ops && ctx->renderer->ops->clear) {
             ctx->renderer->ops->clear(0.0f, 0.0f, 0.0f, 1.0f);
         }

@@ -158,6 +158,9 @@ typedef struct {
     float render_margin_px_y;
     int render_tile_x;            /* default tiling flags */
     int render_tile_y;
+    /* Trails/accumulation effect */
+    bool render_accumulate;       /* if true, accumulate previous frames */
+    float render_trail_strength;  /* 0..1 fade amount per frame when accumulating */
 
     /* Cursor input configuration */
     float cursor_sensitivity_x;       /* multiplier on normalized input */

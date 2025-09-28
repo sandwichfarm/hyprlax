@@ -79,6 +79,7 @@ shader_uniforms_t* shader_get_uniforms(shader_program_t *program);
 extern const char *shader_vertex_basic;
 extern const char *shader_vertex_basic_offset;
 extern const char *shader_fragment_basic;
+extern const char *shader_fragment_fill;
 extern const char *shader_fragment_blur;
 
 /* Shader builder for dynamic blur shaders */

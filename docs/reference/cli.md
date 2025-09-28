@@ -59,6 +59,8 @@ hyprlax ctl <COMMAND> [ARGS...]
 | `--no-tile-y` | flag | off | Disable tiling on Y axis |
 | `--margin-px-x` | float | 0 | Extra horizontal safe margin (px) |
 | `--margin-px-y` | float | 0 | Extra vertical safe margin (px) |
+| `--accumulate` | flag | off | Enable trails effect (accumulate frames) |
+| `--trail-strength` | float | 0.12 | Per-frame fade when accumulating (0..1) |
 
 ## Layers
 

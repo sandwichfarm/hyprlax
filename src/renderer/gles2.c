@@ -31,6 +31,7 @@ typedef struct {
     shader_program_t *basic_shader;
     shader_program_t *blur_shader;
     shader_program_t *blur_sep_shader;
+    shader_program_t *fill_shader;
 
     /* Vertex buffer for quad rendering */
     GLuint vbo;
@@ -173,6 +174,15 @@ static int gles2_init(void *native_display, void *native_window,
         fprintf(stderr, "[DEBUG] Basic shader compiled successfully, id=%u\n", data->basic_shader->id);
     }
 
+    /* Compile fill shader for fullscreen color overlay */
+    if (getenv("HYPRLAX_DEBUG")) {
+        fprintf(stderr, "[DEBUG] Compiling fill shader\n");
+    }
+    data->fill_shader = shader_create_program("fill");
+    if (shader_compile(data->fill_shader, shader_vertex_basic, shader_fragment_fill) != HYPRLAX_SUCCESS) {
+        fprintf(stderr, "Failed to compile fill shader\n");
+    }
+
     /* Compile blur shader */
     if (getenv("HYPRLAX_DEBUG")) {
         fprintf(stderr, "[DEBUG] Compiling blur shader\n");
@@ -230,6 +240,9 @@ static void gles2_destroy(void) {
 
     if (g_gles2_data->basic_shader) {
         shader_destroy_program(g_gles2_data->basic_shader);
+    }
+    if (g_gles2_data->fill_shader) {
+        shader_destroy_program(g_gles2_data->fill_shader);
     }
 
     if (g_gles2_data->blur_shader) {
@@ -296,6 +309,47 @@ static void gles2_present(void) {
         glFinish();
     }
     eglSwapBuffers(g_gles2_data->egl_display, surface);
+}
+
+/* Fullscreen fade overlay (blended) */
+static void gles2_fade_frame(float r, float g, float b, float a) {
+    if (!g_gles2_data || !g_gles2_data->fill_shader) return;
+    if (a <= 0.0001f) return;
+
+    /* Use fill shader */
+    shader_use(g_gles2_data->fill_shader);
+    GLint loc_col = shader_get_uniform_location(g_gles2_data->fill_shader, "u_color");
+    if (loc_col != -1) glUniform4f(loc_col, r, g, b, a);
+
+    /* Prepare vertices: fullscreen quad (-1..1), dummy texcoords (not used) */
+    GLfloat vertices[] = {
+        -1.0f, -1.0f,  0.0f, 1.0f,
+         1.0f, -1.0f,  1.0f, 1.0f,
+        -1.0f,  1.0f,  0.0f, 0.0f,
+         1.0f,  1.0f,  1.0f, 0.0f
+    };
+
+    GLuint vbo = 0; glGenBuffers(1, &vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    GLint pos_attrib = shader_get_attrib_location(g_gles2_data->fill_shader, "a_position");
+    GLint tex_attrib = shader_get_attrib_location(g_gles2_data->fill_shader, "a_texcoord");
+    if (pos_attrib >= 0) {
+        glEnableVertexAttribArray(pos_attrib);
+        glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (void*)0);
+    }
+    if (tex_attrib >= 0) {
+        glEnableVertexAttribArray(tex_attrib);
+        glVertexAttribPointer(tex_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (void*)(2 * sizeof(GLfloat)));
+    }
+
+    /* Draw blended overlay */
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+    if (pos_attrib >= 0) glDisableVertexAttribArray(pos_attrib);
+    if (tex_attrib >= 0) glDisableVertexAttribArray(tex_attrib);
+    glDeleteBuffers(1, &vbo);
 }
 
 /* Helpers for extended draw */
@@ -953,6 +1007,7 @@ const renderer_ops_t renderer_gles2_ops = {
     .destroy_texture = gles2_destroy_texture,
     .bind_texture = gles2_bind_texture,
     .clear = gles2_clear,
+    .fade_frame = gles2_fade_frame,
     .draw_layer = gles2_draw_layer,
     .draw_layer_ex = gles2_draw_layer_ex,
     .resize = gles2_resize,

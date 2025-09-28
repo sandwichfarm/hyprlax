@@ -50,6 +50,8 @@ void config_set_defaults(config_t *cfg) {
     cfg->render_margin_px_y = 0.0f;
     cfg->render_tile_x = 0;
     cfg->render_tile_y = 0;
+    cfg->render_accumulate = false;
+    cfg->render_trail_strength = 0.12f; /* per-frame fade when accumulating */
     cfg->cursor_sensitivity_x = 1.0f;
     cfg->cursor_sensitivity_y = 1.0f;
     cfg->cursor_deadzone_px = 4.0f;

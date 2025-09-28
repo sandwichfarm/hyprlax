@@ -204,6 +204,31 @@ align = { x = 0.5, y = 0.8 }  # Align to bottom
 margin_px = { x = 50, y = 30 }
 ```
 
+## Render Settings
+
+### [global.render]
+
+Rendering behavior, including optional trails (frame accumulation).
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `overflow` | string | `repeat_edge` | Texture overflow mode |
+| `tile` | bool/table | false | Enable tiling (`true`) or per-axis `{ x, y }` |
+| `margin_px` | table | `{ x=0, y=0 }` | Extra safe margin in pixels |
+| `accumulate` | bool | false | Accumulate frames to create motion trails |
+| `trail_strength` | float | 0.12 | Per-frame fade when accumulating (0..1) |
+
+Example:
+
+```toml
+[global.render]
+overflow = "repeat_edge"
+tile = { x = false, y = false }
+margin_px = { x = 0, y = 0 }
+accumulate = true
+trail_strength = 0.12
+```
+
 ## Validation
 
 Run with `--debug` to validate configuration:

@@ -328,6 +328,8 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
         {"parallax", required_argument, 0, 1005},
         {"mouse-weight", required_argument, 0, 1006},
         {"workspace-weight", required_argument, 0, 1007},
+        {"accumulate", no_argument, 0, 1040},
+        {"trail-strength", required_argument, 0, 1041},
         {"non-interactive", no_argument, 0, 1030},
         {0, 0, 0, 0}
     };
@@ -359,6 +361,8 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 printf("      --parallax <mode>     Parallax mode: workspace|cursor|hybrid\n");
                 printf("      --mouse-weight <w>    Weight of cursor source (0..1)\n");
                 printf("      --workspace-weight <w> Weight of workspace source (0..1)\n");
+                printf("      --accumulate          Enable trails effect (accumulate frames)\n");
+                printf("      --trail-strength <a>  Trail fade per frame (0..1, default: %.2f)\n", 0.12f);
                 printf("  --idle-poll-rate <hz>     Polling rate when idle (default: 2.0 Hz)\n");
                 printf("\nRender options:\n");
                 printf("      --overflow <mode>     repeat_edge|repeat|repeat_x|repeat_y|none\n");
@@ -514,6 +518,14 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 ctx->config.parallax_workspace_weight = atof(optarg);
                 if (ctx->config.parallax_workspace_weight < 0.0f) ctx->config.parallax_workspace_weight = 0.0f;
                 if (ctx->config.parallax_workspace_weight > 1.0f) ctx->config.parallax_workspace_weight = 1.0f;
+                break;
+
+            case 1040: /* --accumulate */
+                ctx->config.render_accumulate = true;
+                break;
+            case 1041: /* --trail-strength */ {
+                float v = atof(optarg); if (v < 0.0f) v = 0.0f; if (v > 1.0f) v = 1.0f;
+                ctx->config.render_trail_strength = v; }
                 break;
 
             case 1010: { /* --overflow */
