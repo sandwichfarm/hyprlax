@@ -7,6 +7,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include <GLES2/gl2.h>
+#include <string.h>
 #include "../include/hyprlax.h"
 #include "../include/renderer.h"
 #include "../core/monitor.h"
@@ -73,6 +74,14 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
     if (s_profile) t_draw_start = rc_get_time();
 
     RENDERER_BEGIN_FRAME(ctx->renderer);
+    /* Clear background to avoid accumulation/trails between frames.
+       Set HYPRLAX_ACCUMULATE=1 to skip clearing and get motion trails. */
+    const char *accum = getenv("HYPRLAX_ACCUMULATE");
+    if (!(accum && *accum && strcmp(accum, "0") != 0 && strcasecmp(accum, "false") != 0)) {
+        if (ctx->renderer && ctx->renderer->ops && ctx->renderer->ops->clear) {
+            ctx->renderer->ops->clear(0.0f, 0.0f, 0.0f, 1.0f);
+        }
+    }
 
     parallax_layer_t *layer = ctx->layers;
     while (layer) {
