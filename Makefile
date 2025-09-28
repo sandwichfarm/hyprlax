@@ -289,11 +289,16 @@ tests/test_config_validation: tests/test_config_validation.c
 tests/test_hyprland_events: tests/test_hyprland_events.c src/compositor/hyprland.c src/compositor/compositor.c src/core/log.c
 	$(CC) $(TEST_CFLAGS) -DUNIT_TEST -Isrc -Isrc/include $^ $(TEST_LIBS) -o $@
 
+tests/test_niri_events: tests/test_niri_events.c src/compositor/niri.c src/compositor/compositor.c src/core/log.c
+	$(CC) $(TEST_CFLAGS) -DUNIT_TEST -Isrc -Isrc/include $^ $(TEST_LIBS) -o $@
+
 # Ops smoke test: link against compositor adapters to validate get_event_fd presence
 tests/test_compositor_ops: tests/test_compositor_ops.c \
     src/compositor/hyprland.c src/compositor/sway.c src/compositor/wayfire.c \
     src/compositor/niri.c src/compositor/river.c src/compositor/generic_wayland.c \
-    src/compositor/compositor.c src/core/log.c protocols/river-status-protocol.c
+    src/compositor/compositor.c src/compositor/workspace_models.c src/core/log.c \
+    src/core/monitor.c \
+    protocols/river-status-protocol.c
 	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) $(PKG_LIBS) -o $@
 
 # Caps/Model tests
@@ -301,6 +306,7 @@ tests/test_compositor_caps: tests/test_compositor_caps.c \
     src/compositor/hyprland.c src/compositor/sway.c src/compositor/wayfire.c \
     src/compositor/niri.c src/compositor/river.c src/compositor/generic_wayland.c \
     src/compositor/compositor.c src/compositor/workspace_models.c src/core/log.c \
+    src/core/monitor.c \
     protocols/river-status-protocol.c
 	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) $(PKG_LIBS) -o $@
 
@@ -312,7 +318,7 @@ tests/test_toml_config: tests/test_toml_config.c src/core/config_toml.c src/core
 
 tests/test_runtime_properties: tests/test_runtime_properties.c tests/stubs_gfx.c \
     src/hyprlax_main.c src/core/parallax.c src/core/log.c src/core/config.c src/core/layer.c \
-    src/core/event_loop.c src/core/input/input_manager.c src/core/input/providers.c \
+    src/core/monitor.c src/core/event_loop.c src/core/input/input_manager.c src/core/input/providers.c \
     src/core/input/modes/workspace.c src/core/input/modes/cursor.c src/core/input/modes/window.c \
     src/core/animation.c src/core/easing.c src/vendor/toml.c src/core/config_toml.c
 	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) $(PKG_LIBS) -o $@
