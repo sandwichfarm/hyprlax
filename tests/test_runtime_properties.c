@@ -5,7 +5,6 @@
 #include "include/hyprlax.h"
 
 // Stubs to satisfy hyprlax_main.o links (unused in this test)
-void layer_list_destroy(parallax_layer_t *p) { (void)p; }
 void ipc_cleanup(void *p) { (void)p; }
 void renderer_destroy(renderer_t *p) { (void)p; }
 void compositor_destroy(compositor_adapter_t *p) { (void)p; }

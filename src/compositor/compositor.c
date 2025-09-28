@@ -206,6 +206,11 @@ int compositor_create(compositor_adapter_t **out_adapter, compositor_type_t type
             return HYPRLAX_ERROR_INVALID_ARGS;
     }
 
+    /* Normalize capability bits based on ops presence */
+    if (adapter->ops && adapter->ops->get_cursor_position) {
+        adapter->caps |= C_CAP_GLOBAL_CURSOR;
+    }
+
     adapter->initialized = false;
     adapter->connected = false;
     *out_adapter = adapter;

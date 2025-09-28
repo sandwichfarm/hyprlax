@@ -47,8 +47,8 @@ workspace_model_t workspace_detect_model_for_adapter(const compositor_adapter_t 
     if (c & C_CAP_WS_SET_BASED) return WS_MODEL_SET_BASED;
     if (c & C_CAP_WS_PER_OUTPUT_NUMERIC) return WS_MODEL_PER_OUTPUT_NUMERIC;
     if (c & C_CAP_WS_GLOBAL_NUMERIC) return WS_MODEL_GLOBAL_NUMERIC;
-    /* Fallback to type-based detection (within compositor module only) */
-    return workspace_detect_model(adapter->type);
+    /* No caps signaled: default to global numeric */
+    return WS_MODEL_GLOBAL_NUMERIC;
 }
 
 /* Detect compositor capabilities */

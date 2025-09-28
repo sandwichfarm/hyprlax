@@ -34,7 +34,7 @@ hyprlax --layer background.jpg:0.3:1.0:3.0 \
 
 ### Method 2: Configuration File
 
-Create `~/.config/hyprlax/parallax.conf`:
+Create `~/.config/hyprlax/hyprlax.toml`:
 
 ```bash
 # Background layer - distant mountains
@@ -54,7 +54,7 @@ easing expo
 
 Then run:
 ```bash
-hyprlax --config ~/.config/hyprlax/parallax.conf
+hyprlax --config ~/.config/hyprlax/hyprlax.toml
 ```
 
 ## Layer Parameters Explained

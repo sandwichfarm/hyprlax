@@ -169,7 +169,7 @@ Reload configuration file.
 hyprlax ctl reload
 ```
 
-Reloads the configuration file specified at startup. If no TOML path is set, falls back to legacy config (`~/.config/hyprlax/parallax.conf`) when available.
+Reloads the configuration file specified at startup. Runtime reload now supports TOML only. If a legacy `.conf` path was used, hyprlax will refuse to reload and print a conversion hint.
 
 ## Quick Examples
 

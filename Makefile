@@ -100,7 +100,7 @@ PROTOCOL_HDRS =
 endif
 
 # Core module sources (always included)
-CORE_SRCS = src/core/easing.c src/core/animation.c src/core/layer.c src/core/config.c src/core/monitor.c src/core/log.c src/core/parallax.c
+CORE_SRCS = src/core/easing.c src/core/animation.c src/core/layer.c src/core/config.c src/core/monitor.c src/core/log.c src/core/parallax.c src/core/cursor.c src/core/render_core.c src/core/event_loop.c
 
 # Renderer module sources (conditional)
 RENDERER_SRCS = src/renderer/renderer.c src/renderer/shader.c
@@ -236,6 +236,7 @@ export DEBUGINFOD_URLS ?= https://debuginfod.archlinux.org
 TEST_TARGETS = tests/test_integration tests/test_ipc tests/test_blur tests/test_config tests/test_animation tests/test_easing tests/test_shader tests/test_platform tests/test_compositor tests/test_modules tests/test_renderer tests/test_workspace_changes tests/test_animation_state tests/test_config_validation tests/test_hyprland_events
 ALL_TESTS = $(filter tests/test_%, $(wildcard tests/test_*.c))
 ALL_TEST_TARGETS = $(ALL_TESTS:.c=)
+SHELL_TESTS = $(wildcard tests/test_*.sh)
 
 # Individual test rules - updated for Check framework
 tests/test_integration: tests/test_integration.c src/ipc.c src/core/log.c
@@ -294,11 +295,20 @@ tests/test_compositor_ops: tests/test_compositor_ops.c \
     src/compositor/compositor.c src/core/log.c protocols/river-status-protocol.c
 	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) $(PKG_LIBS) -o $@
 
+# Caps/Model tests
+tests/test_compositor_caps: tests/test_compositor_caps.c \
+    src/compositor/hyprland.c src/compositor/sway.c src/compositor/wayfire.c \
+    src/compositor/niri.c src/compositor/river.c src/compositor/generic_wayland.c \
+    src/compositor/compositor.c src/compositor/workspace_models.c src/core/log.c \
+    protocols/river-status-protocol.c
+	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) $(PKG_LIBS) -o $@
+
 # New parallax-related tests
 tests/test_toml_config: tests/test_toml_config.c src/core/config_toml.c src/core/config.c src/core/parallax.c src/core/log.c src/core/easing.c src/vendor/toml.c
 	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) -o $@
 
-tests/test_runtime_properties: tests/test_runtime_properties.c src/hyprlax_main.c src/core/parallax.c src/core/log.c src/core/config.c
+tests/test_runtime_properties: tests/test_runtime_properties.c tests/stubs_gfx.c \
+    src/hyprlax_main.c src/core/parallax.c src/core/log.c src/core/config.c src/core/layer.c
 	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) $(PKG_LIBS) -o $@
 
 # Run all tests
@@ -321,6 +331,33 @@ test: $(ALL_TEST_TARGETS)
 		echo "✓ All tests passed!"; \
 	else \
 		echo "✗ $$failed test(s) failed"; \
+		exit 1; \
+	fi
+
+# Run shell-based tests (scripts under tests/)
+test-scripts: $(TARGET)
+	@echo "=== Running Shell Test Scripts ==="
+	@failed=0; total=0; \
+	for script in $(SHELL_TESTS); do \
+		if [ -x $$script ]; then \
+			total=$$((total + 1)); \
+			echo "\n--- Running $$script ---"; \
+			if ! $$script; then \
+				echo "✗ $$script FAILED"; \
+				failed=$$((failed + 1)); \
+			else \
+				echo "✓ $$script PASSED"; \
+			fi; \
+		fi; \
+	done; \
+	if [ $$total -eq 0 ]; then \
+		echo "(no shell tests found)"; \
+	fi; \
+	echo "\n=== Shell Test Summary ==="; \
+	if [ $$failed -eq 0 ]; then \
+		echo "✓ All shell tests passed!"; \
+	else \
+		echo "✗ $$failed shell test(s) failed"; \
 		exit 1; \
 	fi
 
@@ -381,7 +418,7 @@ lint-fix:
 clean-tests:
 	rm -f $(ALL_TEST_TARGETS) tests/*.valgrind.log tests/*.valgrind.log.* tests/*.valgrind.log.core.*
 
-.PHONY: all clean install install-user uninstall uninstall-user test memcheck clean-tests lint lint-fix bench bench-perf bench-30fps bench-clean
+.PHONY: all clean install install-user uninstall uninstall-user test test-scripts memcheck clean-tests lint lint-fix bench bench-perf bench-30fps bench-clean
 # Benchmark helpers
 bench:
 	@./scripts/bench/bench-optimizations.sh

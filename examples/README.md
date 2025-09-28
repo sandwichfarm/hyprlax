@@ -4,6 +4,12 @@ This directory contains self-contained example configurations demonstrating vari
 
 ## Available Examples
 
+Note: Some examples historically used `parallax.conf`. If `hyprlax.toml` is missing, convert once:
+
+```
+hyprlax ctl convert-config <example>/parallax.conf <example>/hyprlax.toml --yes
+```
+
 ### 🏔️ Mountains
 A natural landscape with layered mountains, clouds, and trees.
 - 6 layers with varying depth
@@ -11,7 +17,7 @@ A natural landscape with layered mountains, clouds, and trees.
 - Smooth, organic animations
 
 ```bash
-hyprlax --config examples/mountains/parallax.conf
+hyprlax --config examples/mountains/hyprlax.toml
 ```
 
 ### 🌃 City
@@ -21,7 +27,7 @@ An urban nightscape with multiple skyline layers.
 - Street-level foreground
 
 ```bash
-hyprlax --config examples/city/parallax.conf
+hyprlax --config examples/city/hyprlax.toml
 ```
 
 ### 🎨 Abstract
@@ -31,14 +37,14 @@ Colorful geometric shapes with dreamy motion.
 - Heavy blur for depth effect
 
 ```bash
-hyprlax --config examples/abstract/parallax.conf
+hyprlax --config examples/abstract/hyprlax.toml
 ```
 
 ## Structure
 
 Each example directory contains:
 - **Layer images** (PNG with transparency)
-- **parallax.conf** - Hyprlax configuration file
+- **hyprlax.toml** - Hyprlax TOML configuration file (convert from legacy if needed)
 - **README.md** - Example-specific documentation
 
 ## Generating New Examples
@@ -57,14 +63,14 @@ The script creates procedurally-generated images perfect for testing parallax ef
 
 ## Using Examples
 
-1. **Test an example:**
+1. **Test an example (TOML):**
    ```bash
    cd /path/to/hyprlax
-   ./hyprlax --config examples/mountains/parallax.conf
+   ./hyprlax --config examples/mountains/hyprlax.toml
    ```
 
 2. **Customize settings:**
-   Edit the `parallax.conf` file in any example directory to adjust:
+   Edit the `hyprlax.toml` file in any example directory to adjust:
    - Shift multipliers (parallax intensity)
    - Opacity values (layer transparency)  
    - Blur amounts (depth perception)
@@ -87,7 +93,7 @@ To create a custom parallax wallpaper:
 1. Prepare layered images (PNG with transparency)
 2. Copy an example directory as a template
 3. Replace the layer images
-4. Update paths in `parallax.conf`
+4. Update paths in `hyprlax.toml`
 5. Adjust parameters to taste
 
 ## Layer Guidelines

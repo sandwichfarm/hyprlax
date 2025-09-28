@@ -16,7 +16,7 @@ hyprlax --shift 200 --duration 1.5 --fps 60 image.jpg
 ### 2. TOML Configuration (Recommended)
 Advanced features with structured configuration:
 ```bash
-hyprlax --config ~/.config/hyprlax/config.toml
+hyprlax --config ~/.config/hyprlax/hyprlax.toml
 ```
 
 See [TOML Reference](toml-reference.md) for complete documentation.
@@ -45,7 +45,7 @@ See [Legacy Format](legacy-format.md) for syntax.
 
 Settings are applied in this order (later overrides earlier):
 1. Built-in defaults
-2. Configuration file (TOML or legacy)
+2. Configuration file (TOML)
 3. Command-line arguments
 4. Runtime IPC commands
 

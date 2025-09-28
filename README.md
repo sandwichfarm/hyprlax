@@ -98,8 +98,8 @@ hyprlax ~/Pictures/wallpaper.jpg
 hyprlax --layer background.jpg:0.3:1.0:expo:0:1.0:3.0 \
         --layer foreground.png:1.0:0.7
 
-# Using config file
-hyprlax --config ~/.config/hyprlax/parallax.conf
+# Using TOML config
+hyprlax --config ~/.config/hyprlax/hyprlax.toml
 
 # Force specific compositor
 HYPRLAX_COMPOSITOR=sway hyprlax ~/Pictures/wallpaper.jpg
@@ -116,6 +116,21 @@ HYPRLAX_COMPOSITOR=sway hyprlax ~/Pictures/wallpaper.jpg
 - `--config` - Load from config file
 
 **Full documentation:** [Configuration Guide](docs/configuration.md)
+
+### Migrating from legacy .conf
+
+Legacy runtime loading of `.conf` files has been removed. Convert once to TOML, then run with the new path:
+
+```bash
+# Interactive (prompts):
+hyprlax ctl convert-config ~/.config/hyprlax/parallax.conf ~/.config/hyprlax/hyprlax.toml
+
+# Non-interactive:
+hyprlax ctl convert-config ~/.config/hyprlax/parallax.conf ~/.config/hyprlax/hyprlax.toml --yes
+
+# If you start hyprlax with a legacy path, it prints the exact convert command
+hyprlax --non-interactive --config ~/.config/hyprlax/parallax.conf
+```
 
 ## Compositor Configuration
 

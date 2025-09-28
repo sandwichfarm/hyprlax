@@ -130,6 +130,9 @@ void hyprlax_handle_resize(hyprlax_context_t *ctx, int width, int height);
 
 /* Rendering */
 void hyprlax_render_frame(hyprlax_context_t *ctx);
+int hyprlax_load_layer_textures(hyprlax_context_t *ctx);
+/* Texture loading helper */
+unsigned int load_texture(const char *path, int *width, int *height);
 
 /* Control interface */
 int hyprlax_ctl_main(int argc, char **argv);
@@ -143,5 +146,16 @@ int hyprlax_reload_config(hyprlax_context_t *ctx);
 
 /* Cursor input processing */
 bool hyprlax_cursor_tick(hyprlax_context_t *ctx);
+
+/* Event loop helpers */
+int create_timerfd_monotonic(void);
+void disarm_timerfd(int fd);
+void arm_timerfd_ms(int fd, int initial_ms, int interval_ms);
+int epoll_add_fd(int epfd, int fd, uint32_t events);
+void hyprlax_setup_epoll(hyprlax_context_t *ctx);
+void hyprlax_arm_frame_timer(hyprlax_context_t *ctx, int fps);
+void hyprlax_disarm_frame_timer(hyprlax_context_t *ctx);
+void hyprlax_arm_debounce(hyprlax_context_t *ctx, int debounce_ms);
+void hyprlax_clear_timerfd(int fd);
 
 #endif /* HYPRLAX_H */

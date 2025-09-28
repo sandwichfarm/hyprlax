@@ -15,6 +15,7 @@
 #include <wayland-egl.h>
 #include <GLES2/gl2.h>
 #include "../include/platform.h"
+#include "../compositor/workspace_models.h"
 #include "../include/hyprlax_internal.h"
 #include "../include/log.h"
 #include "../include/renderer.h"
@@ -303,7 +304,7 @@ static void layer_surface_configure(void *data,
                         config_t *config = monitor_resolve_config(mon, &wl_data->ctx->config);
                         monitor_apply_config(mon, config);
                         if (wl_data->ctx->compositor) {
-                            workspace_model_t model = workspace_detect_model(wl_data->ctx->compositor->type);
+                            workspace_model_t model = workspace_detect_model_for_adapter(wl_data->ctx->compositor);
                             mon->current_context.model = model;
                             mon->current_context.data.workspace_id = COMPOSITOR_GET_WORKSPACE(wl_data->ctx->compositor);
                             mon->previous_context = mon->current_context;
@@ -737,7 +738,7 @@ static int wayland_poll_events(platform_event_t *event) {
                         config_t *config = monitor_resolve_config(mon, &g_wayland_data->ctx->config);
                         monitor_apply_config(mon, config);
                         if (g_wayland_data->ctx->compositor) {
-                            workspace_model_t model = workspace_detect_model(g_wayland_data->ctx->compositor->type);
+                            workspace_model_t model = workspace_detect_model_for_adapter(g_wayland_data->ctx->compositor);
                             mon->current_context.model = model;
                             mon->current_context.data.workspace_id = COMPOSITOR_GET_WORKSPACE(g_wayland_data->ctx->compositor);
                             mon->previous_context = mon->current_context;
@@ -916,7 +917,7 @@ static void output_handle_mode(void *data, struct wl_output *output,
                     config_t *config = monitor_resolve_config(mon, &g_wayland_data->ctx->config);
                     monitor_apply_config(mon, config);
                     if (g_wayland_data->ctx->compositor) {
-                        workspace_model_t model = workspace_detect_model(g_wayland_data->ctx->compositor->type);
+                        workspace_model_t model = workspace_detect_model_for_adapter(g_wayland_data->ctx->compositor);
                         mon->current_context.model = model;
                         mon->current_context.data.workspace_id = COMPOSITOR_GET_WORKSPACE(g_wayland_data->ctx->compositor);
                         mon->previous_context = mon->current_context;
@@ -957,7 +958,7 @@ static void output_handle_done(void *data, struct wl_output *output) {
 
                 /* Set initial workspace context from compositor */
                 if (g_wayland_data->ctx->compositor) {
-                    workspace_model_t model = workspace_detect_model(g_wayland_data->ctx->compositor->type);
+                    workspace_model_t model = workspace_detect_model_for_adapter(g_wayland_data->ctx->compositor);
                     mon->current_context.model = model;
                     mon->current_context.data.workspace_id = COMPOSITOR_GET_WORKSPACE(g_wayland_data->ctx->compositor);
                     mon->previous_context = mon->current_context;

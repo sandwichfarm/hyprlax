@@ -3,6 +3,7 @@
  */
 
 #include <math.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include "../include/hyprlax.h"
@@ -135,4 +136,3 @@ bool hyprlax_cursor_tick(hyprlax_context_t *ctx) {
     if (ctx->config.debug) return true;
     return (dxn > 0.0015f || dyn > 0.0015f);
 }
-

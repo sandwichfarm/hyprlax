@@ -140,10 +140,10 @@ hyprlax --layer ~/sky.jpg:0.2:1.0:5.0 \
 ### Configuration
 ```bash
 # Load TOML config
-hyprlax --config ~/.config/hyprlax/config.toml
+hyprlax --config ~/.config/hyprlax/hyprlax.toml
 
-# Load legacy config
-hyprlax --config ~/.config/hyprlax/parallax.conf
+# Convert legacy to TOML (non-interactive)
+hyprlax ctl convert-config ~/.config/hyprlax/parallax.conf ~/.config/hyprlax/hyprlax.toml --yes
 
 # Override config settings
 hyprlax --config config.toml --fps 30 -D
