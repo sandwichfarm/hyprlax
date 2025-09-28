@@ -286,6 +286,25 @@ __attribute__((weak)) bool workspace_detect_capabilities(int compositor_type,
     return false;
 }
 
+static void format_parallax_inputs(const config_t *cfg, char *out, size_t out_sz) {
+    if (!out || out_sz == 0) return;
+    out[0] = '\0';
+    size_t len = 0;
+    if (cfg) {
+        if (cfg->parallax_workspace_weight > 0.0f) {
+            len += snprintf(out + len, out_sz - len, "%sworkspace:%.3f",
+                            len ? "," : "", cfg->parallax_workspace_weight);
+        }
+        if (cfg->parallax_cursor_weight > 0.0f) {
+            len += snprintf(out + len, out_sz - len, "%scursor:%.3f",
+                            len ? "," : "", cfg->parallax_cursor_weight);
+        }
+    }
+    if (len == 0) {
+        snprintf(out, out_sz, "none");
+    }
+}
+
 static void get_socket_path(char* buffer, size_t size) {
     const char* user = getenv("USER");
     if (!user) {
@@ -850,6 +869,8 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 int layers = app ? app->layer_count : 0;
                 const char *comp = (app && app->compositor && app->compositor->ops && app->compositor->ops->get_name) ? app->compositor->ops->get_name() : "unknown";
                 const char *mode = app ? parallax_mode_to_string(app->config.parallax_mode) : "unknown";
+                char parallax_inputs[64];
+                format_parallax_inputs(app ? &app->config : NULL, parallax_inputs, sizeof(parallax_inputs));
                 int monitors = (app && app->monitors) ? app->monitors->count : 0;
                 int target_fps = app ? app->config.target_fps : 0;
                 double fps = app ? app->fps : 0.0;
@@ -863,8 +884,8 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                     (void)workspace_detect_capabilities(ctype, &tcaps);
 
                     off += snprintf(response + off, sizeof(response) - off,
-                        "{\"running\":true,\"layers\":%d,\"target_fps\":%d,\"fps\":%.2f,\"parallax\":\"%s\",\"compositor\":\"%s\",\"socket\":\"%s\",\"vsync\":%s,\"debug\":%s,\"caps\":{\"steal\":%s,\"move\":%s,\"split\":%s,\"wsets\":%s,\"tags\":%s,\"vstack\":%s},\"monitors\":[",
-                        layers, target_fps, fps, mode, comp, ctx->socket_path, vsync?"true":"false", debug?"true":"false",
+                        "{\"running\":true,\"layers\":%d,\"target_fps\":%d,\"fps\":%.2f,\"parallax\":\"%s\",\"parallax_input\":\"%s\",\"compositor\":\"%s\",\"socket\":\"%s\",\"vsync\":%s,\"debug\":%s,\"caps\":{\"steal\":%s,\"move\":%s,\"split\":%s,\"wsets\":%s,\"tags\":%s,\"vstack\":%s},\"monitors\":[",
+                        layers, target_fps, fps, mode, parallax_inputs, comp, ctx->socket_path, vsync?"true":"false", debug?"true":"false",
                         tcaps.can_steal_workspace?"true":"false",
                         tcaps.supports_workspace_move?"true":"false",
                         tcaps.has_split_plugin?"true":"false",
@@ -892,8 +913,8 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                     if (off + 2 < sizeof(response)) { response[off++] = ']'; response[off++]='}'; response[off++]='\n'; response[off]='\0'; }
                 } else {
                     snprintf(response, sizeof(response),
-                             "Status: Active\nhyprlax running\nLayers: %d\nTarget FPS: %d\nFPS: %.1f\nParallax: %s\nMonitors: %d\nCompositor: %s\nSocket: %s\n",
-                             layers, target_fps, fps, mode, monitors, comp, ctx->socket_path);
+                             "Status: Active\nhyprlax running\nLayers: %d\nTarget FPS: %d\nFPS: %.1f\nParallax Mode: %s\nParallax Inputs: %s\nMonitors: %d\nCompositor: %s\nSocket: %s\n",
+                             layers, target_fps, fps, mode, parallax_inputs, monitors, comp, ctx->socket_path);
                 }
                 success = true;
                 break;

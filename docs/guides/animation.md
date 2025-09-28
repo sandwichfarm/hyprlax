@@ -4,25 +4,24 @@ Master the animation system to create smooth, natural parallax effects.
 
 ## Parallax Modes
 
-Hyprlax supports multiple sources of parallax and ways to combine them:
-- workspace: Driven only by workspace changes (original behavior)
-- cursor: Driven only by mouse/cursor movement
-- hybrid: Workspace-driven with cursor influence blended in
+Hyprlax combines one or more **input sources** to drive layer movement:
+- `workspace`: driven by workspace changes (original behavior)
+- `cursor`: driven by smoothed cursor motion
+- `window` *(planned)*: will track the active window position
 
-You can select a mode via CLI or TOML:
+Configure sources via CLI or TOML:
 
 ```bash
-# CLI
-hyprlax --parallax workspace   # or cursor, hybrid
-hyprlax --mouse-weight 0.3 --workspace-weight 0.7
+# CLI examples
+hyprlax --input workspace                      # workspace only
+hyprlax --input workspace,cursor:0.3           # workspace + cursor blend
+
+# Legacy knobs (warn but still supported)
+hyprlax --parallax hybrid --mouse-weight 0.3
 
 # TOML (preferred)
 [global.parallax]
-mode = "hybrid"
-
-[global.parallax.sources]
-workspace.weight = 0.7
-cursor.weight = 0.3
+input = ["workspace", "cursor:0.3"]
 
 [global.parallax.invert.cursor]
 x = true  # invert X for increased depth feeling
@@ -34,6 +33,8 @@ sensitivity_y = 0.25
 deadzone_px = 3
 ema_alpha = 0.25
 ```
+
+> **Deprecated:** `parallax.mode` + `parallax.sources.(workspace|cursor).weight` remain for compatibility. Prefer `parallax.input` and the `--input` flag for new configurations.
 
 ### Per-Layer Axis Control
 

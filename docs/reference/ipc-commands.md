@@ -124,6 +124,12 @@ Aliases (kept for compatibility): `fps`, `shift`, `duration`, `easing`.
 | `blur_size` | int | 3-31 (odd) | Blur kernel size |
 | `debug` | bool | true/false | Debug output toggle |
 
+Additional structured keys:
+
+- `parallax.input` — comma/array list of enabled sources (e.g. `workspace,cursor:0.3`)
+- `parallax.sources.cursor.weight`, `parallax.sources.workspace.weight` — legacy knobs (kept for compatibility)
+- `parallax.mode` — legacy alias that maps to the equivalent `parallax.input`
+
 **Examples:**
 ```bash
 hyprlax ctl set fps 120
@@ -158,8 +164,8 @@ hyprlax ctl status [--json|-j] [--long|-l]
 ```
 
 **Output includes:**
-- Default (text): running state, layers, target FPS, current FPS, parallax mode, Render (overflow + tile), compositor, socket, vsync, debug
-- `--long`: adds Shift Pixels, Parallax Weights (workspace/cursor), and full Render defaults (overflow, tile, margin_px)
+- Default (text): running state, layers, target FPS, current FPS, parallax inputs, Render (overflow + tile), compositor, socket, vsync, debug
+- `--long`: adds Shift Pixels, input weights, and full Render defaults (overflow, tile, margin_px)
 - `--json`: full machine-readable status including the above plus `monitors[]` (name, size, pos, scale, refresh, caps)
 
 ### reload

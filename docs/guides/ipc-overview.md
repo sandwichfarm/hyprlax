@@ -72,12 +72,14 @@ hyprlax ctl get animation.duration
 Structured properties are also available (examples):
 
 ```bash
-hyprlax ctl set parallax.mode cursor
-hyprlax ctl set parallax.sources.cursor.weight 0.5
+hyprlax ctl set parallax.input workspace,cursor:0.3
+hyprlax ctl set parallax.sources.cursor.weight 0.5  # legacy, still accepted
 hyprlax ctl set render.overflow none
 hyprlax ctl set render.tile.x true
 hyprlax ctl get render.margin_px.x
 ```
+
+> **Deprecated:** `parallax.mode` remains readable/settable for compatibility, but will emit warnings. Prefer `parallax.input` for new tooling.
 
 ## Understanding x/y (UV Pan)
 

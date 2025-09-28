@@ -73,6 +73,13 @@ static void hyprlax_update_cursor_provider(hyprlax_context_t *ctx) {
     }
 }
 
+static void warn_legacy_parallax_usage(const char *source) {
+    static bool warned = false;
+    if (warned) return;
+    warned = true;
+    LOG_WARN("Legacy %s parallax spec detected; consider using --input / HYPRLAX_PARALLAX_INPUT / parallax.input instead", source ? source : "parallax.mode");
+}
+
 /* --- Local helpers (refactored from nested functions) --- */
 static bool parse_bool_local(const char *v) {
     if (!v) return false;
@@ -401,7 +408,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 printf("  -C, --compositor <backend> Compositor (hyprland, sway, generic, auto)\n");
                 printf("  -V, --vsync               Enable VSync (default: off)\n");
                 printf("      --verbose <level>     Log level: error|warn|info|debug|trace or 0..4\n");
-                printf("      --parallax <mode>     Parallax mode: workspace|cursor|hybrid\n");
+                printf("      --parallax <mode>     (deprecated) workspace|cursor|hybrid\n");
                 printf("      --input <spec>        Enable inputs, e.g. workspace,cursor:0.3\n");
                 printf("      --mouse-weight <w>    Weight of cursor source (0..1)\n");
                 printf("      --workspace-weight <w> Weight of workspace source (0..1)\n");
@@ -535,6 +542,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 break;
 
             case 1005:  /* --parallax */
+                warn_legacy_parallax_usage("--parallax");
                 ctx->config.parallax_mode = parallax_mode_from_string(optarg);
                 if (ctx->config.parallax_mode == PARALLAX_WORKSPACE) {
                     ctx->config.parallax_workspace_weight = 1.0f;
@@ -897,6 +905,7 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
         v = getenv("HYPRLAX_PARALLAX_MODE");
         if (v && *v) {
             ctx->config.parallax_mode = parallax_mode_from_string(v);
+            warn_legacy_parallax_usage("HYPRLAX_PARALLAX_MODE");
         }
         v = getenv("HYPRLAX_PARALLAX_INPUT");
         if (v && *v) {
@@ -976,6 +985,7 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
                 if (v2) { float f = atof(v2); if (f >= 0.0f) ctx->config.render_margin_px_y = f; }
                 if (!strchr(arg, '=') && next) i++;
             } else if (!strncmp(arg, "--parallax=", 11) || !strcmp(arg, "--parallax")) {
+                warn_legacy_parallax_usage("--parallax");
                 const char *v2 = strchr(arg, '=') ? strchr(arg, '=') + 1 : next;
                 if (v2) { ctx->config.parallax_mode = parallax_mode_from_string(v2); }
                 if (!strchr(arg, '=') && next) i++;
@@ -1470,6 +1480,7 @@ int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, c
     }
 
     if (strcmp(property, "parallax.mode") == 0) {
+        warn_legacy_parallax_usage("parallax.mode");
         ctx->config.parallax_mode = parallax_mode_from_string(value);
         if (ctx->config.parallax_mode == PARALLAX_WORKSPACE) {
             ctx->config.parallax_workspace_weight = 1.0f;
