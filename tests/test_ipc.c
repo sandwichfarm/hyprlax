@@ -308,11 +308,11 @@ START_TEST(test_ipc_get_property)
     ck_assert_int_eq(result, 0);
     ck_assert_str_eq(response, "60");  // Default test value
     
-    // Test getting shift (returns default test value)
+    // Test getting shift (returns default percentage when no monitors available)
     snprintf(request, sizeof(request), "GET_PROPERTY shift");
     result = ipc_handle_request(ctx, request, response, sizeof(response));
     ck_assert_int_eq(result, 0);
-    ck_assert_str_eq(response, "200");  // Default test value
+    ck_assert_str_eq(response, "1.5\n");  // Default percentage value
     
     // Test getting invalid property
     snprintf(request, sizeof(request), "GET_PROPERTY invalid_prop");
