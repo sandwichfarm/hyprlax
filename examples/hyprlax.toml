@@ -1,9 +1,15 @@
 # Example hyprlax TOML configuration (scaffold)
+#
+# Default values optimized for 10 workspaces without edge smearing:
+# - shift = 100px per workspace (total 900px movement across 10 workspaces)
+# - layer scale = 1.2x (20% larger than viewport)
+# - For 1920px screen: 1.2x = 2304px, giving 192px margin each side
+# - This prevents edge artifacts while maintaining smooth parallax
 
 [global]
 fps = 144
 duration = 1.0
-shift = 200
+shift = 100  # Reduced from 200 to prevent smearing with typical 10 workspaces
 easing = "expo"
 debug = false
 vsync = false
@@ -12,12 +18,14 @@ idle_poll_rate = 2.0
 [[global.layers]]
 path = "images/bg.png"
 shift_multiplier = 0.25
+scale = 1.2  # 20% larger to accommodate parallax shift without edge artifacts
 opacity = 1.0
 blur = 0.0
 
 [[global.layers]]
 path = "images/fg.png"
-shift_multiplier = 1.0
+shift_multiplier = 0.75  # Reduced from 1.0 to stay within scaled bounds
+scale = 1.2  # Match background scale for consistency
 opacity = 0.9
 blur = 0.0
 

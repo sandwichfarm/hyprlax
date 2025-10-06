@@ -5,7 +5,7 @@
 fps = 144
 debug = false
 duration = 1.2
-shift = 250
+shift = 100  # Optimized for 10 workspaces without smearing
 vsync = true
 easing = "expo"
 
@@ -61,7 +61,7 @@ scale = 1.1
 # Layer 5: Foreground elements
 [[global.layers]]
 path = "~/walls/layer5_foreground.png"
-shift_multiplier = 1.2    # Faster than normal
+shift_multiplier = 1.0    # Full speed (but within bounds)
 opacity = 1.0
 blur = 0.0                # Sharp foreground
 fit = "contain"
@@ -70,7 +70,7 @@ align = { x = 0.5, y = 1.0 }  # Bottom-aligned
 # Layer 6: Overlay effects (optional)
 # [[global.layers]]
 # path = "~/walls/layer6_particles.png"
-# shift_multiplier = { x = 1.5, y = 0.5 }  # Different X/Y speeds
+# shift_multiplier = { x = 1.0, y = 0.5 }  # Different X/Y speeds
 # opacity = 0.3
 # blur = 0.0
 # fit = "cover"

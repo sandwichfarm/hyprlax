@@ -1369,7 +1369,7 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
         hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
         if (!app) {
             if (strcmp(property, "fps") == 0) { snprintf(response, response_size, "60"); return 0; }
-            if (strcmp(property, "shift") == 0) { snprintf(response, response_size, "200"); return 0; }
+            if (strcmp(property, "shift") == 0) { snprintf(response, response_size, "100"); return 0; }
             if (strcmp(property, "duration") == 0) { snprintf(response, response_size, "1.000"); return 0; }
             if (strcmp(property, "easing") == 0) { snprintf(response, response_size, "cubic"); return 0; }
             if (ipc_error_codes_enabled()) snprintf(response, response_size, "Error(1217): Unknown property '%s'", property); else snprintf(response, response_size, "Error: Unknown property '%s'", property); return -1;

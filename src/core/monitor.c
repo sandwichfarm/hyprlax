@@ -295,7 +295,7 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
         /* Calculate 2D offset for 2D models */
         offset_2d = workspace_calculate_offset_2d(&monitor->current_context,
                                                  new_context,
-                                                 monitor->config ? monitor->config->shift_pixels : 200.0f,
+                                                 monitor->config ? monitor->config->shift_pixels : 100.0f,
                                                  NULL);
         if (ctx && ctx->config.debug) {
             fprintf(stderr, "[DEBUG]   Using 2D offset calculation\n");
@@ -304,7 +304,7 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
         /* Calculate 1D offset for linear models */
         offset_1d = workspace_calculate_offset(&monitor->current_context,
                                               new_context,
-                                              monitor->config ? monitor->config->shift_pixels : 200.0f,
+                                              monitor->config ? monitor->config->shift_pixels : 100.0f,
                                               NULL);
         offset_2d.x = offset_1d;
         offset_2d.y = 0.0f;
@@ -349,7 +349,7 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
             int from_ws = old_context.data.workspace_id;
             int to_ws = new_context->data.workspace_id;
             int delta_ws = to_ws - from_ws;
-            float step = (monitor->config ? monitor->config->shift_pixels : 200.0f);
+            float step = (monitor->config ? monitor->config->shift_pixels : 100.0f);
             float base_x = monitor->animating ? monitor->animation_target_x : monitor->parallax_offset_x;
             absolute_target_x = base_x + delta_ws * step;
             absolute_target_y = 0.0f;

@@ -20,8 +20,8 @@ void config_set_defaults(config_t *cfg) {
 
     cfg->target_fps = 60;
     cfg->max_fps = 144;
-    cfg->shift_pixels = 150.0f;
-    cfg->scale_factor = 1.5f;
+    cfg->shift_pixels = 100.0f;  /* Reduced from 150 to prevent smearing with 10 workspaces */
+    cfg->scale_factor = 1.2f;    /* Reduced from 1.5 to match new shift defaults */
     cfg->animation_duration = 1.0;
     cfg->default_easing = EASE_CUBIC_OUT;
     cfg->vsync = false;  /* Default off to prevent GPU blocking when idle */

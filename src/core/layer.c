@@ -48,7 +48,7 @@ parallax_layer_t* layer_create(const char *image_path, float shift_multiplier, f
 
     /* Content scaling defaults */
     layer->fit_mode = LAYER_FIT_STRETCH;
-    layer->content_scale = 1.0f;
+    layer->content_scale = 1.2f;  /* 20% larger to prevent edge smearing with 10 workspaces */
     layer->align_x = 0.5f;
     layer->align_y = 0.5f;
     layer->base_uv_x = 0.0f;

@@ -82,7 +82,7 @@ int main(int argc, char **argv) {
             printf("  -h, --help                Show this help message\n");
             printf("  -v, --version             Show version information\n");
             printf("  -f, --fps <rate>          Target FPS (default: 60)\n");
-            printf("  -s, --shift <pixels>      Shift amount per workspace (default: 150)\n");
+            printf("  -s, --shift <pixels>      Shift amount per workspace (default: 100)\n");
             printf("  -d, --duration <seconds>  Animation duration (default: 1.0)\n");
             printf("  -e, --easing <type>       Easing function (default: cubic)\n");
             printf("  -c, --config <file>       Load configuration from file\n");
