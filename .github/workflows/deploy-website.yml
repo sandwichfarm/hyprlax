@@ -54,7 +54,7 @@ jobs:
         replication-timeout: "15000"
 
     - name: Purge Bunny CDN URLs (root)
-      if: ${{ success() && secrets.BUNNY_API_KEY }}
+      if: success()
       env:
         BUNNY_API_KEY: ${{ secrets.BUNNY_API_KEY }}
       run: |

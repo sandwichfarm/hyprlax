@@ -44,7 +44,7 @@ jobs:
           mkdocs build -f mkdocs.yml
 
       - name: Upload docs to Bunny Storage
-        if: ${{ (github.event.inputs.purge_only != 'true') && secrets.BUNNY_STORAGE_ZONE && secrets.BUNNY_STORAGE_PASSWORD }}
+        if: github.event.inputs.purge_only != 'true'
         env:
           BUNNY_STORAGE_ZONE: ${{ secrets.BUNNY_STORAGE_ZONE }}
           BUNNY_STORAGE_PASSWORD: ${{ secrets.BUNNY_STORAGE_PASSWORD }}
@@ -70,7 +70,7 @@ jobs:
           echo "Upload complete."
 
       - name: Purge Bunny CDN URLs under /docs/
-        if: ${{ secrets.BUNNY_API_KEY }}
+        if: success()
         env:
           BUNNY_API_KEY: ${{ secrets.BUNNY_API_KEY }}
           BUNNY_PULL_ZONE_ID: ${{ secrets.BUNNY_PULL_ZONE_ID }}
