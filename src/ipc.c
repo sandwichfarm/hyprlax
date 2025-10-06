@@ -355,6 +355,7 @@ static ipc_command_t parse_command(const char* cmd) {
     if (strcmp(cmd, "set") == 0) return IPC_CMD_SET_PROPERTY;
     if (strcmp(cmd, "get") == 0) return IPC_CMD_GET_PROPERTY;
     if (strcmp(cmd, "diag") == 0) return IPC_CMD_DIAG;
+    if (strcmp(cmd, "computed") == 0 || strcmp(cmd, "calc") == 0 || strcmp(cmd, "calculate") == 0) return IPC_CMD_COMPUTED;
     return IPC_CMD_UNKNOWN;
 }
 
@@ -1094,6 +1095,55 @@ bool ipc_process_commands(ipc_context_t* ctx) {
             break;
         }
 
+        case IPC_CMD_COMPUTED: {
+            hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+            if (!app) { snprintf(response, sizeof(response), "Error: Runtime context unavailable\n"); break; }
+
+            monitor_instance_t *mon = (app->monitors && app->monitors->primary) ? app->monitors->primary : (app->monitors ? app->monitors->head : NULL);
+            parallax_layer_t *layer = app->layers;
+            int screen_w = mon ? mon->width : HYPRLAX_DEFAULT_MON_WIDTH;
+            int screen_h = mon ? mon->height : HYPRLAX_DEFAULT_MON_HEIGHT;
+            float screen_aspect = screen_h > 0 ? ((float)screen_w / (float)screen_h) : 1.7778f;
+            float img_w = (layer && layer->width > 0) ? (float)layer->width : (float)screen_w;
+            float img_h = (layer && layer->height > 0) ? (float)layer->height : (float)screen_h;
+            float image_aspect = img_h > 0 ? (img_w / img_h) : screen_aspect;
+            float scale = (layer && layer->content_scale > 0.0f) ? layer->content_scale : app->config.scale_factor;
+            if (scale <= 0.0f) scale = HYPRLAX_DEFAULT_LAYER_SCALE;
+
+            /* Visible UV window for cover fit */
+            float uvw = 1.0f / scale; /* default for narrower images */
+            if (image_aspect > screen_aspect) {
+                uvw = (screen_aspect / image_aspect) * (1.0f / scale);
+            }
+            if (uvw > 1.0f) uvw = 1.0f; if (uvw < 0.0f) uvw = 0.0f;
+            float margin_norm = 0.5f * (1.0f - uvw);
+            float margin_px = margin_norm * scale * (float)screen_w;
+
+            int wc = HYPRLAND_DEFAULT_WORKSPACE_COUNT;
+            if (app->compositor && app->compositor->ops && app->compositor->ops->get_workspace_count) {
+                int c = app->compositor->ops->get_workspace_count();
+                if (c > 1 && c < 1000) wc = c;
+            }
+            if (wc <= 1) wc = 2;
+
+            float fudge = 0.90f; const char *envf = getenv("HYPRLAX_SAFE_SHIFT_FACTOR");
+            if (envf && *envf) { float f = atof(envf); if (f > 0.0f && f <= 1.0f) fudge = f; }
+            float auto_shift_px = (margin_px / (float)(wc - 1)) * fudge;
+            float auto_shift_pct = (auto_shift_px / (float)screen_w) * 100.0f;
+
+            float cfg_shift_px = app->config.shift_pixels;
+            float cfg_shift_pct = app->config.shift_percent;
+            int used_auto = (cfg_shift_px <= 0.0f && cfg_shift_pct <= 0.0f) ? 1 : 0;
+
+            int n = snprintf(response, sizeof(response),
+                             "monitor %s %dx%d\nlayer %u size %dx%d\nfit cover\ncontent_scale %.3f\nworkspaces %d\nuv_width_frac %.6f\nmargin_px %.2f\nauto_shift_px %.2f\nauto_shift_percent %.4f\nconfigured_shift_px %.2f\nconfigured_shift_percent %.4f\nmode %s\n",
+                             mon ? mon->name : "<none>", screen_w, screen_h,
+                             layer ? layer->id : 0, (int)img_w, (int)img_h,
+                             scale, wc, uvw, margin_px, auto_shift_px, auto_shift_pct, cfg_shift_px, cfg_shift_pct,
+                             used_auto ? "auto" : "configured");
+            (void)n; success = true; break;
+        }
+
         default:
             ipc_errorf(response, sizeof(response), 1002, "Unknown command '%s'\n", cmd);
             break;
@@ -1421,7 +1471,7 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
         hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
         if (!app) {
             if (strcmp(property, "fps") == 0) { snprintf(response, response_size, "60"); return 0; }
-            if (strcmp(property, "shift") == 0) { snprintf(response, response_size, "50"); return 0; }
+            if (strcmp(property, "shift") == 0) { snprintf(response, response_size, "1.5\n"); return 0; }
             if (strcmp(property, "duration") == 0) { snprintf(response, response_size, "1.000"); return 0; }
             if (strcmp(property, "easing") == 0) { snprintf(response, response_size, "cubic"); return 0; }
             if (ipc_error_codes_enabled()) snprintf(response, response_size, "Error(1217): Unknown property '%s'", property); else snprintf(response, response_size, "Error: Unknown property '%s'", property); return -1;

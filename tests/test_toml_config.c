@@ -60,7 +60,7 @@ START_TEST(test_parse_parallax_globals)
     ck_assert_float_eq_tol(cfg.shift_pixels, 240.0f, 0.0001);
     ck_assert(cfg.debug == true);
 
-    ck_assert_int_eq(cfg.parallax_mode, PARALLAX_HYBRID);
+    /* Check that weights are set correctly - mode is now determined by weights */
     ck_assert_float_eq_tol(cfg.parallax_workspace_weight, 0.6f, 0.0001);
     ck_assert_float_eq_tol(cfg.parallax_cursor_weight, 0.4f, 0.0001);
 

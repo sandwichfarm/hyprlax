@@ -18,8 +18,10 @@ START_TEST(test_runtime_set_get)
     hyprlax_context_t *ctx = hyprlax_create();
     ck_assert_ptr_nonnull(ctx);
 
-    ck_assert_int_eq(hyprlax_runtime_set_property(ctx, "parallax.mode", "cursor"), 0);
-    ck_assert_int_eq(ctx->config.parallax_mode, PARALLAX_CURSOR);
+    ck_assert_int_eq(hyprlax_runtime_set_property(ctx, "parallax.input", "cursor:1.0"), 0);
+    /* Check that cursor weight is set to 1.0 and others to 0 */
+    ck_assert_float_eq_tol(ctx->config.parallax_cursor_weight, 1.0f, 0.0001);
+    ck_assert_float_eq_tol(ctx->config.parallax_workspace_weight, 0.0f, 0.0001);
 
     ck_assert_int_eq(hyprlax_runtime_set_property(ctx, "parallax.sources.cursor.weight", "0.42"), 0);
     ck_assert_int_eq(hyprlax_runtime_set_property(ctx, "parallax.sources.workspace.weight", "0.58"), 0);
@@ -31,9 +33,11 @@ START_TEST(test_runtime_set_get)
     ck_assert_int_eq(hyprlax_runtime_set_property(ctx, "parallax.invert.cursor.y", "false"), 0);
     ck_assert(ctx->config.invert_cursor_y == false);
 
-    char buf[64];
-    ck_assert_int_eq(hyprlax_runtime_get_property(ctx, "parallax.mode", buf, sizeof(buf)), 0);
-    ck_assert_str_eq(buf, "cursor");
+    char buf[128];
+    ck_assert_int_eq(hyprlax_runtime_get_property(ctx, "parallax.input", buf, sizeof(buf)), 0);
+    /* After setting weights, should return "workspace:0.58,cursor:0.42" or similar */
+    ck_assert(strstr(buf, "cursor:0.42") != NULL);
+    ck_assert(strstr(buf, "workspace:0.58") != NULL);
     ck_assert_int_eq(hyprlax_runtime_get_property(ctx, "parallax.sources.cursor.weight", buf, sizeof(buf)), 0);
     ck_assert_str_eq(buf, "0.420");
 
