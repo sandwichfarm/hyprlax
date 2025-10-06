@@ -10,7 +10,7 @@ content_scale = 1.0
 
 [global.parallax]
 mode = "workspace"
-shift_percent = 0.0000001
+shift_percent = 0.01
 
 [[global.layers]]
 path = "./1.png"

@@ -4,16 +4,10 @@
 fps = 144
 debug = false
 duration = 0.0            # workspace animation not used in cursor mode
-shift = 100               # legacy shift; unused in cursor-only mode
 vsync = false
 easing = expo
 
-[global.parallax]
-mode = "cursor"           # Mouse-driven parallax for focus-follow effect
-
 [global.parallax.sources]
-# Only the cursor source should drive parallax in this preset.
-# Setting the workspace weight to 0 avoids large jumps when switching workspaces.
 workspace.weight = 0.0
 cursor.weight = 1.0
 

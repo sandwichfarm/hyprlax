@@ -93,8 +93,10 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
         if (layer->hidden || layer->texture_id == 0) { layer = layer->next; continue; }
 
         /* Workspace-driven offsets (pixels) */
-        float workspace_x = (layer->offset_x + layer->current_x);
-        float workspace_y = (layer->offset_y + layer->current_y);
+        /* Use the current animated value only; offset_x/y are maintained by layer_tick
+           and should not be summed with current to avoid double-application. */
+        float workspace_x = layer->current_x;
+        float workspace_y = layer->current_y;
 
         /* Apply optional workspace inversion (global xor layer) */
         bool workspace_invert_x = ctx->config.invert_workspace_x ^ layer->invert_workspace_x;

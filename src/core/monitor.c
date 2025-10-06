@@ -62,6 +62,7 @@ monitor_instance_t* monitor_instance_create(const char *name) {
     monitor->current_context.model = WS_MODEL_GLOBAL_NUMERIC;
     monitor->current_context.data.workspace_id = 1;
     monitor->previous_context = monitor->current_context;
+    monitor->origin_set = false;
 
     monitor->parallax_offset_x = 0.0f;
     monitor->parallax_offset_y = 0.0f;
@@ -283,6 +284,16 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
         }
     }
 
+    /* On first event, capture the origin context (the context BEFORE this change)
+       so the very first workspace event animates from the actual previous state. */
+    if (!monitor->origin_set) {
+        monitor->origin_context = monitor->current_context; /* old context */
+        monitor->origin_set = true;
+        if (ctx && ctx->config.debug) {
+            LOG_DEBUG("  Captured origin context for absolute positioning");
+        }
+    }
+
     /* Check if this is a 2D workspace model */
     bool is_2d = (new_context->model == WS_MODEL_SET_BASED ||
                   new_context->model == WS_MODEL_PER_OUTPUT_NUMERIC);
@@ -292,11 +303,73 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
 
     /* Calculate shift in pixels from unified helper */
     config_t *config = monitor->config ? monitor->config : (ctx ? &ctx->config : NULL);
-    float shift_pixels = monitor_effective_shift_px(config, monitor);
+    float shift_pixels = 0.0f;
+    if (config) {
+        if (config->shift_percent > 0.0f) {
+            shift_pixels = (config->shift_percent / 100.0f) * monitor->width;
+        } else if (config->shift_pixels > 0.0f) {
+            shift_pixels = config->shift_pixels;
+        } else {
+            /* Compute a safe default based on actual image fit (cover) and content_scale
+               so 10 workspaces don't expose edges. Uses first layer as the base wallpaper. */
+            float scale = (config->scale_factor > 0.0f) ? config->scale_factor : HYPRLAX_DEFAULT_LAYER_SCALE;
+            float screen_w = (float)monitor->width;
+            float screen_h = (float)monitor->height;
+            float screen_aspect = screen_w / (screen_h > 0 ? screen_h : 1.0f);
+
+            float img_w = 0.0f, img_h = 0.0f;
+            if (ctx && ctx->layers && ctx->layers->width > 0 && ctx->layers->height > 0) {
+                img_w = (float)ctx->layers->width;
+                img_h = (float)ctx->layers->height;
+            }
+
+            float margin_px = 0.0f;
+            if (img_w > 0.0f && img_h > 0.0f) {
+                float image_aspect = img_w / img_h;
+                /* For cover fit, visible UV width fraction:
+                   if image narrower (R<=S): 1/s
+                   if image wider   (R> S):   (S/R) * (1/s)
+                   margin_norm = (1 - visible_fraction)/2
+                   Safe pixel margin = margin_norm * s * screen_w */
+                float visible_fraction = (image_aspect <= screen_aspect)
+                                          ? (1.0f / scale)
+                                          : ((screen_aspect / image_aspect) * (1.0f / scale));
+                float margin_norm = 0.5f * (1.0f - visible_fraction);
+                if (margin_norm < 0.0f) margin_norm = 0.0f;
+                margin_px = margin_norm * scale * screen_w;
+            } else {
+                /* Fallback: assume baseline cover produces no horizontal overscan at 1.0 */
+                margin_px = (scale - 1.0f) * 0.5f * screen_w;
+            }
+
+            int workspace_count = HYPRLAND_DEFAULT_WORKSPACE_COUNT;
+            if (ctx && ctx->compositor && ctx->compositor->ops && ctx->compositor->ops->get_workspace_count) {
+                int wc = ctx->compositor->ops->get_workspace_count();
+                if (wc > 1 && wc < 1000) workspace_count = wc;
+            }
+            if (workspace_count <= 1) workspace_count = 2;
+
+            /* Leave comfortable headroom. Use (count) instead of (count-1) to be extra safe. */
+            float fudge = 0.90f;
+            const char *env = getenv("HYPRLAX_SAFE_SHIFT_FACTOR");
+            if (env && *env) { float f = atof(env); if (f > 0.0f && f <= 1.0f) fudge = f; }
+            int denom = (workspace_count > 1) ? (workspace_count - 1) : 1;
+            float safe_px = (margin_px / (float)denom) * fudge;
+            shift_pixels = safe_px;
+
+            if (config->debug) {
+                LOG_DEBUG("  Auto shift: margin_px=%.1f, wc=%d, fudge=%.2f -> shift_px=%.2f",
+                          margin_px, workspace_count, fudge, shift_pixels);
+            }
+        }
+    } else {
+        /* Fallback */
+        shift_pixels = (HYPRLAX_DEFAULT_SHIFT_PERCENT / 100.0f) * monitor->width;
+    }
 
     if (is_2d) {
-        /* Calculate 2D offset for 2D models */
-        offset_2d = workspace_calculate_offset_2d(&monitor->current_context,
+        /* Absolute 2D offset from origin */
+        offset_2d = workspace_calculate_offset_2d(&monitor->origin_context,
                                                  new_context,
                                                  shift_pixels,
                                                  NULL);
@@ -304,8 +377,8 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
             fprintf(stderr, "[DEBUG]   Using 2D offset calculation\n");
         }
     } else {
-        /* Calculate 1D offset for linear models */
-        offset_1d = workspace_calculate_offset(&monitor->current_context,
+        /* Absolute 1D offset from origin */
+        offset_1d = workspace_calculate_offset(&monitor->origin_context,
                                               new_context,
                                               shift_pixels,
                                               NULL);
@@ -323,53 +396,19 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
     /* Keep a copy of the old context for correct delta calculations */
     workspace_context_t old_context = monitor->current_context;
 
-    /* Start animation if offset changed */
-    if ((offset_2d.x != 0.0f || offset_2d.y != 0.0f) && ctx) {
+    /* Start animation if target changed (absolute target) */
+    if (ctx) {
         /* Calculate absolute workspace position */
         float absolute_target_x, absolute_target_y;
 
-        if (is_2d) {
-            /* For 2D models, accumulate the offsets */
-            /* If animating, accumulate from the target position, not current */
-            float base_x = monitor->animating ? monitor->animation_target_x : monitor->parallax_offset_x;
-            float base_y = monitor->animating ? monitor->animation_target_y : monitor->parallax_offset_y;
-
-            if (ctx && ctx->config.debug) {
-                LOG_DEBUG("  Base position: X=%.1f, Y=%.1f (animating=%d)", base_x, base_y, monitor->animating);
-            }
-
-            absolute_target_x = base_x + offset_2d.x;
-            absolute_target_y = base_y + offset_2d.y;
-
-            /* Update the accumulated position */
-            monitor->parallax_offset_x = absolute_target_x;
-            monitor->parallax_offset_y = absolute_target_y;
-            if (ctx && ctx->config.debug) {
-                LOG_DEBUG("  2D accumulative offset: X=%.1f, Y=%.1f", monitor->parallax_offset_x, monitor->parallax_offset_y);
-            }
-        } else {
-            /* For 1D models, use the calculated offset */
-            float base_x = monitor->animating ? monitor->animation_target_x : monitor->parallax_offset_x;
-            absolute_target_x = base_x + offset_2d.x;  /* offset_2d.x contains the offset_1d value */
-            absolute_target_y = 0.0f;
-            
-            /* Update the accumulated position */
-            monitor->parallax_offset_x = absolute_target_x;
-            monitor->parallax_offset_y = absolute_target_y;
-            
-            if (ctx && ctx->config.debug) {
-                int from_ws = old_context.data.workspace_id;
-                int to_ws = new_context->data.workspace_id;
-                int delta_ws = to_ws - from_ws;
-                LOG_DEBUG("  1D accumulative: from %d to %d (delta=%d) base=%.1f -> X=%.1f",
-                          from_ws, to_ws, delta_ws, base_x, absolute_target_x);
-            }
-        }
+        /* Absolute target equals absolute offset from origin */
+        absolute_target_x = offset_2d.x;
+        absolute_target_y = offset_2d.y;
 
         /* Update all layers with their absolute target positions */
         if (ctx->layers) {
             if (ctx && ctx->config.debug) {
-                LOG_DEBUG("  Updating layers with target: X=%.1f, Y=%.1f", absolute_target_x, absolute_target_y);
+                LOG_DEBUG("  Updating layers with absolute target: X=%.1f, Y=%.1f", absolute_target_x, absolute_target_y);
             }
 
             parallax_layer_t *layer = ctx->layers;
@@ -429,9 +468,9 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
             }
         }
 
-        /* Update monitor's animation separately for tracking */
-        float dominant_offset = fabs(offset_2d.x) > fabs(offset_2d.y) ? offset_2d.x : offset_2d.y;
-        monitor_start_parallax_animation_offset(ctx, monitor, dominant_offset);
+        /* Layer animations handle the visual motion. Avoid monitor-level animation
+         * to prevent double-driving and race conditions. */
+        (void)absolute_target_x; (void)absolute_target_y;
     }
 
     /* Update context after computing offsets */
@@ -495,12 +534,51 @@ void monitor_start_parallax_animation_offset(hyprlax_context_t *ctx,
     }
 }
 
+/* Start parallax animation toward an absolute X target (pixels) */
+void monitor_start_parallax_animation_to(hyprlax_context_t *ctx,
+                                         monitor_instance_t *monitor,
+                                         float absolute_target_x) {
+    if (!monitor) return;
+
+    /* Resolve the current animated position as the start point */
+    if (monitor->animating && ctx) {
+        double current_time = get_time();
+        double elapsed = current_time - monitor->animation_start_time;
+        double duration = monitor->config ? monitor->config->animation_duration : 1.0;
+        double progress = (elapsed >= duration) ? 1.0 : (elapsed / duration);
+        double eased_progress = progress;
+        if (monitor->config && monitor->config->default_easing) {
+            eased_progress = apply_easing(progress, monitor->config->default_easing);
+        }
+        monitor->animation_start_x = monitor->animation_start_x +
+                                    (monitor->animation_target_x - monitor->animation_start_x) * eased_progress;
+        monitor->animation_start_y = monitor->animation_start_y +
+                                    (monitor->animation_target_y - monitor->animation_start_y) * eased_progress;
+    } else {
+        monitor->animation_start_x = monitor->parallax_offset_x;
+        monitor->animation_start_y = monitor->parallax_offset_y;
+    }
+
+    monitor->animation_target_x = absolute_target_x;
+    monitor->animation_target_y = monitor->animation_start_y;
+
+    monitor->animation_start_time = get_time();
+    monitor->animating = (monitor->animation_target_x != monitor->animation_start_x) ||
+                         (monitor->animation_target_y != monitor->animation_start_y);
+
+    if (ctx && ctx->config.debug) {
+        LOG_DEBUG("Monitor %s: starting animation %.1f -> %.1f",
+                  monitor->name, monitor->animation_start_x, monitor->animation_target_x);
+    }
+}
+
 /* Update animation state */
 void monitor_update_animation(monitor_instance_t *monitor, double current_time) {
     if (!monitor || !monitor->animating || !monitor->config) return;
 
     double elapsed = current_time - monitor->animation_start_time;
-    double duration = monitor->config->animation_duration;  /* Duration is in seconds */
+    double duration = monitor->config->animation_duration;  /* seconds */
+    if (duration <= 0.0) duration = 0.001; /* safety */
 
     if (elapsed >= duration) {
         /* Animation complete */
@@ -511,25 +589,22 @@ void monitor_update_animation(monitor_instance_t *monitor, double current_time) 
     }
 
     /* Calculate progress with easing */
-    float progress = elapsed / duration;
+    float progress = (float)(elapsed / duration);
+    if (progress < 0.0f) progress = 0.0f;
+    if (progress > 1.0f) progress = 1.0f;
 
-    /* Apply easing function (for now, just exponential) */
-    float eased_progress;
-    switch (monitor->config->default_easing) {
-        case EASE_EXPO_OUT:
-            eased_progress = 1.0f - powf(2.0f, -10.0f * progress);
-            break;
-        case EASE_LINEAR:
-        default:
-            eased_progress = progress;
-            break;
+    float eased_progress = apply_easing(progress, monitor->config->default_easing);
+    if (isnan(eased_progress) || isinf(eased_progress)) {
+        eased_progress = progress; /* fallback */
     }
 
     /* Update offsets */
-    monitor->parallax_offset_x = monitor->animation_start_x +
-        (monitor->animation_target_x - monitor->animation_start_x) * eased_progress;
-    monitor->parallax_offset_y = monitor->animation_start_y +
-        (monitor->animation_target_y - monitor->animation_start_y) * eased_progress;
+    float start_x = monitor->animation_start_x;
+    float start_y = monitor->animation_start_y;
+    float target_x = monitor->animation_target_x;
+    float target_y = monitor->animation_target_y;
+    monitor->parallax_offset_x = start_x + (target_x - start_x) * eased_progress;
+    monitor->parallax_offset_y = start_y + (target_y - start_y) * eased_progress;
 }
 
 /* Check if monitor should render a new frame */

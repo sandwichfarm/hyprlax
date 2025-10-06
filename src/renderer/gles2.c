@@ -597,7 +597,12 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
     }
 
     /* Adjust coordinates based on mode */
-    const char *use_uniform_offset = getenv("HYPRLAX_UNIFORM_OFFSET");
+    /* Default to uniform-offset; user can disable with HYPRLAX_UNIFORM_OFFSET=0 */
+    int uniform_offset_mode = 1;
+    const char *use_uniform_offset_env = getenv("HYPRLAX_UNIFORM_OFFSET");
+    if (use_uniform_offset_env && *use_uniform_offset_env) {
+        if (!strcmp(use_uniform_offset_env, "0") || !strcasecmp(use_uniform_offset_env, "false")) uniform_offset_mode = 0;
+    }
     bool using_params = (params != NULL);
     if (!using_params) {
         /* Legacy path: encode offset into texcoords over full screen */
@@ -609,7 +614,7 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
         vertices[11] = 0.0f - y;
         vertices[14] = 1.0f + x;
         vertices[15] = 0.0f - y;
-    } else if (!(use_uniform_offset && *use_uniform_offset)) {
+    } else if (!uniform_offset_mode) {
         /* Extended params path but drive offset via texcoord translation (legacy behavior)
            so tiling works identically without relying on u_offset. */
         vertices[2]  += x;  vertices[3]  += -y;  /* bottom-left */
@@ -710,11 +715,17 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
                                (float)g_gles2_data->width, (float)g_gles2_data->height);
     }
 
-    /* If shader supports u_offset, set it (extended path uses uniform offset). */
+    /* If shader supports u_offset, set it (use uniform-offset by default). */
     {
+        /* Default to uniform-offset; allow opting out with HYPRLAX_UNIFORM_OFFSET=0 */
+        int uniform_offset_mode = 1;
+        const char *env_uo = getenv("HYPRLAX_UNIFORM_OFFSET");
+        if (env_uo && *env_uo) {
+            if (!strcmp(env_uo, "0") || !strcasecmp(env_uo, "false")) uniform_offset_mode = 0;
+        }
         GLint u_off = shader_get_uniform_location(shader, "u_offset");
         if (u_off != -1) {
-            if (using_params) {
+            if (using_params && uniform_offset_mode) {
                 /* Scale the offset by content_scale to compensate for scaled image */
                 float scale = (params && params->content_scale > 0.0f) ? params->content_scale : 1.0f;
                 float offset_x = x / scale;
@@ -722,8 +733,9 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
                 LOG_DEBUG("Setting u_offset: x=%.3f y=%.3f scale=%.2f -> offset=(%.3f, %.3f)",
                           x, y, scale, offset_x, offset_y);
                 glUniform2f(u_off, offset_x, offset_y);
+            } else {
+                glUniform2f(u_off, 0.0f, 0.0f);
             }
-            else glUniform2f(u_off, 0.0f, 0.0f);
         } else {
             LOG_DEBUG("WARNING: u_offset uniform not found in shader!");
         }
@@ -873,7 +885,7 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
     /* Texture already bound earlier when setting wrap state */
 
     /* If uniform-offset mode, set u_offset */
-    if (use_uniform_offset && *use_uniform_offset) {
+    if (uniform_offset_mode) {
         GLint u_off = shader_get_uniform_location(shader, "u_offset");
         /* When uniform-offset is enabled, always drive offset via uniform to debug path. */
         if (u_off != -1) {
@@ -889,7 +901,7 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
     if (persist_vbo && *persist_vbo && g_gles2_data->vbo) {
         glBindBuffer(GL_ARRAY_BUFFER, g_gles2_data->vbo);
         /* If using uniform-offset or separable blur, keep default texcoords; otherwise update texcoords */
-        if (!(use_uniform_offset && *use_uniform_offset) && !use_sep_blur) {
+        if (!uniform_offset_mode && !use_sep_blur) {
             glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
         }
     } else {

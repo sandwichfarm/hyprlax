@@ -21,8 +21,10 @@ void config_set_defaults(config_t *cfg) {
 
     cfg->target_fps = HYPRLAX_DEFAULT_FPS;
     cfg->max_fps = 144;
-    cfg->shift_percent = HYPRLAX_DEFAULT_SHIFT_PERCENT;    /* optimized for 10 workspace span */
-    cfg->shift_pixels = 0.0f;     /* DEPRECATED - calculated from shift_percent */
+    /* Default to auto (computed from scale + workspaces). A non-zero
+     * shift_percent or shift_pixels from CLI/TOML/IPC overrides this. */
+    cfg->shift_percent = 0.0f;     /* 0 => auto */
+    cfg->shift_pixels = 0.0f;      /* 0 => auto */
     cfg->scale_factor = HYPRLAX_DEFAULT_SCALE_FACTOR;    /* margin for parallax */
     cfg->animation_duration = HYPRLAX_DEFAULT_ANIM_DURATION;
     cfg->default_easing = EASE_CUBIC_OUT;
@@ -50,6 +52,11 @@ void config_set_defaults(config_t *cfg) {
     cfg->parallax_max_offset_x = HYPRLAX_DEFAULT_MAX_OFFSET_PX; /* effectively no clamp by default */
     cfg->parallax_max_offset_y = HYPRLAX_DEFAULT_MAX_OFFSET_PX;
     /* Render overflow defaults */
+    /* For simple single-layer wallpapers, avoid visible edge smearing by default.
+     * We keep repeat_edge (0) for back-compatibility, but set a slightly larger
+     * default scale_factor to provide overscan, and rely on absolute positioning
+     * to prevent unbounded drift. If smearing still occurs in custom configs,
+     * users can set render.overflow to 'repeat' or increase content_scale. */
     cfg->render_overflow_mode = 0; /* repeat_edge */
     cfg->render_margin_px_x = 0.0f;
     cfg->render_margin_px_y = 0.0f;
