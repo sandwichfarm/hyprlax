@@ -142,7 +142,8 @@ static int apply_layer_property(hyprlax_context_t *app, parallax_layer_t *layer,
         else { ipc_errorf(response, response_sz, 1254, "invalid fit value\n"); return 0; }
         return 1;
     } else if (strcmp(property, "content_scale") == 0) {
-        float v = atof(value); if (v <= 0.0f) { ipc_errorf(response, response_sz, 1253, "content_scale must be > 0\n"); return 0; } layer->content_scale = v; return 1;
+        float v = atof(value); if (v <= 0.0f) { ipc_errorf(response, response_sz, 1253, "content_scale must be > 0\n"); return 0; }
+        layer->content_scale = v; layer->scale_is_custom = true; return 1;
     } else if (strcmp(property, "align_x") == 0 || strcmp(property, "align.x") == 0) {
         layer->align_x = atof(value); if (layer->align_x < 0.0f) layer->align_x = 0.0f; if (layer->align_x > 1.0f) layer->align_x = 1.0f; return 1;
     } else if (strcmp(property, "align_y") == 0 || strcmp(property, "align.y") == 0) {
@@ -950,6 +951,16 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 if (rc <= 0) { ipc_errorf(response, sizeof(response), rc==0?1210:1211, rc==0?"invalid fps\n":"fps out of range (30..240)\n"); break; }
                 app_set->config.target_fps = iv; handled = true;
             }
+            else if (strcmp(property, "render.content_scale") == 0 || strcmp(property, "content_scale_default") == 0 || strcmp(property, "content_scale") == 0) {
+                double dv = 0.0; int rc = parse_double_range(value, 0.01, 10.0, &dv);
+                if (rc <= 0) { ipc_errorf(response, sizeof(response), rc==0?1253:1253, "content_scale must be > 0\n"); break; }
+                app_set->config.scale_factor = (float)dv;
+                /* Update layers that still inherit global */
+                for (parallax_layer_t *it = app_set->layers; it; it = it->next) {
+                    if (!it->scale_is_custom) it->content_scale = app_set->config.scale_factor;
+                }
+                handled = true;
+            }
             else if (strcmp(property, "shift") == 0 || strcmp(property, "shift_percent") == 0 || strcmp(property, "parallax.shift_percent") == 0) {
                 double dv = 0.0; int rc = parse_double_range(value, 0.0, 100.0, &dv);
                 if (rc <= 0) { ipc_errorf(response, sizeof(response), rc==0?1212:1213, rc==0?"invalid shift\n":"shift out of range (0..100)\n"); break; }
@@ -1002,6 +1013,10 @@ bool ipc_process_commands(ipc_context_t* ctx) {
             hyprlax_context_t *app_get = (hyprlax_context_t*)ctx->app_context;
             if (!app_get) { ipc_errorf(response, sizeof(response), 1300, "Runtime settings not available\n"); break; }
             if (strcmp(property, "fps") == 0 || strcmp(property, "render.fps") == 0) { snprintf(response, sizeof(response), "%d\n", app_get->config.target_fps); success = true; break; }
+            if (strcmp(property, "render.content_scale") == 0 || strcmp(property, "content_scale_default") == 0 || strcmp(property, "content_scale") == 0) {
+                snprintf(response, sizeof(response), "%.3f\n", app_get->config.scale_factor);
+                success = true; break;
+            }
             if (strcmp(property, "shift") == 0 || strcmp(property, "shift_percent") == 0 || strcmp(property, "parallax.shift_percent") == 0) { 
                 /* Return percentage if set, otherwise convert pixels to approximate percentage */
                 if (app_get->config.shift_percent > 0.0f) {

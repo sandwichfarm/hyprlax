@@ -144,4 +144,8 @@ void monitor_set_global_position(monitor_instance_t *monitor, int x, int y);
 const char* monitor_get_name(monitor_instance_t *monitor);
 bool monitor_is_active(monitor_instance_t *monitor);
 
+/* Compute effective shift in pixels given config and a monitor.
+ * Falls back to defaults if values are unset. */
+float monitor_effective_shift_px(const config_t *cfg, const monitor_instance_t *monitor);
+
 #endif /* MONITOR_H */

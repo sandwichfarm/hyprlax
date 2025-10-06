@@ -61,7 +61,9 @@ static void parse_global_table(toml_table_t *global, config_t *cfg)
     d = toml_double_in(global, "duration"); if (d.ok) cfg->animation_duration = (float)d.u.d; else {
         double v; if (toml_get_number_in(global, "duration", &v)) cfg->animation_duration = (float)v; }
     {
-        double v; if (toml_get_number_in(global, "scale", &v)) cfg->scale_factor = (float)v;
+        double v;
+        if (toml_get_number_in(global, "content_scale", &v)) cfg->scale_factor = (float)v;
+        else if (toml_get_number_in(global, "scale", &v)) cfg->scale_factor = (float)v; /* legacy alias */
     }
     /* Legacy shift (for backwards compatibility) */
     {
@@ -109,25 +111,28 @@ static void parse_global_table(toml_table_t *global, config_t *cfg)
         /* Legacy 'mode' removed: users should use parallax.input or sources.* weights. */
 
         /* Canonical: shift_percent inside parallax */
+        int parallax_has_percent = 0;
         {
             double v; if (toml_get_number_in(parallax, "shift_percent", &v)) {
                 cfg->shift_percent = (float)v;
                 cfg->shift_pixels = 0.0f;
+                parallax_has_percent = 1;
             }
         }
         
         /* Deprecated: shift_pixels inside parallax */
         {
-            double dv; if (toml_get_number_in(parallax, "shift_pixels", &dv) && cfg->shift_percent == 0.0f) {  /* Only use if shift_percent not set */
-            float value = (float)dv;
-            if (value <= 10.0f) {
-                cfg->shift_percent = value;
-                cfg->shift_pixels = 0.0f;
-            } else {
-                cfg->shift_pixels = value;
-                cfg->shift_percent = 0.0f;
+            double dv; if (toml_get_number_in(parallax, "shift_pixels", &dv) && !parallax_has_percent) {
+                float value = (float)dv;
+                if (value <= 10.0f) {
+                    cfg->shift_percent = value;
+                    cfg->shift_pixels = 0.0f;
+                } else {
+                    cfg->shift_pixels = value;
+                    cfg->shift_percent = 0.0f;
+                }
             }
-        } }
+        }
 
         toml_table_t *sources = toml_table_in(parallax, "sources");
         if (sources) {
@@ -203,6 +208,11 @@ static void parse_global_table(toml_table_t *global, config_t *cfg)
     /* Render: [global.render] */
     toml_table_t *render = toml_table_in(global, "render");
     if (render) {
+        /* Optional global content scale override */
+        {
+            double v; if (toml_get_number_in(render, "content_scale", &v)) cfg->scale_factor = (float)v;
+            else if (toml_get_number_in(render, "scale", &v)) cfg->scale_factor = (float)v; /* legacy alias */
+        }
         toml_datum_t acc = toml_bool_in(render, "accumulate");
         if (acc.ok) cfg->render_accumulate = acc.u.b;
         toml_datum_t ts = toml_double_in(render, "trail_strength");
@@ -450,8 +460,12 @@ int config_apply_toml_to_context(hyprlax_context_t *ctx, const char *path)
                                 if (my.ok) last->margin_px_y = (float)my.u.d;
                             }
                             /* Additional scale */
-                            d = toml_double_in(lt, "scale");
-                            if (d.ok) last->content_scale = (float)d.u.d;
+                            d = toml_double_in(lt, "content_scale");
+                            if (d.ok) { last->content_scale = (float)d.u.d; last->scale_is_custom = true; }
+                            else {
+                                d = toml_double_in(lt, "scale");
+                                if (d.ok) { last->content_scale = (float)d.u.d; last->scale_is_custom = true; }
+                            }
                             /* Alignment for cover/crop */
                             toml_table_t *align = toml_table_in(lt, "align");
                             if (align) {

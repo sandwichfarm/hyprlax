@@ -1,16 +1,16 @@
 [global]
 fps = 144
 duration = 4.0
-scale = 0.1
-shift_percent = 0.0000001
 vsync = false
 easing = "expo"
 
 [global.render]
 tile = { x = true, y = false }
+content_scale = 1.0
 
 [global.parallax]
 mode = "workspace"
+shift_percent = 0.0000001
 
 [[global.layers]]
 path = "./1.png"
@@ -46,4 +46,4 @@ blur = 0.0
 path = "./6.png"
 shift_multiplier = 1.0
 opacity = 1.0
-blur = 0.0
+blur = 0.0VV

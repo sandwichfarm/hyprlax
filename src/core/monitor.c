@@ -290,25 +290,9 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
     workspace_offset_t offset_2d = {0.0f, 0.0f};
     float offset_1d = 0.0f;
 
-    /* Calculate shift in pixels from percentage */
-    float shift_pixels = 0.0f;
-    
-    /* Try to get config from context if monitor config not set */
-    config_t *config = monitor->config;
-    if (!config && ctx) {
-        config = &ctx->config;
-    }
-    
-    if (config && config->shift_percent > 0.0f) {
-        /* Use percentage-based shift (new preferred method) */
-        shift_pixels = (config->shift_percent / 100.0f) * monitor->width;
-    } else if (config && config->shift_pixels > 0.0f) {
-        /* Fall back to pixel-based shift (deprecated) */
-        shift_pixels = config->shift_pixels;
-    } else {
-        /* Default: percent of screen width (optimized for 10 workspaces) */
-        shift_pixels = (HYPRLAX_DEFAULT_SHIFT_PERCENT / 100.0f) * monitor->width;
-    }
+    /* Calculate shift in pixels from unified helper */
+    config_t *config = monitor->config ? monitor->config : (ctx ? &ctx->config : NULL);
+    float shift_pixels = monitor_effective_shift_px(config, monitor);
 
     if (is_2d) {
         /* Calculate 2D offset for 2D models */
@@ -609,4 +593,20 @@ const char* monitor_get_name(monitor_instance_t *monitor) {
 /* Check if monitor is active */
 bool monitor_is_active(monitor_instance_t *monitor) {
     return monitor && monitor->wl_surface != NULL;
+}
+
+/* Compute effective shift in pixels given config and monitor width.
+ * Prefer percentage; fall back to pixels; otherwise use defaults. */
+float monitor_effective_shift_px(const config_t *cfg, const monitor_instance_t *monitor) {
+    int width = monitor ? monitor->width : HYPRLAX_DEFAULT_MON_WIDTH;
+    if (!cfg) {
+        return (HYPRLAX_DEFAULT_SHIFT_PERCENT / 100.0f) * width;
+    }
+    if (cfg->shift_percent > 0.0f) {
+        return (cfg->shift_percent / 100.0f) * width;
+    }
+    if (cfg->shift_pixels > 0.0f) {
+        return cfg->shift_pixels;
+    }
+    return (HYPRLAX_DEFAULT_SHIFT_PERCENT / 100.0f) * width;
 }

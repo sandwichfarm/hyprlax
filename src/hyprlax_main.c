@@ -25,6 +25,7 @@
 #include "include/config_toml.h"
 #include "include/wayland_api.h"
 #include "include/defaults.h"
+#include "core/monitor.h"
 #include "ipc.h"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -1211,6 +1212,7 @@ int hyprlax_add_layer(hyprlax_context_t *ctx, const char *image_path,
     
     /* Apply global scale factor from config (already has good default from layer_create) */
     new_layer->content_scale = ctx->config.scale_factor;
+    new_layer->scale_is_custom = false;
 
     /* Load texture if OpenGL is initialized */
     if (ctx->renderer && ctx->renderer->initialized) {
@@ -1305,13 +1307,7 @@ void hyprlax_handle_workspace_change(hyprlax_context_t *ctx, int new_workspace) 
     }
 
     /* Calculate shift in pixels from percentage (use first monitor's width as reference) */
-    float shift_pixels = ctx->config.shift_pixels;
-    if (ctx->config.shift_percent > 0.0f && ctx->monitors && ctx->monitors->head) {
-        shift_pixels = (ctx->config.shift_percent / 100.0f) * ctx->monitors->head->width;
-    } else if (ctx->config.shift_pixels <= 0.0f && ctx->monitors && ctx->monitors->head) {
-        /* Use default 1.5% if neither is set */
-        shift_pixels = 0.015f * ctx->monitors->head->width;
-    }
+    float shift_pixels = monitor_effective_shift_px(&ctx->config, ctx->monitors ? ctx->monitors->head : NULL);
 
     /* Calculate target offset (for legacy single-surface mode) */
     float target_x = ctx->workspace_offset_x + (delta * shift_pixels);
@@ -1352,13 +1348,7 @@ void hyprlax_handle_workspace_change_2d(hyprlax_context_t *ctx,
     }
 
     /* Calculate shift in pixels from percentage (use first monitor's width as reference) */
-    float shift_pixels = ctx->config.shift_pixels;
-    if (ctx->config.shift_percent > 0.0f && ctx->monitors && ctx->monitors->head) {
-        shift_pixels = (ctx->config.shift_percent / 100.0f) * ctx->monitors->head->width;
-    } else if (ctx->config.shift_pixels <= 0.0f && ctx->monitors && ctx->monitors->head) {
-        /* Use default 1.5% if neither is set */
-        shift_pixels = 0.015f * ctx->monitors->head->width;
-    }
+    float shift_pixels = monitor_effective_shift_px(&ctx->config, ctx->monitors ? ctx->monitors->head : NULL);
 
     /* Calculate target offset for both axes */
     float target_x = ctx->workspace_offset_x + (delta_x * shift_pixels);

@@ -51,6 +51,7 @@ parallax_layer_t* layer_create(const char *image_path, float shift_multiplier, f
     /* Content scaling defaults - these work for the common case */
     layer->fit_mode = LAYER_FIT_COVER;  /* Cover mode to ensure scale is applied and prevent smearing */
     layer->content_scale = HYPRLAX_DEFAULT_LAYER_SCALE;  /* Use config default that prevents smearing */
+    layer->scale_is_custom = false;     /* Will inherit global unless overridden */
     layer->align_x = 0.5f;
     layer->align_y = 0.5f;
     layer->base_uv_x = 0.0f;
