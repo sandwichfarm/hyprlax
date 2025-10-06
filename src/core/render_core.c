@@ -158,7 +158,7 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
 
         if (ctx->renderer->ops->draw_layer_ex) {
             float eff_shift = monitor_effective_shift_px(&ctx->config, monitor);
-            LOG_DEBUG("Rendering layer: fit_mode=%d, content_scale=%.2f, shift=%.1f", 
+            LOG_DEBUG("Rendering layer: fit_mode=%d, content_scale=%.2f, shift=%.1f",
                       layer->fit_mode, layer->content_scale, eff_shift);
             renderer_layer_params_t p = {
                 .fit_mode = layer->fit_mode,

@@ -1017,7 +1017,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 snprintf(response, sizeof(response), "%.3f\n", app_get->config.scale_factor);
                 success = true; break;
             }
-            if (strcmp(property, "shift") == 0 || strcmp(property, "shift_percent") == 0 || strcmp(property, "parallax.shift_percent") == 0) { 
+            if (strcmp(property, "shift") == 0 || strcmp(property, "shift_percent") == 0 || strcmp(property, "parallax.shift_percent") == 0) {
                 /* Return percentage if set, otherwise convert pixels to approximate percentage */
                 if (app_get->config.shift_percent > 0.0f) {
                     snprintf(response, sizeof(response), "%.2f\n", app_get->config.shift_percent);
@@ -1028,13 +1028,13 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 } else {
                     snprintf(response, sizeof(response), "1.5\n");  /* Default */
                 }
-                success = true; 
-                break; 
+                success = true;
+                break;
             }
-            if (strcmp(property, "shift_pixels") == 0 || strcmp(property, "parallax.shift_pixels") == 0) { 
-                snprintf(response, sizeof(response), "%.1f\n", app_get->config.shift_pixels); 
-                success = true; 
-                break; 
+            if (strcmp(property, "shift_pixels") == 0 || strcmp(property, "parallax.shift_pixels") == 0) {
+                snprintf(response, sizeof(response), "%.1f\n", app_get->config.shift_pixels);
+                success = true;
+                break;
             }
             if (strcmp(property, "duration") == 0 || strcmp(property, "animation.duration") == 0) { snprintf(response, sizeof(response), "%.3f\n", app_get->config.animation_duration); success = true; break; }
             if (strcmp(property, "easing") == 0 || strcmp(property, "animation.easing") == 0) { snprintf(response, sizeof(response), "%s\n", easing_to_string(app_get->config.default_easing)); success = true; break; }

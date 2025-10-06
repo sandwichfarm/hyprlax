@@ -119,7 +119,7 @@ static void parse_global_table(toml_table_t *global, config_t *cfg)
                 parallax_has_percent = 1;
             }
         }
-        
+
         /* Deprecated: shift_pixels inside parallax */
         {
             double dv; if (toml_get_number_in(parallax, "shift_pixels", &dv) && !parallax_has_percent) {

@@ -888,7 +888,7 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
         }
         v = getenv("HYPRLAX_PARALLAX_SHIFT_PIXELS");
         if (v && *v) {
-            float f = atof(v); 
+            float f = atof(v);
             if (f >= 0.0f) {
                 /* Keep as pixels for backwards compatibility with env var */
                 ctx->config.shift_pixels = f;
@@ -896,7 +896,7 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
         }
         v = getenv("HYPRLAX_PARALLAX_SHIFT_PERCENT");
         if (v && *v) {
-            float f = atof(v); 
+            float f = atof(v);
             if (f >= 0.0f && f <= 100.0f) {
                 ctx->config.shift_percent = f;
                 ctx->config.shift_pixels = 0.0f;  /* Percent takes precedence */
@@ -979,8 +979,8 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
                 else if (next) i++;
             } else if (!strcmp(arg, "-s") || !strcmp(arg, "--shift") || !strncmp(arg, "--shift=", 8)) {
                 valeq = arg_get_val_local(arg, next);
-                if (valeq) { 
-                    float f = atof(valeq); 
+                if (valeq) {
+                    float f = atof(valeq);
                     if (f >= 0.0f) {
                         if (f <= 10.0f) {
                             ctx->config.shift_percent = f;
@@ -1209,7 +1209,7 @@ int hyprlax_add_layer(hyprlax_context_t *ctx, const char *image_path,
     if (!new_layer) {
         return HYPRLAX_ERROR_NO_MEMORY;
     }
-    
+
     /* Apply global scale factor from config (already has good default from layer_create) */
     new_layer->content_scale = ctx->config.scale_factor;
     new_layer->scale_is_custom = false;
