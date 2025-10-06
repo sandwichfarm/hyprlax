@@ -11,6 +11,7 @@
 #include <getopt.h>
 #include "../include/core.h"
 #include "../include/log.h"
+#include "../include/defaults.h"
 
 /* Set default configuration values */
 void config_set_defaults(config_t *cfg) {
@@ -18,14 +19,15 @@ void config_set_defaults(config_t *cfg) {
 
     memset(cfg, 0, sizeof(config_t));
 
-    cfg->target_fps = 60;
+    cfg->target_fps = HYPRLAX_DEFAULT_FPS;
     cfg->max_fps = 144;
-    cfg->shift_pixels = 100.0f;  /* Reduced from 150 to prevent smearing with 10 workspaces */
-    cfg->scale_factor = 1.2f;    /* Reduced from 1.5 to match new shift defaults */
-    cfg->animation_duration = 1.0;
+    cfg->shift_percent = HYPRLAX_DEFAULT_SHIFT_PERCENT;    /* optimized for 10 workspace span */
+    cfg->shift_pixels = 0.0f;     /* DEPRECATED - calculated from shift_percent */
+    cfg->scale_factor = HYPRLAX_DEFAULT_SCALE_FACTOR;    /* margin for parallax */
+    cfg->animation_duration = HYPRLAX_DEFAULT_ANIM_DURATION;
     cfg->default_easing = EASE_CUBIC_OUT;
     cfg->vsync = false;  /* Default off to prevent GPU blocking when idle */
-    cfg->idle_poll_rate = 2.0f;  /* Default 2 Hz = 500ms polling when idle */
+    cfg->idle_poll_rate = HYPRLAX_IDLE_POLL_RATE_DEFAULT;  /* Hz */
     cfg->debug = false;
     cfg->log_level = -1; /* -1 means not explicitly set, will use LOG_WARN or LOG_DEBUG based on debug flag */
     cfg->dry_run = false;
@@ -45,8 +47,8 @@ void config_set_defaults(config_t *cfg) {
     cfg->invert_cursor_y = false;
     cfg->invert_window_x = false;
     cfg->invert_window_y = false;
-    cfg->parallax_max_offset_x = 100000.0f; /* effectively no clamp by default */
-    cfg->parallax_max_offset_y = 100000.0f;
+    cfg->parallax_max_offset_x = HYPRLAX_DEFAULT_MAX_OFFSET_PX; /* effectively no clamp by default */
+    cfg->parallax_max_offset_y = HYPRLAX_DEFAULT_MAX_OFFSET_PX;
     /* Render overflow defaults */
     cfg->render_overflow_mode = 0; /* repeat_edge */
     cfg->render_margin_px_x = 0.0f;
@@ -54,7 +56,7 @@ void config_set_defaults(config_t *cfg) {
     cfg->render_tile_x = 0;
     cfg->render_tile_y = 0;
     cfg->render_accumulate = false;
-    cfg->render_trail_strength = 0.12f; /* per-frame fade when accumulating */
+    cfg->render_trail_strength = HYPRLAX_DEFAULT_TRAIL_STRENGTH; /* per-frame fade when accumulating */
     cfg->cursor_sensitivity_x = 1.0f;
     cfg->cursor_sensitivity_y = 1.0f;
     cfg->cursor_deadzone_px = 4.0f;
@@ -106,19 +108,32 @@ int config_parse_args(config_t *cfg, int argc, char **argv) {
 
             case 'f':
                 cfg->target_fps = atoi(optarg);
-                if (cfg->target_fps <= 0 || cfg->target_fps > 240) {
+                if (cfg->target_fps <= 0 || cfg->target_fps > HYPRLAX_MAX_ALLOWED_FPS) {
                     LOG_WARN("Invalid FPS value: %s", optarg);
                     return HYPRLAX_ERROR_INVALID_ARGS;
                 }
                 break;
 
-            case 's':
-                cfg->shift_pixels = atof(optarg);
-                if (cfg->shift_pixels < 0) {
+            case 's': {
+                float value = atof(optarg);
+                if (value < 0) {
                     LOG_WARN("Invalid shift value: %s", optarg);
                     return HYPRLAX_ERROR_INVALID_ARGS;
                 }
+                /* Auto-detect percentage vs pixels:
+                 * Values <= 10 are treated as percentages
+                 * Values > 10 are treated as pixels (deprecated) */
+                if (value <= 10.0f) {
+                    cfg->shift_percent = value;
+                    cfg->shift_pixels = 0.0f;  /* Clear deprecated field */
+                } else {
+                    /* Backwards compatibility: treat as pixels */
+                    cfg->shift_pixels = value;
+                    cfg->shift_percent = 0.0f;  /* Will be converted at runtime */
+                    LOG_WARN("Using deprecated pixel-based shift (%.0f px). Consider using percentage (0-10)", value);
+                }
                 break;
+            }
 
             case 'd':
                 cfg->animation_duration = atof(optarg);

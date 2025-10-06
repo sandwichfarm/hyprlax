@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <poll.h>
 #include "../include/compositor.h"
+#include "../include/defaults.h"
 #include "../include/hyprlax_internal.h"
 #include "../include/log.h"
 
@@ -445,8 +446,8 @@ static int sway_connect_ipc(const char *socket_path) {
     g_sway_data->cmd_fd = compositor_connect_socket_with_retry(
         g_sway_data->socket_path,
         "Sway",
-        30,     /* max retries */
-        500     /* delay ms */
+        SWAY_CONNECT_MAX_RETRIES,     /* max retries */
+        SWAY_CONNECT_RETRY_MS     /* delay ms */
     );
     if (g_sway_data->cmd_fd < 0) {
         return HYPRLAX_ERROR_NO_DISPLAY;

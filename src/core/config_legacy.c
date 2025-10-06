@@ -157,6 +157,7 @@ int legacy_config_write_toml(const legacy_cfg_t *cfg, const char *dst_path, char
     fprintf(fp, "# Converted from legacy hyprlax config\n\n[global]\n");
     if (cfg->have_fps)      fprintf(fp, "fps = %d\n", cfg->fps);
     if (cfg->have_duration) fprintf(fp, "duration = %.3f\n", cfg->duration);
+    if (cfg->have_scale)    fprintf(fp, "scale = %.3f\n", cfg->scale);
     if (cfg->have_shift)    fprintf(fp, "shift = %.3f\n", cfg->shift);
     if (cfg->have_easing && cfg->easing[0]) fprintf(fp, "easing = \"%s\"\n", cfg->easing);
     if (cfg->have_vsync)    fprintf(fp, "vsync = %s\n", cfg->vsync ? "true" : "false");

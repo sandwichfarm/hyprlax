@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <time.h>
+#include "include/defaults.h"
 
 /* Get current time in seconds */
 static double get_time(void) {
@@ -262,14 +263,12 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
         return;
     }
 
-    /* Cursor-only mode: update context for bookkeeping, but do not drive parallax
-       offsets or layer animations from workspace changes. Cursor input is the
-       sole parallax source in this mode. */
-    if (ctx && ctx->config.parallax_mode == PARALLAX_CURSOR) {
+    /* If workspace input is disabled, do not drive parallax from workspace changes. */
+    if (ctx && ctx->input.weights[INPUT_WORKSPACE] <= 0.0f) {
         monitor->previous_context = monitor->current_context;
         monitor->current_context = *new_context;
         if (ctx->config.debug) {
-            fprintf(stderr, "[DEBUG] monitor_handle_workspace_context_change: cursor-only mode; skipping parallax update\n");
+            fprintf(stderr, "[DEBUG] monitor_handle_workspace_context_change: workspace input disabled; skipping parallax update\n");
         }
         return;
     }
@@ -291,11 +290,31 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
     workspace_offset_t offset_2d = {0.0f, 0.0f};
     float offset_1d = 0.0f;
 
+    /* Calculate shift in pixels from percentage */
+    float shift_pixels = 0.0f;
+    
+    /* Try to get config from context if monitor config not set */
+    config_t *config = monitor->config;
+    if (!config && ctx) {
+        config = &ctx->config;
+    }
+    
+    if (config && config->shift_percent > 0.0f) {
+        /* Use percentage-based shift (new preferred method) */
+        shift_pixels = (config->shift_percent / 100.0f) * monitor->width;
+    } else if (config && config->shift_pixels > 0.0f) {
+        /* Fall back to pixel-based shift (deprecated) */
+        shift_pixels = config->shift_pixels;
+    } else {
+        /* Default: percent of screen width (optimized for 10 workspaces) */
+        shift_pixels = (HYPRLAX_DEFAULT_SHIFT_PERCENT / 100.0f) * monitor->width;
+    }
+
     if (is_2d) {
         /* Calculate 2D offset for 2D models */
         offset_2d = workspace_calculate_offset_2d(&monitor->current_context,
                                                  new_context,
-                                                 monitor->config ? monitor->config->shift_pixels : 100.0f,
+                                                 shift_pixels,
                                                  NULL);
         if (ctx && ctx->config.debug) {
             fprintf(stderr, "[DEBUG]   Using 2D offset calculation\n");
@@ -304,7 +323,7 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
         /* Calculate 1D offset for linear models */
         offset_1d = workspace_calculate_offset(&monitor->current_context,
                                               new_context,
-                                              monitor->config ? monitor->config->shift_pixels : 100.0f,
+                                              shift_pixels,
                                               NULL);
         offset_2d.x = offset_1d;
         offset_2d.y = 0.0f;
@@ -345,15 +364,19 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
                 LOG_DEBUG("  2D accumulative offset: X=%.1f, Y=%.1f", monitor->parallax_offset_x, monitor->parallax_offset_y);
             }
         } else {
-            /* For 1D models, accumulate delta from previous context (legacy behavior) */
-            int from_ws = old_context.data.workspace_id;
-            int to_ws = new_context->data.workspace_id;
-            int delta_ws = to_ws - from_ws;
-            float step = (monitor->config ? monitor->config->shift_pixels : 100.0f);
+            /* For 1D models, use the calculated offset */
             float base_x = monitor->animating ? monitor->animation_target_x : monitor->parallax_offset_x;
-            absolute_target_x = base_x + delta_ws * step;
+            absolute_target_x = base_x + offset_2d.x;  /* offset_2d.x contains the offset_1d value */
             absolute_target_y = 0.0f;
+            
+            /* Update the accumulated position */
+            monitor->parallax_offset_x = absolute_target_x;
+            monitor->parallax_offset_y = absolute_target_y;
+            
             if (ctx && ctx->config.debug) {
+                int from_ws = old_context.data.workspace_id;
+                int to_ws = new_context->data.workspace_id;
+                int delta_ws = to_ws - from_ws;
                 LOG_DEBUG("  1D accumulative: from %d to %d (delta=%d) base=%.1f -> X=%.1f",
                           from_ws, to_ws, delta_ws, base_x, absolute_target_x);
             }

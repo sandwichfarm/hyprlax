@@ -125,7 +125,8 @@ typedef struct {
     float idle_poll_rate;  /* Polling rate when idle in Hz (default: 2.0 = 500ms) */
 
     /* Animation settings */
-    float shift_pixels;
+    float shift_percent;        /* NEW: Shift as percentage of viewport width (0-100) */
+    float shift_pixels;         /* DEPRECATED: Use shift_percent instead */
     double animation_duration;
     easing_type_t default_easing;
 

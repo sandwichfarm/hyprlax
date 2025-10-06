@@ -5,7 +5,7 @@
 fps = 144
 debug = false
 duration = 1.2
-shift = 100  # Optimized for 10 workspaces without smearing
+shift = 50   # Conservative shift to prevent edge smearing
 vsync = true
 easing = "expo"
 

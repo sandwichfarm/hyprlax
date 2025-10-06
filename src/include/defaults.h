@@ -1,0 +1,89 @@
+/*
+ * defaults.h - Centralized default constants for hyprlax
+ */
+
+#ifndef HYPRLAX_DEFAULTS_H
+#define HYPRLAX_DEFAULTS_H
+
+/* Frame & FPS */
+#define HYPRLAX_DEFAULT_FPS 60
+#define HYPRLAX_MAX_ALLOWED_FPS 999
+
+/* Shift & scaling defaults */
+#define HYPRLAX_DEFAULT_SHIFT_PERCENT 1.0f
+#define HYPRLAX_DEFAULT_SCALE_FACTOR 1.3f
+#define HYPRLAX_DEFAULT_LAYER_SCALE HYPRLAX_DEFAULT_SCALE_FACTOR
+
+/* Animation */
+#define HYPRLAX_DEFAULT_ANIM_DURATION 1.0
+/* Note: HYPRLAX_DEFAULT_EASING uses enum from core.h; ensure core.h is included before using */
+#define HYPRLAX_ANIM_COMPLETE_EPS 0.995f
+
+/* Idle timing */
+#define HYPRLAX_IDLE_POLL_RATE_DEFAULT 2.0f
+#define HYPRLAX_IDLE_POLL_RATE_MIN 0.1f
+#define HYPRLAX_IDLE_POLL_RATE_MAX 10.0f
+
+/* Parallax hybrid defaults */
+#define HYPRLAX_DEFAULT_HYBRID_WORKSPACE_WEIGHT 0.7f
+#define HYPRLAX_DEFAULT_HYBRID_CURSOR_WEIGHT 0.3f
+
+/* Max offset clamps */
+#define HYPRLAX_DEFAULT_MAX_OFFSET_PX 100000.0f
+
+/* Trails / accumulation */
+#define HYPRLAX_DEFAULT_TRAIL_STRENGTH 0.12f
+
+/* Cursor defaults */
+#define HYPRLAX_DEFAULT_MON_WIDTH 1920
+#define HYPRLAX_DEFAULT_MON_HEIGHT 1080
+#define HYPRLAX_CURSOR_EASE_EPS 0.0003f
+#define HYPRLAX_CURSOR_DIRTY_DELTA 0.0015f
+
+/* Platform/compositor retry policy */
+#define WAYLAND_CONNECT_MAX_RETRIES 30
+#define WAYLAND_CONNECT_RETRY_MS 500
+
+#define SWAY_CONNECT_MAX_RETRIES 30
+#define SWAY_CONNECT_RETRY_MS 500
+
+#define HYPRLAND_CONNECT_MAX_RETRIES 150
+#define HYPRLAND_CONNECT_RETRY_MS 100
+#define HYPRLAND_CMD_POLL_ATTEMPTS 5
+#define HYPRLAND_CMD_POLL_TIMEOUT_MS 10
+#define HYPRLAND_DEFAULT_WORKSPACE_COUNT 10
+
+/* IPC defaults */
+#define IPC_SOCKET_CREATE_MAX_RETRIES 10
+#define IPC_SOCKET_CREATE_RETRY_MS 200
+#define IPC_LISTEN_BACKLOG 5
+
+/* Wayland layer-shell */
+#define WAYLAND_EXCLUSIVE_ZONE_BACKGROUND -1
+#define WAYLAND_EGL_INITIAL_W 1
+#define WAYLAND_EGL_INITIAL_H 1
+
+/* Renderer/shader */
+#define HYPRLAX_BLUR_KERNEL_SIZE 5.0f
+#define HYPRLAX_BLUR_WEIGHT_FALLOFF 0.15f
+#define HYPRLAX_SHADER_BUFFER_SIZE 4096
+#define HYPRLAX_FADE_ALPHA_MIN 0.0001f
+
+/* Sizes and buffers */
+#define HYPRLAX_MONITOR_NAME_MAX 64
+#define HYPRLAX_LOG_BUFFER_SIZE 4096
+#define HYPRLAX_MAX_CONFIG_LINE 512
+
+/* Window defaults (fallback paths) */
+#define HYPRLAX_DEFAULT_WINDOW_W 1920
+#define HYPRLAX_DEFAULT_WINDOW_H 1080
+#define HYPRLAX_DEFAULT_WINDOW_FULLSCREEN 1
+#define HYPRLAX_DEFAULT_WINDOW_BORDERLESS 1
+
+/* Paths/logging */
+#define HYPRLAX_STDERR_LOG_PATH "/tmp/hyprlax-stderr.log"
+#define HYPRLAX_STARTUP_LOG_PATH "/tmp/hyprlax-exec.log"
+#define HYPRLAX_DEBUG_LOG_TEMPLATE "/tmp/hyprlax-%d.log"
+
+#endif /* HYPRLAX_DEFAULTS_H */
+

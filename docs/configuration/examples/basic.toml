@@ -5,7 +5,7 @@
 fps = 60                # Lower FPS for battery saving
 debug = false
 duration = 1.0          # 1 second workspace animation
-shift = 100             # Optimized parallax shift for 10 workspaces
+shift_percent = 1.5     # 1.5% of screen width per workspace (works on any screen size)
 vsync = true
 easing = "expo"
 
@@ -20,13 +20,13 @@ easing = "expo"
 [[global.layers]]
 path = "~/Pictures/background.jpg"
 shift_multiplier = 0.5    # Moves at half speed
-scale = 1.2                # 20% larger to prevent edge smearing
+scale = 1.3                # 30% larger to prevent edge smearing
 opacity = 1.0
 blur = 1.0                 # Slight blur for depth
 
 [[global.layers]]
 path = "~/Pictures/foreground.png"
-shift_multiplier = 0.75   # Reduced to stay within bounds
-scale = 1.2                # 20% larger to prevent edge smearing
+shift_multiplier = 0.75   # Foreground moves more for depth effect  
+scale = 1.3                # 30% larger to prevent edge smearing
 opacity = 0.95             # Slightly transparent
 blur = 0.0                 # Sharp foreground

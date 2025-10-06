@@ -13,6 +13,8 @@
 #include "../include/renderer.h"
 #include "../include/shader.h"
 #include "../include/hyprlax_internal.h"
+#include "../include/log.h"
+#include "../include/defaults.h"
 
 /* STB_IMAGE is already implemented in hyprlax.c, just need declarations */
 
@@ -314,7 +316,7 @@ static void gles2_present(void) {
 /* Fullscreen fade overlay (blended) */
 static void gles2_fade_frame(float r, float g, float b, float a) {
     if (!g_gles2_data || !g_gles2_data->fill_shader) return;
-    if (a <= 0.0001f) return;
+    if (a <= HYPRLAX_FADE_ALPHA_MIN) return;
 
     /* Use fill shader */
     shader_use(g_gles2_data->fill_shader);
@@ -712,8 +714,18 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
     {
         GLint u_off = shader_get_uniform_location(shader, "u_offset");
         if (u_off != -1) {
-            if (using_params) glUniform2f(u_off, x, -y);
+            if (using_params) {
+                /* Scale the offset by content_scale to compensate for scaled image */
+                float scale = (params && params->content_scale > 0.0f) ? params->content_scale : 1.0f;
+                float offset_x = x / scale;
+                float offset_y = -y / scale;
+                LOG_DEBUG("Setting u_offset: x=%.3f y=%.3f scale=%.2f -> offset=(%.3f, %.3f)",
+                          x, y, scale, offset_x, offset_y);
+                glUniform2f(u_off, offset_x, offset_y);
+            }
             else glUniform2f(u_off, 0.0f, 0.0f);
+        } else {
+            LOG_DEBUG("WARNING: u_offset uniform not found in shader!");
         }
     }
 
@@ -755,7 +767,11 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
         /* Always apply layer offset via u_offset for separable blur pass 1 */
         {
             GLint u_off = shader_get_uniform_location(shader, "u_offset");
-            if (u_off != -1) glUniform2f(u_off, x, -y);
+            if (u_off != -1) {
+                /* Scale the offset by content_scale to compensate for scaled image */
+                float scale = (params && params->content_scale > 0.0f) ? params->content_scale : 1.0f;
+                glUniform2f(u_off, x / scale, -y / scale);
+            }
         }
         /* Save viewport and blend state */
         GLint prev_viewport[4];
@@ -860,7 +876,11 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
     if (use_uniform_offset && *use_uniform_offset) {
         GLint u_off = shader_get_uniform_location(shader, "u_offset");
         /* When uniform-offset is enabled, always drive offset via uniform to debug path. */
-        if (u_off != -1) glUniform2f(u_off, x, -y);
+        if (u_off != -1) {
+            /* Scale the offset by content_scale to compensate for scaled image */
+            float scale = (params && params->content_scale > 0.0f) ? params->content_scale : 1.0f;
+            glUniform2f(u_off, x / scale, -y / scale);
+        }
     }
 
     /* Setup vertex data */

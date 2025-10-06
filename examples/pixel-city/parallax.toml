@@ -1,7 +1,8 @@
 [global]
 fps = 144
 duration = 4.0
-shift = 200
+scale = 0.1
+shift_percent = 0.0000001
 vsync = false
 easing = "expo"
 

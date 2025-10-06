@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../include/core.h"
+#include "../include/log.h"
+#include "../include/defaults.h"
 
 static uint32_t next_layer_id = 1;
 
@@ -46,9 +48,9 @@ parallax_layer_t* layer_create(const char *image_path, float shift_multiplier, f
     layer->texture_width = 0;
     layer->texture_height = 0;
 
-    /* Content scaling defaults */
-    layer->fit_mode = LAYER_FIT_STRETCH;
-    layer->content_scale = 1.2f;  /* 20% larger to prevent edge smearing with 10 workspaces */
+    /* Content scaling defaults - these work for the common case */
+    layer->fit_mode = LAYER_FIT_COVER;  /* Cover mode to ensure scale is applied and prevent smearing */
+    layer->content_scale = HYPRLAX_DEFAULT_LAYER_SCALE;  /* Use config default that prevents smearing */
     layer->align_x = 0.5f;
     layer->align_y = 0.5f;
     layer->base_uv_x = 0.0f;

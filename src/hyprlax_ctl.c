@@ -251,8 +251,8 @@ static void print_ctl_help(const char *prog) {
     printf("Runtime Settings Commands:\n");
     printf("  set <property> <value>\n");
     printf("      Set a runtime property\n");
-    printf("      Properties: fps, shift, duration, easing,\n");
-    printf("                 blur_passes, blur_size, debug\n\n");
+    printf("      Properties: fps, shift (%%screen), shift_pixels (deprecated),\n");
+    printf("                 duration, easing, blur_passes, blur_size, debug\n\n");
 
     printf("  get <property>\n");
     printf("      Get current value of a property\n\n");

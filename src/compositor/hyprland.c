@@ -17,6 +17,7 @@
 #include "../include/compositor.h"
 #include "../include/hyprlax_internal.h"
 #include "../include/log.h"
+#include "../include/defaults.h"
 
 /* Hyprland IPC commands */
 #define HYPRLAND_IPC_GET_WORKSPACES "j/workspaces"
@@ -350,7 +351,7 @@ static int hyprland_list_workspaces(workspace_info_t **workspaces, int *count) {
     }
 
     /* Simplified implementation - would parse IPC response */
-    *count = 10;
+    *count = HYPRLAND_DEFAULT_WORKSPACE_COUNT;
     *workspaces = calloc(*count, sizeof(workspace_info_t));
     if (!*workspaces) {
         return HYPRLAX_ERROR_NO_MEMORY;
@@ -443,8 +444,8 @@ static int hyprland_connect_ipc(const char *socket_path) {
     g_hyprland_data->event_fd = compositor_connect_socket_with_retry(
         g_hyprland_data->event_socket_path,
         "Hyprland",
-        150,   /* max_retries: 15 seconds total (match Wayland retry window) */
-        100    /* retry_delay_ms */
+        HYPRLAND_CONNECT_MAX_RETRIES,   /* max_retries */
+        HYPRLAND_CONNECT_RETRY_MS    /* retry_delay_ms */
     );
 
     if (g_hyprland_data->event_fd < 0) {
@@ -632,8 +633,8 @@ static int hyprland_send_command(const char *command, char *response,
         ssize_t total = 0;
         struct pollfd pfd = { .fd = cmd_fd, .events = POLLIN };
         /* Try a few short polls to catch the immediate reply without blocking exit */
-        for (int attempt = 0; attempt < 5 && total < (ssize_t)(response_size - 1); attempt++) {
-            int pr = poll(&pfd, 1, 10); /* 10 ms */
+        for (int attempt = 0; attempt < HYPRLAND_CMD_POLL_ATTEMPTS && total < (ssize_t)(response_size - 1); attempt++) {
+            int pr = poll(&pfd, 1, HYPRLAND_CMD_POLL_TIMEOUT_MS);
             if (pr <= 0) continue; /* timeout or interrupted */
             for (;;) {
                 ssize_t n = read(cmd_fd, response + total, (response_size - 1) - (size_t)total);

@@ -15,6 +15,7 @@
 #include "../include/compositor.h"
 #include "../include/log.h"
 #include "../ipc.h"
+#include "../include/defaults.h"
 
 int create_timerfd_monotonic(void) {
     int fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
@@ -81,7 +82,7 @@ void hyprlax_setup_epoll(hyprlax_context_t *ctx) {
 
 void hyprlax_arm_frame_timer(hyprlax_context_t *ctx, int fps) {
     if (!ctx) return;
-    if (fps <= 0) fps = 60;
+    if (fps <= 0) fps = HYPRLAX_DEFAULT_FPS;
     int interval_ms = (int)(1000.0 / (double)fps);
     if (ctx->frame_timer_fd >= 0) {
         arm_timerfd_ms(ctx->frame_timer_fd, interval_ms, interval_ms);
@@ -134,7 +135,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
 
     double last_render_time = ev_get_time();
     double last_frame_time = last_render_time;
-    double frame_time = 1.0 / (double)(ctx->config.target_fps > 0 ? ctx->config.target_fps : 60);
+    double frame_time = 1.0 / (double)(ctx->config.target_fps > 0 ? ctx->config.target_fps : HYPRLAX_DEFAULT_FPS);
     int prev_target_fps = ctx->config.target_fps;
     int frame_count = 0;
     double debug_timer = 0.0;
@@ -142,7 +143,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
 
     while (ctx->running) {
         int current_fps = ctx->config.target_fps;
-        if (current_fps <= 0) current_fps = 60;
+        if (current_fps <= 0) current_fps = HYPRLAX_DEFAULT_FPS;
         if (current_fps != prev_target_fps) {
             const char *fc_env = getenv("HYPRLAX_FRAME_CALLBACK");
             bool use_frame_callback = (fc_env && *fc_env);

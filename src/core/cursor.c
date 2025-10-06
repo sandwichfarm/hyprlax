@@ -10,6 +10,7 @@
 #include "../include/core.h"
 #include "../include/log.h"
 #include "../core/monitor.h"
+#include "../include/defaults.h"
 
 static void cursor_apply_sample(hyprlax_context_t *ctx, float norm_x, float norm_y) {
     if (!ctx) return;
@@ -57,7 +58,7 @@ bool hyprlax_cursor_tick(hyprlax_context_t *ctx) {
     }
     if (!got_pos) return false;
 
-    int mon_x = 0, mon_y = 0, mon_w = 1920, mon_h = 1080;
+    int mon_x = 0, mon_y = 0, mon_w = HYPRLAX_DEFAULT_MON_WIDTH, mon_h = HYPRLAX_DEFAULT_MON_HEIGHT;
     if (ctx->monitors && ctx->monitors->head) {
         monitor_instance_t *m = ctx->monitors->head;
         monitor_instance_t *found = NULL;
@@ -102,7 +103,7 @@ bool hyprlax_cursor_tick(hyprlax_context_t *ctx) {
             ctx->cursor_eased_y = ctx->cursor_norm_y;
             ctx->cursor_ease_initialized = true;
         }
-        const float thr = 0.0003f;
+        const float thr = HYPRLAX_CURSOR_EASE_EPS;
         if (animation_is_active(&ctx->cursor_anim_x)) {
             if (fabsf(ctx->cursor_anim_x.to_value - ctx->cursor_norm_x) > thr) {
                 ctx->cursor_anim_x.to_value = ctx->cursor_norm_x;
@@ -134,5 +135,5 @@ bool hyprlax_cursor_tick(hyprlax_context_t *ctx) {
     float dxn = fabsf(ctx->cursor_norm_x - prev_x);
     float dyn = fabsf(ctx->cursor_norm_y - prev_y);
     if (ctx->config.debug) return true;
-    return (dxn > 0.0015f || dyn > 0.0015f);
+    return (dxn > HYPRLAX_CURSOR_DIRTY_DELTA || dyn > HYPRLAX_CURSOR_DIRTY_DELTA);
 }

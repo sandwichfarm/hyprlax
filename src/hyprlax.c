@@ -81,7 +81,7 @@ struct config {
     int max_workspaces;    // Maximum number of workspaces (detected from Hyprland)
     char *config_file_path;  // Path to the config file for resolving relative paths
 } config = {
-    .shift_per_workspace = 100.0f,  // Optimized shift to prevent smearing with 10 workspaces
+    .shift_per_workspace = 50.0f,   // Conservative shift to prevent smearing at workspace edges
     .animation_duration = 1.0f,  // Longer duration - user can "feel" it settling
     .animation_delay = 0.0f,
     .scale_factor = 1.2f,  // 20% larger to accommodate parallax without edge artifacts
@@ -1199,7 +1199,7 @@ void print_usage(const char *prog) {
     printf("   or: %s [OPTIONS] --layer <image:shift:opacity> [...]\n", prog);
     printf("   or: %s [OPTIONS] --config <config_file>\n\n", prog);
     printf("Options:\n");
-    printf("  -s, --shift <pixels>     Pixels to shift per workspace (default: 100)\n");
+    printf("  -s, --shift <pixels>     Pixels to shift per workspace (default: 50)\n");
     printf("  -d, --duration <seconds> Animation duration (default: 1.0)\n");
     printf("  --delay <seconds>        Delay before animation starts (default: 0)\n");
     printf("  -e, --easing <type>      Easing function (default: expo)\n");

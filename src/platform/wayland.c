@@ -18,6 +18,7 @@
 #include "../compositor/workspace_models.h"
 #include "../include/hyprlax_internal.h"
 #include "../include/log.h"
+#include "../include/defaults.h"
 #include "../include/renderer.h"
 #include "../../protocols/wlr-layer-shell-client-protocol.h"
 #include "../include/hyprlax.h"
@@ -364,8 +365,8 @@ static int wayland_connect(const char *display_name) {
     }
 
     /* Try to connect to Wayland display with retries for startup race condition */
-    int max_retries = 30;  /* 30 retries = up to 15 seconds */
-    int retry_delay_ms = 500;  /* 500ms between retries */
+    int max_retries = WAYLAND_CONNECT_MAX_RETRIES;  /* retries */
+    int retry_delay_ms = WAYLAND_CONNECT_RETRY_MS;  /* delay ms */
     bool first_attempt = true;
 
     for (int i = 0; i < max_retries; i++) {
@@ -497,7 +498,7 @@ static int wayland_create_window(const window_config_t *config) {
 
         if (g_wayland_data->layer_surface) {
             /* Configure as fullscreen background (input-transparent, non-interactive) */
-            zwlr_layer_surface_v1_set_exclusive_zone(g_wayland_data->layer_surface, -1);
+            zwlr_layer_surface_v1_set_exclusive_zone(g_wayland_data->layer_surface, WAYLAND_EXCLUSIVE_ZONE_BACKGROUND);
             zwlr_layer_surface_v1_set_anchor(g_wayland_data->layer_surface,
                 ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
                 ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
@@ -528,7 +529,7 @@ static int wayland_create_window(const window_config_t *config) {
             wl_display_roundtrip(g_wayland_data->display);
 
             /* Now create EGL window with initial 1x1 dimensions (will be resized on configure) */
-            g_wayland_data->egl_window = wl_egl_window_create(g_wayland_data->surface, 1, 1);
+            g_wayland_data->egl_window = wl_egl_window_create(g_wayland_data->surface, WAYLAND_EGL_INITIAL_W, WAYLAND_EGL_INITIAL_H);
             if (!g_wayland_data->egl_window) {
                 if (g_wayland_data->layer_surface) {
                     zwlr_layer_surface_v1_destroy(g_wayland_data->layer_surface);
@@ -624,7 +625,7 @@ int wayland_create_monitor_surface(monitor_instance_t *monitor) {
 
         if (monitor->layer_surface) {
             /* Configure as fullscreen background (input-transparent, non-interactive) */
-            zwlr_layer_surface_v1_set_exclusive_zone(monitor->layer_surface, -1);
+            zwlr_layer_surface_v1_set_exclusive_zone(monitor->layer_surface, WAYLAND_EXCLUSIVE_ZONE_BACKGROUND);
             zwlr_layer_surface_v1_set_anchor(monitor->layer_surface,
                 ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
                 ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |

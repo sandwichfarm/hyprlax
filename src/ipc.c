@@ -23,6 +23,7 @@
 #include <limits.h>
 #include <stdarg.h>
 #include <math.h>
+#include "include/defaults.h"
 
 /* stb_image prototypes (implementation is compiled in hyprlax_main.c) */
 extern int stbi_info(const char *filename, int *x, int *y, int *comp);
@@ -263,6 +264,7 @@ __attribute__((weak)) parallax_layer_t* layer_list_find(parallax_layer_t *head, 
 __attribute__((weak)) parallax_layer_t* layer_list_sort_by_z(parallax_layer_t *head) {
     return head;
 }
+/* Legacy mode APIs retained as weak stubs but unused */
 __attribute__((weak)) const char* parallax_mode_to_string(parallax_mode_t mode) {
     (void)mode; return "workspace";
 }
@@ -388,8 +390,8 @@ ipc_context_t* ipc_init(void) {
     unlink(ctx->socket_path);
 
     // Create Unix domain socket with retries for early boot scenario
-    int max_retries = 10;
-    int retry_delay_ms = 200;
+    int max_retries = IPC_SOCKET_CREATE_MAX_RETRIES;
+    int retry_delay_ms = IPC_SOCKET_CREATE_RETRY_MS;
     ctx->socket_fd = -1;
 
     for (int i = 0; i < max_retries; i++) {
@@ -418,7 +420,7 @@ ipc_context_t* ipc_init(void) {
     }
 
     LOG_TRACE("[IPC] Starting to listen on socket");
-    if (listen(ctx->socket_fd, 5) < 0) {
+    if (listen(ctx->socket_fd, IPC_LISTEN_BACKLOG) < 0) {
         LOG_ERROR("[IPC] Failed to listen on IPC socket: %s", strerror(errno));
         close(ctx->socket_fd);
         unlink(ctx->socket_path);
@@ -868,7 +870,6 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
                 int layers = app ? app->layer_count : 0;
                 const char *comp = (app && app->compositor && app->compositor->ops && app->compositor->ops->get_name) ? app->compositor->ops->get_name() : "unknown";
-                const char *mode = app ? parallax_mode_to_string(app->config.parallax_mode) : "unknown";
                 char parallax_inputs[64];
                 format_parallax_inputs(app ? &app->config : NULL, parallax_inputs, sizeof(parallax_inputs));
                 int monitors = (app && app->monitors) ? app->monitors->count : 0;
@@ -884,8 +885,8 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                     (void)workspace_detect_capabilities(ctype, &tcaps);
 
                     off += snprintf(response + off, sizeof(response) - off,
-                        "{\"running\":true,\"layers\":%d,\"target_fps\":%d,\"fps\":%.2f,\"parallax\":\"%s\",\"parallax_input\":\"%s\",\"compositor\":\"%s\",\"socket\":\"%s\",\"vsync\":%s,\"debug\":%s,\"caps\":{\"steal\":%s,\"move\":%s,\"split\":%s,\"wsets\":%s,\"tags\":%s,\"vstack\":%s},\"monitors\":[",
-                        layers, target_fps, fps, mode, parallax_inputs, comp, ctx->socket_path, vsync?"true":"false", debug?"true":"false",
+                        "{\"running\":true,\"layers\":%d,\"target_fps\":%d,\"fps\":%.2f,\"parallax_input\":\"%s\",\"compositor\":\"%s\",\"socket\":\"%s\",\"vsync\":%s,\"debug\":%s,\"caps\":{\"steal\":%s,\"move\":%s,\"split\":%s,\"wsets\":%s,\"tags\":%s,\"vstack\":%s},\"monitors\":[",
+                        layers, target_fps, fps, parallax_inputs, comp, ctx->socket_path, vsync?"true":"false", debug?"true":"false",
                         tcaps.can_steal_workspace?"true":"false",
                         tcaps.supports_workspace_move?"true":"false",
                         tcaps.has_split_plugin?"true":"false",
@@ -913,8 +914,8 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                     if (off + 2 < sizeof(response)) { response[off++] = ']'; response[off++]='}'; response[off++]='\n'; response[off]='\0'; }
                 } else {
                     snprintf(response, sizeof(response),
-                             "Status: Active\nhyprlax running\nLayers: %d\nTarget FPS: %d\nFPS: %.1f\nParallax Mode: %s\nParallax Inputs: %s\nMonitors: %d\nCompositor: %s\nSocket: %s\n",
-                             layers, target_fps, fps, mode, parallax_inputs, monitors, comp, ctx->socket_path);
+                             "Status: Active\nhyprlax running\nLayers: %d\nTarget FPS: %d\nFPS: %.1f\nParallax Inputs: %s\nMonitors: %d\nCompositor: %s\nSocket: %s\n",
+                             layers, target_fps, fps, parallax_inputs, monitors, comp, ctx->socket_path);
                 }
                 success = true;
                 break;
@@ -949,10 +950,27 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 if (rc <= 0) { ipc_errorf(response, sizeof(response), rc==0?1210:1211, rc==0?"invalid fps\n":"fps out of range (30..240)\n"); break; }
                 app_set->config.target_fps = iv; handled = true;
             }
-            else if (strcmp(property, "shift") == 0 || strcmp(property, "parallax.shift_pixels") == 0) {
+            else if (strcmp(property, "shift") == 0 || strcmp(property, "shift_percent") == 0 || strcmp(property, "parallax.shift_percent") == 0) {
+                double dv = 0.0; int rc = parse_double_range(value, 0.0, 100.0, &dv);
+                if (rc <= 0) { ipc_errorf(response, sizeof(response), rc==0?1212:1213, rc==0?"invalid shift\n":"shift out of range (0..100)\n"); break; }
+                /* Auto-detect percentage vs pixels */
+                if (dv <= 10.0) {
+                    app_set->config.shift_percent = (float)dv;
+                    app_set->config.shift_pixels = 0.0f;
+                } else {
+                    /* Backwards compatibility: treat large values as pixels */
+                    app_set->config.shift_pixels = (float)dv;
+                    app_set->config.shift_percent = 0.0f;
+                }
+                handled = true;
+            }
+            else if (strcmp(property, "shift_pixels") == 0 || strcmp(property, "parallax.shift_pixels") == 0) {
+                /* Deprecated: explicit pixel-based shift */
                 double dv = 0.0; int rc = parse_double_range(value, 0.0, 1000.0, &dv);
                 if (rc <= 0) { ipc_errorf(response, sizeof(response), rc==0?1212:1213, rc==0?"invalid shift\n":"shift out of range (0..1000)\n"); break; }
-                app_set->config.shift_pixels = (float)dv; handled = true;
+                app_set->config.shift_pixels = (float)dv;
+                app_set->config.shift_percent = 0.0f;
+                handled = true;
             }
             else if (strcmp(property, "duration") == 0 || strcmp(property, "animation.duration") == 0) {
                 double dv = 0.0; int rc = parse_double_range(value, 0.1, 10.0, &dv);
@@ -984,7 +1002,25 @@ bool ipc_process_commands(ipc_context_t* ctx) {
             hyprlax_context_t *app_get = (hyprlax_context_t*)ctx->app_context;
             if (!app_get) { ipc_errorf(response, sizeof(response), 1300, "Runtime settings not available\n"); break; }
             if (strcmp(property, "fps") == 0 || strcmp(property, "render.fps") == 0) { snprintf(response, sizeof(response), "%d\n", app_get->config.target_fps); success = true; break; }
-            if (strcmp(property, "shift") == 0 || strcmp(property, "parallax.shift_pixels") == 0) { snprintf(response, sizeof(response), "%.1f\n", app_get->config.shift_pixels); success = true; break; }
+            if (strcmp(property, "shift") == 0 || strcmp(property, "shift_percent") == 0 || strcmp(property, "parallax.shift_percent") == 0) { 
+                /* Return percentage if set, otherwise convert pixels to approximate percentage */
+                if (app_get->config.shift_percent > 0.0f) {
+                    snprintf(response, sizeof(response), "%.2f\n", app_get->config.shift_percent);
+                } else if (app_get->config.shift_pixels > 0.0f && app_get->monitors && app_get->monitors->head) {
+                    /* Convert pixels to percentage for display */
+                    float percent = (app_get->config.shift_pixels / app_get->monitors->head->width) * 100.0f;
+                    snprintf(response, sizeof(response), "%.2f (from %.0f px)\n", percent, app_get->config.shift_pixels);
+                } else {
+                    snprintf(response, sizeof(response), "1.5\n");  /* Default */
+                }
+                success = true; 
+                break; 
+            }
+            if (strcmp(property, "shift_pixels") == 0 || strcmp(property, "parallax.shift_pixels") == 0) { 
+                snprintf(response, sizeof(response), "%.1f\n", app_get->config.shift_pixels); 
+                success = true; 
+                break; 
+            }
             if (strcmp(property, "duration") == 0 || strcmp(property, "animation.duration") == 0) { snprintf(response, sizeof(response), "%.3f\n", app_get->config.animation_duration); success = true; break; }
             if (strcmp(property, "easing") == 0 || strcmp(property, "animation.easing") == 0) { snprintf(response, sizeof(response), "%s\n", easing_to_string(app_get->config.default_easing)); success = true; break; }
             if (hyprlax_runtime_get_property(app_get, property, response, sizeof(response)) == 0) {
@@ -1311,10 +1347,11 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
         const char *comp = (app && app->compositor && app->compositor->ops && app->compositor->ops->get_name) ? app->compositor->ops->get_name() : "unknown";
         int target_fps = app ? app->config.target_fps : 60;
         double fps = app ? app->fps : 0.0;
-        const char *mode = app ? parallax_mode_to_string(app->config.parallax_mode) : "workspace";
+        char parallax_inputs[64];
+        format_parallax_inputs(app ? &app->config : NULL, parallax_inputs, sizeof(parallax_inputs));
         snprintf(response, response_size,
-                 "hyprlax running\nLayers: %d\nTarget FPS: %d\nFPS: %.1f\nParallax: %s\nCompositor: %s",
-                 layers, target_fps, fps, mode, comp);
+                 "hyprlax running\nLayers: %d\nTarget FPS: %d\nFPS: %.1f\nParallax inputs: %s\nCompositor: %s",
+                 layers, target_fps, fps, parallax_inputs, comp);
         return 0;
     }
 
@@ -1369,7 +1406,7 @@ int ipc_handle_request(ipc_context_t* ctx, const char* request, char* response, 
         hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
         if (!app) {
             if (strcmp(property, "fps") == 0) { snprintf(response, response_size, "60"); return 0; }
-            if (strcmp(property, "shift") == 0) { snprintf(response, response_size, "100"); return 0; }
+            if (strcmp(property, "shift") == 0) { snprintf(response, response_size, "50"); return 0; }
             if (strcmp(property, "duration") == 0) { snprintf(response, response_size, "1.000"); return 0; }
             if (strcmp(property, "easing") == 0) { snprintf(response, response_size, "cubic"); return 0; }
             if (ipc_error_codes_enabled()) snprintf(response, response_size, "Error(1217): Unknown property '%s'", property); else snprintf(response, response_size, "Error: Unknown property '%s'", property); return -1;

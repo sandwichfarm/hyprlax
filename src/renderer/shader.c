@@ -10,6 +10,7 @@
 #include <GLES2/gl2.h>
 #include "../include/shader.h"
 #include "../include/hyprlax_internal.h"
+#include "../include/defaults.h"
 
 /* Built-in shader sources */
 const char *shader_vertex_basic =
@@ -62,9 +63,9 @@ const char *shader_vertex_basic_offset =
     "}\n";
 
 /* Shader constants */
-#define BLUR_KERNEL_SIZE 5.0f
-#define BLUR_WEIGHT_FALLOFF 0.15f
-#define SHADER_BUFFER_SIZE 4096
+#define BLUR_KERNEL_SIZE HYPRLAX_BLUR_KERNEL_SIZE
+#define BLUR_WEIGHT_FALLOFF HYPRLAX_BLUR_WEIGHT_FALLOFF
+#define SHADER_BUFFER_SIZE HYPRLAX_SHADER_BUFFER_SIZE
 
 /* Blur shader template */
 static const char *shader_fragment_blur_template =

@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <sys/time.h>
 #include "include/log.h"
+#include "include/defaults.h"
 
 static FILE *g_log_file = NULL;
 static bool g_log_to_file = false;
@@ -76,7 +77,7 @@ void log_message(log_level_t level, const char *fmt, ...) {
 
     /* Format message */
     va_list args;
-    char buffer[4096];
+    char buffer[HYPRLAX_LOG_BUFFER_SIZE];
 
     va_start(args, fmt);
     vsnprintf(buffer, sizeof(buffer), fmt, args);

@@ -38,7 +38,9 @@ Showcase a layered pixel-art scene with smooth parallax suitable for high FPS.
 
 ## Configuration Walkthrough (TOML)
 
-- Global: `fps = 144`, `duration = 4.0`, `shift = 200`, `easing = "expo"`
+- Global: `fps = 144`, `duration = 4.0`, `shift = 0.01%`, `scale = 1.0`, `easing = "expo"`
+- **Pixel-art specific**: No scaling (`scale = 1.0`) preserves pixel crispness
+- **Minimal shift**: Only 0.01% per workspace for subtle movement
 - `render.tile = { x = true, y = false }` — tile horizontally only
 - Six layers with increasing `shift_multiplier` from 0.1 … 1.0
 - All layers `opacity = 1.0`; light blur on mid layers for depth

@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include "include/defaults.h"
 #include "include/hyprlax.h"
 #include "include/hyprlax_internal.h"
 #include "include/config_legacy.h"
@@ -39,7 +40,7 @@ int main(int argc, char **argv) {
         target[len] = '\0';
         if (strcmp(target, "/dev/null") == 0) {
             /* Redirect stderr to a log file instead of /dev/null */
-            int fd = open("/tmp/hyprlax-stderr.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
+            int fd = open(HYPRLAX_STDERR_LOG_PATH, O_WRONLY | O_CREAT | O_APPEND, 0644);
             if (fd >= 0) {
                 dup2(fd, STDERR_FILENO);
                 close(fd);
@@ -48,7 +49,7 @@ int main(int argc, char **argv) {
     }
 
     /* Log startup immediately to see if we're even running */
-    FILE *startup_log = fopen("/tmp/hyprlax-exec.log", "a");
+    FILE *startup_log = fopen(HYPRLAX_STARTUP_LOG_PATH, "a");
     if (startup_log) {
         fprintf(startup_log, "\n[%ld] === HYPRLAX STARTUP ===\n", (long)time(NULL));
         fprintf(startup_log, "  argc: %d\n", argc);
@@ -82,7 +83,7 @@ int main(int argc, char **argv) {
             printf("  -h, --help                Show this help message\n");
             printf("  -v, --version             Show version information\n");
             printf("  -f, --fps <rate>          Target FPS (default: 60)\n");
-            printf("  -s, --shift <pixels>      Shift amount per workspace (default: 100)\n");
+            printf("  -s, --shift <percent>     Shift amount per workspace as %% of screen (default: 0.3)\n");
             printf("  -d, --duration <seconds>  Animation duration (default: 1.0)\n");
             printf("  -e, --easing <type>       Easing function (default: cubic)\n");
             printf("  -c, --config <file>       Load configuration from file\n");

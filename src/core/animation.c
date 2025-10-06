@@ -7,6 +7,7 @@
 
 #include <string.h>
 #include "../include/core.h"
+#include "../include/defaults.h"
 
 /* Start a new animation */
 void animation_start(animation_state_t *anim, float from, float to,
@@ -58,7 +59,7 @@ float animation_evaluate(animation_state_t *anim, double current_time) {
     float t = (float)(elapsed / anim->duration);
 
     // Smooth completion: treat very close to 1.0 as complete
-    if (t > 0.995f) {
+    if (t > HYPRLAX_ANIM_COMPLETE_EPS) {
         t = 1.0f;
     }
 

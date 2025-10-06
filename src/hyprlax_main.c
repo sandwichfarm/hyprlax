@@ -24,6 +24,7 @@
 #include "include/compositor.h"
 #include "include/config_toml.h"
 #include "include/wayland_api.h"
+#include "include/defaults.h"
 #include "ipc.h"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -62,8 +63,8 @@ static void hyprlax_update_cursor_provider(hyprlax_context_t *ctx) {
             created = true;
         }
 
-        int fps = ctx->config.target_fps > 0 ? ctx->config.target_fps : 60;
-        int interval_ms = fps > 0 ? (int)(1000.0 / (double)fps) : 16;
+        int fps = ctx->config.target_fps > 0 ? ctx->config.target_fps : HYPRLAX_DEFAULT_FPS;
+        int interval_ms = fps > 0 ? (int)(1000.0 / (double)fps) : (int)(1000.0 / (double)HYPRLAX_DEFAULT_FPS);
         arm_timerfd_ms(ctx->cursor_event_fd, interval_ms, interval_ms);
         ctx->cursor_supported = true;
 
@@ -173,10 +174,9 @@ static const char* fit_to_string_local(int m) {
 /* Apply a compositor workspace event (shared by immediate and debounced paths) */
 void process_workspace_event(hyprlax_context_t *ctx, const compositor_event_t *comp_event) {
     if (!ctx || !comp_event) return;
-    /* In cursor-only mode, monitors are realized via Wayland output events.
-       Skip workspace event processing entirely to avoid any parallax updates. */
-    if (ctx->config.parallax_mode == PARALLAX_CURSOR) {
-        LOG_TRACE("Ignoring workspace event in cursor-only parallax mode");
+    /* If workspace input is disabled (weight == 0), ignore workspace events. */
+    if (ctx->input.weights[INPUT_WORKSPACE] <= 0.0f) {
+        LOG_TRACE("Ignoring workspace event: workspace input weight disabled");
         return;
     }
 
@@ -419,7 +419,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 printf("  -h, --help                Show this help message\n");
                 printf("  -v, --version             Show version information\n");
                 printf("  -f, --fps <rate>          Target FPS (default: 60)\n");
-                printf("  -s, --shift <pixels>      Shift amount per workspace (default: 100)\n");
+                printf("  -s, --shift <pixels>      Shift amount per workspace (default: 50)\n");
                 printf("  -d, --duration <seconds>  Animation duration (default: 1.0)\n");
                 printf("  -e, --easing <type>       Easing function (default: cubic)\n");
                 printf("  -c, --config <file>       Load configuration from file\n");
@@ -431,7 +431,6 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 printf("  -C, --compositor <backend> Compositor (hyprland, sway, generic, auto)\n");
                 printf("  -V, --vsync               Enable VSync (default: off)\n");
                 printf("      --verbose <level>     Log level: error|warn|info|debug|trace or 0..4\n");
-                printf("      --parallax <mode>     (deprecated) workspace|cursor|hybrid\n");
                 printf("      --input <spec>        Enable inputs, e.g. workspace,cursor:0.3\n");
                 printf("      --mouse-weight <w>    Weight of cursor source (0..1)\n");
                 printf("      --workspace-weight <w> Weight of workspace source (0..1)\n");
@@ -458,9 +457,19 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 ctx->config.target_fps = atoi(optarg);
                 break;
 
-            case 's':
-                ctx->config.shift_pixels = atof(optarg);
+            case 's': {
+                float value = atof(optarg);
+                /* Auto-detect percentage vs pixels */
+                if (value <= 10.0f) {
+                    ctx->config.shift_percent = value;
+                    ctx->config.shift_pixels = 0.0f;
+                } else {
+                    ctx->config.shift_pixels = value;
+                    ctx->config.shift_percent = 0.0f;
+                    LOG_WARN("Using deprecated pixel shift (%.0f). Use percentage (0-10)", value);
+                }
                 break;
+            }
 
             case 'd':
                 ctx->config.animation_duration = atof(optarg);
@@ -501,7 +510,7 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
                 } else {
                     /* Default log file with timestamp */
                     char log_file[256];
-                    snprintf(log_file, sizeof(log_file), "/tmp/hyprlax-%d.log", getpid());
+                    snprintf(log_file, sizeof(log_file), HYPRLAX_DEBUG_LOG_TEMPLATE, getpid());
                     ctx->config.debug_log_path = strdup(log_file);
                 }
                 if (ctx->config.log_level < 3) ctx->config.log_level = 3; /* ensure LOG_DEBUG */
@@ -558,29 +567,15 @@ static int parse_arguments(hyprlax_context_t *ctx, int argc, char **argv) {
 
             case 1003:  /* --idle-poll-rate */
                 ctx->config.idle_poll_rate = atof(optarg);
-                if (ctx->config.idle_poll_rate < 0.1f || ctx->config.idle_poll_rate > 10.0f) {
-                    LOG_WARN("Invalid idle poll rate: %.1f, using default 2.0 Hz", ctx->config.idle_poll_rate);
-                    ctx->config.idle_poll_rate = 2.0f;
+                if (ctx->config.idle_poll_rate < HYPRLAX_IDLE_POLL_RATE_MIN || ctx->config.idle_poll_rate > HYPRLAX_IDLE_POLL_RATE_MAX) {
+                    LOG_WARN("Invalid idle poll rate: %.1f, using default %.1f Hz", ctx->config.idle_poll_rate, HYPRLAX_IDLE_POLL_RATE_DEFAULT);
+                    ctx->config.idle_poll_rate = HYPRLAX_IDLE_POLL_RATE_DEFAULT;
                 }
                 break;
 
-            case 1005:  /* --parallax */
+            case 1005:  /* --parallax (legacy) */
                 warn_legacy_parallax_usage("--parallax");
-                ctx->config.parallax_mode = parallax_mode_from_string(optarg);
-                if (ctx->config.parallax_mode == PARALLAX_WORKSPACE) {
-                    ctx->config.parallax_workspace_weight = 1.0f;
-                    ctx->config.parallax_cursor_weight = 0.0f;
-                } else if (ctx->config.parallax_mode == PARALLAX_CURSOR) {
-                    ctx->config.parallax_workspace_weight = 0.0f;
-                    ctx->config.parallax_cursor_weight = 1.0f;
-                } else {
-                    /* Hybrid default if untouched */
-                    if (ctx->config.parallax_workspace_weight == 1.0f &&
-                        ctx->config.parallax_cursor_weight == 0.0f) {
-                        ctx->config.parallax_workspace_weight = 0.7f;
-                        ctx->config.parallax_cursor_weight = 0.3f;
-                    }
-                }
+                /* No-op: legacy mode removed. Use --input or weights. */
                 break;
 
             case 1006:  /* --mouse-weight */
@@ -892,7 +887,19 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
         }
         v = getenv("HYPRLAX_PARALLAX_SHIFT_PIXELS");
         if (v && *v) {
-            float f = atof(v); if (f >= 0.0f) ctx->config.shift_pixels = f;
+            float f = atof(v); 
+            if (f >= 0.0f) {
+                /* Keep as pixels for backwards compatibility with env var */
+                ctx->config.shift_pixels = f;
+            }
+        }
+        v = getenv("HYPRLAX_PARALLAX_SHIFT_PERCENT");
+        if (v && *v) {
+            float f = atof(v); 
+            if (f >= 0.0f && f <= 100.0f) {
+                ctx->config.shift_percent = f;
+                ctx->config.shift_pixels = 0.0f;  /* Percent takes precedence */
+            }
         }
         v = getenv("HYPRLAX_ANIMATION_DURATION");
         if (v && *v) {
@@ -925,11 +932,7 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
         if (v && *v) {
             float f = atof(v); if (f >= 0.0f) ctx->config.render_margin_px_y = f;
         }
-        v = getenv("HYPRLAX_PARALLAX_MODE");
-        if (v && *v) {
-            ctx->config.parallax_mode = parallax_mode_from_string(v);
-            warn_legacy_parallax_usage("HYPRLAX_PARALLAX_MODE");
-        }
+        /* Legacy HYPRLAX_PARALLAX_MODE removed; use HYPRLAX_PARALLAX_INPUT or sources weights. */
         v = getenv("HYPRLAX_PARALLAX_INPUT");
         if (v && *v) {
             if (input_source_selection_add_spec(&env_input_selection, v) == HYPRLAX_SUCCESS) {
@@ -975,7 +978,18 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
                 else if (next) i++;
             } else if (!strcmp(arg, "-s") || !strcmp(arg, "--shift") || !strncmp(arg, "--shift=", 8)) {
                 valeq = arg_get_val_local(arg, next);
-                if (valeq) { float f = atof(valeq); if (f >= 0.0f) ctx->config.shift_pixels = f; }
+                if (valeq) { 
+                    float f = atof(valeq); 
+                    if (f >= 0.0f) {
+                        if (f <= 10.0f) {
+                            ctx->config.shift_percent = f;
+                            ctx->config.shift_pixels = 0.0f;
+                        } else {
+                            ctx->config.shift_pixels = f;
+                            ctx->config.shift_percent = 0.0f;
+                        }
+                    }
+                }
                 if (!strncmp(arg, "--shift=", 8)) { } else if (next) i++;
             } else if (!strcmp(arg, "-d") || !strcmp(arg, "--duration") || !strncmp(arg, "--duration=", 11)) {
                 valeq = arg_get_val_local(arg, next);
@@ -1013,8 +1027,6 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
                 if (!strchr(arg, '=') && next) i++;
             } else if (!strncmp(arg, "--parallax=", 11) || !strcmp(arg, "--parallax")) {
                 warn_legacy_parallax_usage("--parallax");
-                const char *v2 = strchr(arg, '=') ? strchr(arg, '=') + 1 : next;
-                if (v2) { ctx->config.parallax_mode = parallax_mode_from_string(v2); }
                 if (!strchr(arg, '=') && next) i++;
             } else if (!strncmp(arg, "--mouse-weight=", 15) || !strcmp(arg, "--mouse-weight")) {
                 const char *v2 = strchr(arg, '=') ? strchr(arg, '=') + 1 : next;
@@ -1112,12 +1124,12 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
     /* 4. Create window */
     LOG_INFO("[INIT] Step 4: Creating window");
     window_config_t window_config = {
-        .width = 1920,
-        .height = 1080,
+        .width = HYPRLAX_DEFAULT_WINDOW_W,
+        .height = HYPRLAX_DEFAULT_WINDOW_H,
         .x = 0,
         .y = 0,
-        .fullscreen = true,
-        .borderless = true,
+        .fullscreen = HYPRLAX_DEFAULT_WINDOW_FULLSCREEN,
+        .borderless = HYPRLAX_DEFAULT_WINDOW_BORDERLESS,
         .title = "hyprlax",
         .app_id = "hyprlax",
     };
@@ -1196,6 +1208,9 @@ int hyprlax_add_layer(hyprlax_context_t *ctx, const char *image_path,
     if (!new_layer) {
         return HYPRLAX_ERROR_NO_MEMORY;
     }
+    
+    /* Apply global scale factor from config (already has good default from layer_create) */
+    new_layer->content_scale = ctx->config.scale_factor;
 
     /* Load texture if OpenGL is initialized */
     if (ctx->renderer && ctx->renderer->initialized) {
@@ -1289,12 +1304,21 @@ void hyprlax_handle_workspace_change(hyprlax_context_t *ctx, int new_workspace) 
         monitor_handle_workspace_change(ctx, ctx->monitors->primary, new_workspace);
     }
 
+    /* Calculate shift in pixels from percentage (use first monitor's width as reference) */
+    float shift_pixels = ctx->config.shift_pixels;
+    if (ctx->config.shift_percent > 0.0f && ctx->monitors && ctx->monitors->head) {
+        shift_pixels = (ctx->config.shift_percent / 100.0f) * ctx->monitors->head->width;
+    } else if (ctx->config.shift_pixels <= 0.0f && ctx->monitors && ctx->monitors->head) {
+        /* Use default 1.5% if neither is set */
+        shift_pixels = 0.015f * ctx->monitors->head->width;
+    }
+
     /* Calculate target offset (for legacy single-surface mode) */
-    float target_x = ctx->workspace_offset_x + (delta * ctx->config.shift_pixels);
+    float target_x = ctx->workspace_offset_x + (delta * shift_pixels);
     float target_y = ctx->workspace_offset_y;
 
-    LOG_TRACE("Target offset: %.1f, %.1f (shift=%.1f)",
-           target_x, target_y, ctx->config.shift_pixels);
+    LOG_TRACE("Target offset: %.1f, %.1f (shift=%.1f px from %.1f%%)",
+           target_x, target_y, shift_pixels, ctx->config.shift_percent);
 
     /* Update all layers with animation */
     parallax_layer_t *layer = ctx->layers;
@@ -1327,12 +1351,21 @@ void hyprlax_handle_workspace_change_2d(hyprlax_context_t *ctx,
                   from_x, from_y, to_x, to_y, delta_x, delta_y);
     }
 
-    /* Calculate target offset for both axes */
-    float target_x = ctx->workspace_offset_x + (delta_x * ctx->config.shift_pixels);
-    float target_y = ctx->workspace_offset_y + (delta_y * ctx->config.shift_pixels);
+    /* Calculate shift in pixels from percentage (use first monitor's width as reference) */
+    float shift_pixels = ctx->config.shift_pixels;
+    if (ctx->config.shift_percent > 0.0f && ctx->monitors && ctx->monitors->head) {
+        shift_pixels = (ctx->config.shift_percent / 100.0f) * ctx->monitors->head->width;
+    } else if (ctx->config.shift_pixels <= 0.0f && ctx->monitors && ctx->monitors->head) {
+        /* Use default 1.5% if neither is set */
+        shift_pixels = 0.015f * ctx->monitors->head->width;
+    }
 
-    LOG_TRACE("Target offset: (%.1f, %.1f) shift=%.1f",
-           target_x, target_y, ctx->config.shift_pixels);
+    /* Calculate target offset for both axes */
+    float target_x = ctx->workspace_offset_x + (delta_x * shift_pixels);
+    float target_y = ctx->workspace_offset_y + (delta_y * shift_pixels);
+
+    LOG_TRACE("Target offset: (%.1f, %.1f) shift=%.1f px from %.1f%%",
+           target_x, target_y, shift_pixels, ctx->config.shift_percent);
 
     /* Update all layers with animation for both axes */
     parallax_layer_t *layer = ctx->layers;
@@ -1506,29 +1539,7 @@ int hyprlax_runtime_set_property(hyprlax_context_t *ctx, const char *property, c
         return -1;
     }
 
-    if (strcmp(property, "parallax.mode") == 0) {
-        warn_legacy_parallax_usage("parallax.mode");
-        ctx->config.parallax_mode = parallax_mode_from_string(value);
-        if (ctx->config.parallax_mode == PARALLAX_WORKSPACE) {
-            ctx->config.parallax_workspace_weight = 1.0f;
-            ctx->config.parallax_cursor_weight = 0.0f;
-        } else if (ctx->config.parallax_mode == PARALLAX_CURSOR) {
-            ctx->config.parallax_workspace_weight = 0.0f;
-            ctx->config.parallax_cursor_weight = 1.0f;
-        } else {
-            if (ctx->config.parallax_workspace_weight == 1.0f &&
-                ctx->config.parallax_cursor_weight == 0.0f) {
-                ctx->config.parallax_workspace_weight = 0.7f;
-                ctx->config.parallax_cursor_weight = 0.3f;
-            }
-        }
-        input_manager_apply_config(&ctx->input, &ctx->config);
-        hyprlax_update_cursor_provider(ctx);
-        if (ctx->frame_timer_fd >= 0) {
-            arm_timerfd_ms(ctx->frame_timer_fd, 1, 0);
-        }
-        return 0;
-    }
+    /* Legacy parallax.mode removed; use parallax.input or sources weights instead. */
     if (strcmp(property, "parallax.input") == 0) {
         input_source_selection_t selection;
         input_source_selection_init(&selection);
@@ -1672,7 +1683,7 @@ int hyprlax_runtime_get_property(hyprlax_context_t *ctx, const char *property, c
         if (strcmp(leaf, "margin_px.y") == 0) { float eff = (layer->margin_px_x != 0.0f || layer->margin_px_y != 0.0f) ? layer->margin_px_y : ctx->config.render_margin_px_y; W("%.1f", eff); return 0; }
         return -1;
     }
-    if (strcmp(property, "parallax.mode") == 0) { W("%s", parallax_mode_to_string(ctx->config.parallax_mode)); return 0; }
+    /* Legacy parallax.mode removed */
     if (strcmp(property, "parallax.input") == 0) {
         char buffer[128] = "";
         size_t len = 0;

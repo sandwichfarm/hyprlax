@@ -7,6 +7,7 @@
 #include "core/input/input_manager.h"
 #include "include/log.h"
 #include "core/monitor.h"
+#include "include/defaults.h"
 
 #ifndef INPUT_MANAGER_CLAMP01
 #define INPUT_MANAGER_CLAMP01(v) ((v) < 0.0f ? 0.0f : ((v) > 1.0f ? 1.0f : (v)))
@@ -127,8 +128,8 @@ void input_source_selection_commit(input_source_selection_t *selection, config_t
         bool cursor_unspecified = selection->seen[INPUT_CURSOR] && !selection->explicit_weight[INPUT_CURSOR];
 
         if (workspace_unspecified && cursor_unspecified && unspecified_count == 2) {
-            final_weights[INPUT_WORKSPACE] = 0.7f;
-            final_weights[INPUT_CURSOR] = 0.3f;
+            final_weights[INPUT_WORKSPACE] = HYPRLAX_DEFAULT_HYBRID_WORKSPACE_WEIGHT;
+            final_weights[INPUT_CURSOR] = HYPRLAX_DEFAULT_HYBRID_CURSOR_WEIGHT;
             remaining = 0.0f;
             unspecified_count = 0;
         }
@@ -145,16 +146,7 @@ void input_source_selection_commit(input_source_selection_t *selection, config_t
         cfg->parallax_workspace_weight = selection->seen[INPUT_WORKSPACE] ? final_weights[INPUT_WORKSPACE] : 0.0f;
         cfg->parallax_cursor_weight = selection->seen[INPUT_CURSOR] ? final_weights[INPUT_CURSOR] : 0.0f;
 
-        bool workspace_enabled = cfg->parallax_workspace_weight > 0.0f;
-        bool cursor_enabled = cfg->parallax_cursor_weight > 0.0f;
-
-        if (workspace_enabled && !cursor_enabled) {
-            cfg->parallax_mode = PARALLAX_WORKSPACE;
-        } else if (!workspace_enabled && cursor_enabled) {
-            cfg->parallax_mode = PARALLAX_CURSOR;
-        } else if (workspace_enabled || cursor_enabled || selection->seen[INPUT_WINDOW]) {
-            cfg->parallax_mode = PARALLAX_HYBRID;
-        }
+        /* Legacy parallax modes removed; behavior derives purely from weights. */
 
         cfg->parallax_window_weight = selection->seen[INPUT_WINDOW] ? final_weights[INPUT_WINDOW] : 0.0f;
     }
