@@ -100,7 +100,7 @@ PROTOCOL_HDRS =
 endif
 
 # Core module sources (always included)
-CORE_SRCS = src/core/easing.c src/core/animation.c src/core/layer.c src/core/config.c src/core/monitor.c src/core/log.c src/core/parallax.c src/core/cursor.c src/core/render_core.c src/core/event_loop.c \
+CORE_SRCS = src/core/easing.c src/core/animation.c src/core/layer.c src/core/config.c src/core/monitor.c src/core/log.c src/core/cursor.c src/core/render_core.c src/core/event_loop.c \
             src/core/input/input_manager.c src/core/input/providers.c src/core/input/modes/workspace.c src/core/input/modes/cursor.c src/core/input/modes/window.c
 
 # Renderer module sources (conditional)

@@ -47,6 +47,7 @@ nav:
       - Legacy Format: configuration/legacy-format.md
   - Guides:
       - Animation: guides/animation.md
+      - Inputs: guides/inputs.md
       - Multi-layer: guides/multi-layer.md
       - Cursor Tracking: guides/cursor-tracking.md
       - Performance: guides/performance.md

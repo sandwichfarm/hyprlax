@@ -39,7 +39,6 @@ void config_set_defaults(config_t *cfg) {
     cfg->socket_path = NULL;
 
     /* Parallax defaults */
-    cfg->parallax_mode = PARALLAX_WORKSPACE;
     cfg->parallax_workspace_weight = 1.0f;
     cfg->parallax_cursor_weight = 0.0f;
     cfg->parallax_window_weight = 0.0f;

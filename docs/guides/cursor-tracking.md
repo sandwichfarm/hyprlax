@@ -12,7 +12,7 @@ Cursor-driven parallax makes layers shift based on mouse position, creating an i
 
 ```toml
 [global.parallax]
-mode = "cursor"
+input = "cursor"
 
 [global.input.cursor]
 sensitivity_x = 1.0
@@ -27,30 +27,22 @@ path = "foreground.png"
 shift_multiplier = 1.0
 ```
 
-## Parallax Modes
+## Parallax Inputs
 
 ### Cursor-Only Mode
 Layers move only with mouse movement:
 
 ```toml
 [global.parallax]
-mode = "cursor"
-
-[global.parallax.sources]
-workspace.weight = 0.0
-cursor.weight = 1.0
+input = "cursor"
 ```
 
-### Hybrid Mode
+### Blended Inputs
 Combine workspace and cursor movement:
 
 ```toml
 [global.parallax]
-mode = "hybrid"
-
-[global.parallax.sources]
-workspace.weight = 0.7    # 70% workspace influence
-cursor.weight = 0.3       # 30% cursor influence
+input = ["workspace", "cursor:0.3"]    # 30% cursor influence
 ```
 
 ### Workspace-Only Mode (Traditional)
@@ -58,7 +50,7 @@ Disable cursor tracking:
 
 ```toml
 [global.parallax]
-mode = "workspace"
+input = "workspace"
 ```
 
 ## Cursor Input Settings
@@ -157,7 +149,7 @@ Objects appear to shift based on depth:
 
 ```toml
 [global.parallax]
-mode = "cursor"
+input = "cursor"
 
 [global.input.cursor]
 sensitivity_x = 0.8
@@ -269,7 +261,7 @@ sensitivity_y = 1.2
 
 ### Cursor Not Tracked
 - Check compositor supports cursor position reporting
-- Verify `mode` includes cursor: `"cursor"` or `"hybrid"`
+    - Verify `parallax.input` includes cursor, e.g., `"cursor"` or `"workspace,cursor:0.3"`
 - Run with `--debug` to see cursor position
 
 ### Jittery Movement
@@ -304,11 +296,7 @@ vsync = true
 debug = false
 
 [global.parallax]
-mode = "cursor"
-
-[global.parallax.sources]
-workspace.weight = 0.0
-cursor.weight = 1.0
+input = "cursor"
 
 [global.parallax.invert.cursor]
 x = false

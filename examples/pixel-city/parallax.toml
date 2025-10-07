@@ -9,7 +9,7 @@ tile = { x = true, y = false }
 content_scale = 1.0
 
 [global.parallax]
-mode = "workspace"
+input = "workspace"
 shift_percent = 5
 
 [[global.layers]]

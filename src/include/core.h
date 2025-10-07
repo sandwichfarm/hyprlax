@@ -109,12 +109,6 @@ typedef struct parallax_layer {
     struct parallax_layer *next;
 } parallax_layer_t;
 
-/* Parallax mode */
-typedef enum {
-    PARALLAX_WORKSPACE = 0,
-    PARALLAX_CURSOR = 1,
-    PARALLAX_HYBRID = 2,
-} parallax_mode_t;
 
 /* Configuration structure */
 typedef struct {
@@ -145,8 +139,7 @@ typedef struct {
     bool blur_enabled;
     bool ipc_enabled;
 
-    /* Parallax configuration */
-    parallax_mode_t parallax_mode;    /* workspace | cursor | hybrid */
+    /* Parallax configuration (inputs blended by weights) */
     float parallax_workspace_weight;  /* 0..1 */
     float parallax_cursor_weight;     /* 0..1 */
     float parallax_window_weight;     /* 0..1 */
@@ -208,9 +201,7 @@ easing_type_t easing_from_string(const char *name);
 /* Get string name from easing type */
 const char* easing_to_string(easing_type_t type);
 
-/* Parallax helpers */
-parallax_mode_t parallax_mode_from_string(const char *name);
-const char* parallax_mode_to_string(parallax_mode_t mode);
+/* Parallax helpers (legacy mode helpers removed) */
 
 /* Animation functions - no allocations in evaluate path */
 void animation_start(animation_state_t *anim, float from, float to,

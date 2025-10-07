@@ -265,10 +265,7 @@ __attribute__((weak)) parallax_layer_t* layer_list_find(parallax_layer_t *head, 
 __attribute__((weak)) parallax_layer_t* layer_list_sort_by_z(parallax_layer_t *head) {
     return head;
 }
-/* Legacy mode APIs retained as weak stubs but unused */
-__attribute__((weak)) const char* parallax_mode_to_string(parallax_mode_t mode) {
-    (void)mode; return "workspace";
-}
+/* Legacy parallax mode helpers removed. */
 __attribute__((weak)) const char* easing_to_string(easing_type_t type) {
     (void)type; return "cubic";
 }

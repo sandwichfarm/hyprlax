@@ -11,11 +11,7 @@ easing = "expo"
 
 # Optional: Add subtle cursor influence
 [global.parallax]
-mode = "hybrid"
-
-[global.parallax.sources]
-workspace.weight = 0.8    # Primarily workspace-driven
-cursor.weight = 0.2       # Subtle cursor influence
+input = "workspace,cursor:0.2"   # Primarily workspace-driven
 
 [global.input.cursor]
 sensitivity_x = 0.5

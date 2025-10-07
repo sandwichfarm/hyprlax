@@ -6,12 +6,9 @@ shift = 100
 vsync = false
 easing = "expo"
 
-[global.parallax]
-mode = "cursor"
-
 [global.parallax.sources]
 cursor.weight = 1.0
-workspace.weight = 0.01
+workspace.weight = 0.1
 window.weight = 0.1
 
 [global.parallax.invert.cursor]

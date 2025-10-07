@@ -48,11 +48,8 @@ hyprlax ctl <COMMAND> [ARGS...]
 | Long | Type | Default | Description |
 |------|------|---------|-------------|
 | `--input` | string | workspace | Comma list of sources (`workspace`, `cursor`, `window`; e.g. `workspace,cursor:0.3`) |
-| `--parallax` | string | workspace | *(deprecated)* Mode: `workspace`, `cursor`, or `hybrid` |
-| `--mouse-weight` | float | 0.3 (hybrid) | Cursor source weight (0..1) |
-| `--workspace-weight` | float | 0.7 (hybrid) | Workspace source weight (0..1) |
 
-> **Tip:** Prefer `--input` (or the TOML/IPC equivalent `parallax.input`) to configure active sources. `--parallax`, `--mouse-weight`, and `--workspace-weight` remain for compatibility and emit a deprecation warning. The `window` source currently requires Hyprland; other compositors will ignore it gracefully.
+> Tip: Use `--input` (or the TOML/IPC equivalent `parallax.input`) to configure active sources. The `window` source currently requires Hyprland; other compositors will ignore it gracefully.
 
 ## Render Options
 

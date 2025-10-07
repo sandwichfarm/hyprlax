@@ -9,11 +9,9 @@ vsync = false
 easing = expo
 
 [global.parallax]
-mode = "cursor"           # Mouse-driven parallax for focus-follow effect
+input = "cursor"           # Mouse-driven parallax for focus-follow effect
 
-[global.parallax.sources]
-workspace.weight = 1.0     # disable workspace-driven movement
-cursor.weight = 1.0
+# No workspace influence when using cursor-only input
 
 # Invert X so layers shift opposite cursor (stronger depth feeling)
 [global.parallax.invert.cursor]

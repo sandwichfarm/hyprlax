@@ -133,8 +133,7 @@ Aliases (kept for compatibility): `fps`, `shift`, `duration`, `easing`.
 Additional structured keys:
 
 - `parallax.input` — comma/array list of enabled sources (e.g. `workspace,cursor:0.3`)
-- `parallax.sources.cursor.weight`, `parallax.sources.workspace.weight` — legacy knobs (kept for compatibility)
-- `parallax.mode` — legacy alias that maps to the equivalent `parallax.input`
+- `parallax.sources.workspace.weight`, `parallax.sources.cursor.weight` — individual source weights
 - `parallax.sources.window.weight` — weight for the window source (Hyprland only at present)
 - `input.window.sensitivity_x/y`, `input.window.deadzone_px`, `input.window.ema_alpha` — window provider tuning knobs
 
@@ -172,10 +171,10 @@ hyprlax ctl status [--json|-j] [--long|-l]
 ```
 
 **Output includes:**
-- Default (text): running state, layers, target FPS, FPS, parallax mode and inputs, monitors count, compositor, socket
+- Default (text): running state, layers, target FPS, FPS, parallax inputs, monitors count, compositor, socket
 - `--json`: machine-readable object with keys including:
   - `running`, `layers`, `target_fps`, `fps`
-  - `parallax` (mode) and `parallax_input` (enabled sources)
+- `parallax_input` (enabled sources)
   - `compositor`, `socket`, `vsync`, `debug`
   - `caps` (compositor capability flags)
   - `monitors[]` with `name`, `size`, `pos`, `scale`, `refresh`, `caps`
@@ -259,7 +258,6 @@ When running `hyprlax ctl status --json`, a compact JSON object is returned. Fie
 - `layers`: number
 - `target_fps`: number
 - `fps`: number
-- `parallax`: string (workspace|cursor|hybrid)
 - `parallax_input`: string (e.g., `workspace,cursor:0.3`)
 - `compositor`: string
 - `socket`: string

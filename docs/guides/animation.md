@@ -2,7 +2,7 @@
 
 Master the animation system to create smooth, natural parallax effects.
 
-## Parallax Modes
+## Parallax Inputs
 
 Hyprlax combines one or more **input sources** to drive layer movement:
 - `workspace`: driven by workspace changes (original behavior)
@@ -15,9 +15,6 @@ Configure sources via CLI or TOML:
 # CLI examples
 hyprlax --input workspace                      # workspace only
 hyprlax --input workspace,cursor:0.3           # workspace + cursor blend
-
-# Legacy knobs (warn but still supported)
-hyprlax --parallax hybrid --mouse-weight 0.3
 
 # TOML (preferred)
 [global.parallax]
@@ -34,7 +31,7 @@ deadzone_px = 3
 ema_alpha = 0.25
 ```
 
-> **Deprecated:** `parallax.mode` + `parallax.sources.(workspace|cursor).weight` remain for compatibility. Prefer `parallax.input` and the `--input` flag for new configurations.
+> Use `parallax.input` (or `--input` on CLI) to select sources and optional weights.
 
 ### Per-Layer Axis Control
 

@@ -65,7 +65,7 @@ TOML allows cursor-driven parallax:
 
 ```toml
 [global.parallax]
-mode = "cursor"  # New feature!
+input = "cursor"  # New feature!
 
 [global.input.cursor]
 sensitivity_x = 1.0
@@ -133,7 +133,7 @@ margin_px = { x = 50, y = 50 }
 
 # Cursor parallax
 [global.parallax]
-mode = "cursor"
+input = "cursor"
 
 [global.input.cursor]
 sensitivity_x = 1.2
@@ -203,11 +203,7 @@ debug = false
 
 # Optional: Add cursor parallax
 [global.parallax]
-mode = "hybrid"  # Both workspace and cursor
-
-[global.parallax.sources]
-workspace.weight = 0.7
-cursor.weight = 0.3
+input = ["workspace", "cursor:0.3"]  # Both workspace and cursor
 
 [global.input.cursor]
 sensitivity_x = 0.8

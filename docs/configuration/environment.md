@@ -58,7 +58,7 @@ The following variables are recognized by hyprlax today (non-exhaustive; impleme
   - `HYPRLAX_RENDER_MARGIN_PX_X=24`         Extra horizontal safe margin (px)
   - `HYPRLAX_RENDER_MARGIN_PX_Y=24`         Extra vertical safe margin (px)
   - `HYPRLAX_RENDER_OVERFLOW=repeat_x`      Overflow behavior (repeat_edge|repeat|repeat_x|repeat_y|none)
-  - `HYPRLAX_PARALLAX_MODE=cursor`          Parallax mode (workspace|cursor|hybrid)
+  - `HYPRLAX_PARALLAX_INPUT=workspace,cursor:0.3`   Parallax inputs (comma list; optional weights)
   - `HYPRLAX_PARALLAX_SOURCES_CURSOR_WEIGHT=0.5`    Cursor source weight (0..1)
   - `HYPRLAX_PARALLAX_SOURCES_WORKSPACE_WEIGHT=0.5` Workspace source weight (0..1)
 

@@ -46,11 +46,11 @@ Complete reference for hyprlax TOML configuration format.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `mode` | string | "workspace" | Parallax mode: "workspace", "cursor", "hybrid" |
+| `input` | string/array | "workspace" | Active sources (e.g., "workspace,cursor:0.3" or ["workspace", "cursor:0.3"]) |
 
 ### [global.parallax.sources]
 
-Control input source influence in hybrid mode:
+Control input source influence via weights:
 
 | Key | Type | Range | Description |
 |-----|------|-------|-------------|
@@ -152,16 +152,12 @@ shift_multiplier = { x = 1.0, y = 0.5 }
 [global]
 fps = 144
 debug = false
-duration = 0.0          # Not used in cursor mode
+duration = 0.0
 vsync = true
 easing = "expo"
 
 [global.parallax]
-mode = "cursor"         # Enable cursor tracking
-
-[global.parallax.sources]
-workspace.weight = 0.0
-cursor.weight = 1.0
+input = "cursor"         # Enable cursor-only tracking
 
 [global.parallax.invert.cursor]
 x = true               # Layers move opposite to cursor

@@ -79,7 +79,7 @@ hyprlax ctl set render.tile.x true
 hyprlax ctl get render.margin_px.x
 ```
 
-> **Deprecated:** `parallax.mode` remains readable/settable for compatibility, but will emit warnings. Prefer `parallax.input` for new tooling.
+> Configure sources with `parallax.input` (e.g., `workspace,cursor:0.3`). Legacy `parallax.mode` is removed.
 
 ## Understanding x/y (UV Pan)
 

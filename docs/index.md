@@ -53,7 +53,8 @@ Environment variables are also supported: see [Environment](configuration/enviro
 ## Learn by Examples and Guides
 
 - Core topics: [Animation](guides/animation.md) • [Multi‑layer](guides/multi-layer.md) • [Cursor Tracking](guides/cursor-tracking.md)
-- Performance tuning: [Performance](guides/performance.md)
+ - Inputs: [Parallax Inputs](guides/inputs.md)
+ - Performance tuning: [Performance](guides/performance.md)
 - Real scenes to copy: [Examples Gallery](guides/examples.md)
 - Runtime control overview: [IPC Overview](guides/ipc-overview.md)
 - Help when stuck: [Troubleshooting](guides/troubleshooting.md)
