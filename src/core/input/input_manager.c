@@ -249,6 +249,15 @@ int input_manager_init(struct hyprlax_context *ctx,
     input_manager_reset_cache(manager);
 
     prime_weights_from_config(manager, cfg);
+    /* Safety: if all weights are zero (e.g., misconfigured), default to workspace-only. */
+    if (manager->weights[INPUT_WORKSPACE] <= 0.0f &&
+        manager->weights[INPUT_CURSOR] <= 0.0f &&
+        manager->weights[INPUT_WINDOW] <= 0.0f) {
+        manager->weights[INPUT_WORKSPACE] = 1.0f;
+        manager->weights[INPUT_CURSOR] = 0.0f;
+        manager->weights[INPUT_WINDOW] = 0.0f;
+        manager->enabled_mask = (1u << INPUT_WORKSPACE);
+    }
 
     for (int i = 0; i < INPUT_MAX; ++i) {
         manager->ops[i] = g_provider_registry[i];
@@ -291,6 +300,14 @@ int input_manager_apply_config(input_manager_t *manager, const config_t *cfg) {
     manager->config = cfg;
     if (cfg) {
         prime_weights_from_config(manager, cfg);
+        if (manager->weights[INPUT_WORKSPACE] <= 0.0f &&
+            manager->weights[INPUT_CURSOR] <= 0.0f &&
+            manager->weights[INPUT_WINDOW] <= 0.0f) {
+            manager->weights[INPUT_WORKSPACE] = 1.0f;
+            manager->weights[INPUT_CURSOR] = 0.0f;
+            manager->weights[INPUT_WINDOW] = 0.0f;
+            manager->enabled_mask = (1u << INPUT_WORKSPACE);
+        }
         for (int i = 0; i < INPUT_MAX; ++i) {
             if (manager->ops[i] && manager->ops[i]->on_config && manager->states[i]) {
                 manager->ops[i]->on_config(manager->states[i], cfg);
