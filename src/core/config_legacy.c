@@ -100,11 +100,27 @@ static char* relativize_to_dir(const char *path, const char *dst_dir) {
     return xstrdup(real_path);
 }
 
+static void strip_inline_comment(char *s) {
+    if (!s) return;
+    /* Remove comments starting with '#' when at BOL or preceded by whitespace. */
+    char *p = s;
+    while (*p) {
+        if (*p == '#') {
+            int at_bol = (p == s);
+            int prev_ws = (!at_bol && (p[-1] == ' ' || p[-1] == '\t'));
+            if (at_bol || prev_ws) { *p = '\0'; break; }
+        }
+        p++;
+    }
+}
+
 static int parse_line(char *line, int *lineno, legacy_cfg_t *cfg) {
     (void)lineno;
+    /* Strip inline comments first */
+    strip_inline_comment(line);
     /* Strip leading spaces */
     char *p = line; while (*p == ' ' || *p == '\t') p++;
-    if (*p == '\0' || *p == '#' || *p == '\n' || *p == '\r') return 0;
+    if (*p == '\0' || *p == '\n' || *p == '\r') return 0;
     char *cmd = strtok(p, " \t\r\n");
     if (!cmd) return 0;
     if (strcmp(cmd, "layer") == 0) {
@@ -205,4 +221,3 @@ int legacy_paths_default(char *legacy_path, size_t lsz, char *toml_path, size_t 
         snprintf(toml_path, tsz, "%s/.config/hyprlax/hyprlax.toml", home);
     return 0;
 }
-
