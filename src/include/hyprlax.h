@@ -9,6 +9,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <pthread.h>
 #include "hyprlax_internal.h"
 #include "core.h"
 #include "core/input/input_manager.h"
@@ -51,6 +52,7 @@ typedef struct hyprlax_context {
     /* Layers */
     parallax_layer_t *layers;
     int layer_count;
+    pthread_mutex_t layer_mutex;  /* Protects layer list operations */
 
     /* Timing */
     double last_frame_time;

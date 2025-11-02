@@ -20,12 +20,16 @@
 /* Global context for signal handling */
 static hyprlax_context_t *g_ctx = NULL;
 
+/* Atomic shutdown flag for signal-safe communication */
+/* Using sig_atomic_t prevents race conditions between signal handler and main loop */
+/* Non-static to allow access from event_loop.c via extern declaration */
+volatile sig_atomic_t g_shutdown_requested = 0;
+
 /* Signal handler for clean shutdown */
 static void signal_handler(int sig) {
     (void)sig;
-    if (g_ctx) {
-        g_ctx->running = false;
-    }
+    /* Only modify the atomic flag - safe in signal context */
+    g_shutdown_requested = 1;
 }
 
 int main(int argc, char **argv) {
@@ -277,6 +281,9 @@ int main(int argc, char **argv) {
         fclose(startup_log);
         startup_log = NULL;
     }
+
+    /* Clear shutdown flag before entering main loop */
+    g_shutdown_requested = 0;
 
     /* Run main loop */
     ret = hyprlax_run(ctx);

@@ -36,7 +36,10 @@ jobs:
           pacman-key --populate
           pacman -Sy --noconfirm archlinux-keyring
           pacman -Syu --noconfirm
-          pacman -S --noconfirm base-devel git openssh curl
+          pacman -S --noconfirm base-devel git openssh curl sudo
+          # Create build user for makepkg
+          useradd -m -G wheel builduser
+          echo "builduser ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
       - name: Configure SSH for AUR
         env:
@@ -82,7 +85,9 @@ jobs:
           # Ensure removed optional dependency stays removed
           sed -i "/wayfire:/d" PKGBUILD
 
-          makepkg --printsrcinfo > .SRCINFO
+          # Run makepkg as builduser
+          chown -R builduser:builduser .
+          sudo -u builduser makepkg --printsrcinfo > .SRCINFO
           echo "Stable pkgver set to: ${VERSION}"
           echo "Stable sha256: ${SHA256}"
 
@@ -121,7 +126,10 @@ jobs:
           pacman-key --populate
           pacman -Sy --noconfirm archlinux-keyring
           pacman -Syu --noconfirm
-          pacman -S --noconfirm base-devel git openssh
+          pacman -S --noconfirm base-devel git openssh sudo
+          # Create build user for makepkg
+          useradd -m -G wheel builduser
+          echo "builduser ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
       - name: Configure SSH for AUR
         env:
@@ -163,7 +171,9 @@ jobs:
           sed -i "s/^pkgver=.*/pkgver=${PKGVER}/" PKGBUILD
           # Ensure removed optional dependency stays removed
           sed -i "/wayfire:/d" PKGBUILD
-          makepkg --printsrcinfo > .SRCINFO
+          # Run makepkg as builduser
+          chown -R builduser:builduser .
+          sudo -u builduser makepkg --printsrcinfo > .SRCINFO
           echo "-git pkgver set to: ${PKGVER}"
 
       - name: Commit and push (-git)

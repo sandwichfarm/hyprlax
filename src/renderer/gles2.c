@@ -10,6 +10,8 @@
 #include <string.h>
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
+/* GLES3 header for fence sync support (GL_ARB_sync / glFenceSync) */
+#include <GLES3/gl3.h>
 #include "../include/renderer.h"
 #include "../include/shader.h"
 #include "../include/hyprlax_internal.h"
@@ -305,11 +307,42 @@ static void gles2_present(void) {
                         g_gles2_data->current_surface :
                         g_gles2_data->egl_surface;
 
-    /* Allow skipping glFinish via env for performance testing */
-    const char *no_finish = getenv("HYPRLAX_NO_GLFINISH");
-    if (!no_finish || strcmp(no_finish, "0") == 0) {
+    /*
+     * GPU synchronization before buffer swap:
+     *
+     * CRITICAL FIX for hyprlock compatibility:
+     * The legacy glFinish() blocks indefinitely when the GPU context is suspended
+     * by screen lockers like hyprlock. This causes hyprlax to hang completely.
+     *
+     * Solution: Use glFenceSync + glClientWaitSync with a timeout (16ms = one frame @ 60 FPS).
+     * If the GPU is suspended, we timeout gracefully and continue rendering without blocking.
+     *
+     * Environment variable HYPRLAX_USE_GLFINISH=1 restores legacy behavior if needed.
+     */
+    const char *use_glfinish = getenv("HYPRLAX_USE_GLFINISH");
+    if (use_glfinish && strcmp(use_glfinish, "1") == 0) {
+        /* Legacy blocking path - not recommended with hyprlock */
         glFinish();
+    } else {
+        /* Non-blocking GPU sync with timeout (default, hyprlock-safe) */
+        GLsync fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        if (fence) {
+            /* Wait up to 16ms (one frame at 60 FPS) for GPU to complete */
+            GLenum result = glClientWaitSync(fence, GL_SYNC_FLUSH_COMMANDS_BIT, 16000000);
+            if (result == GL_TIMEOUT_EXPIRED) {
+                /* GPU context likely suspended (e.g., hyprlock active) - don't block */
+                LOG_WARN("GPU sync timeout - compositor may be suspended (hyprlock/screenlock)");
+            } else if (result == GL_WAIT_FAILED) {
+                LOG_WARN("GPU sync failed - continuing anyway");
+            }
+            glDeleteSync(fence);
+        } else {
+            /* Fence creation failed - fall back to flush only */
+            LOG_WARN("Failed to create GPU fence - using glFlush fallback");
+            glFlush();
+        }
     }
+
     eglSwapBuffers(g_gles2_data->egl_display, surface);
 }
 

@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <time.h>
+#include <wayland-client.h>
 #include "include/defaults.h"
 
 /* Get current time in seconds */
@@ -74,6 +75,13 @@ monitor_instance_t* monitor_instance_create(const char *name) {
 /* Destroy a monitor instance */
 void monitor_instance_destroy(monitor_instance_t *monitor) {
     if (!monitor) return;
+
+    /* Clean up pending frame callback to prevent dangling Wayland objects */
+    if (monitor->frame_callback) {
+        wl_callback_destroy(monitor->frame_callback);
+        monitor->frame_callback = NULL;
+    }
+    monitor->frame_pending = false;
 
     /* Free config if allocated */
     if (monitor->config) {
@@ -411,6 +419,8 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
                 LOG_DEBUG("  Updating layers with absolute target: X=%.1f, Y=%.1f", absolute_target_x, absolute_target_y);
             }
 
+            pthread_mutex_lock(&ctx->layer_mutex);
+
             parallax_layer_t *layer = ctx->layers;
             int layer_count = 0;
 
@@ -462,6 +472,8 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
                 }
                 layer = next_layer;
             }
+
+            pthread_mutex_unlock(&ctx->layer_mutex);
         } else {
             if (ctx && ctx->config.debug) {
                 fprintf(stderr, "[DEBUG]   WARNING: No layers to update!\n");

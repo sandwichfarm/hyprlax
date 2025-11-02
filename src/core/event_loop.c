@@ -9,6 +9,7 @@
 #include <time.h>
 #include <errno.h>
 #include <poll.h>
+#include <signal.h>
 #include "../include/hyprlax.h"
 #include <stdlib.h>
 #include "../include/platform.h"
@@ -16,6 +17,9 @@
 #include "../include/log.h"
 #include "../ipc.h"
 #include "../include/defaults.h"
+
+/* External atomic shutdown flag from main.c for signal-safe shutdown */
+extern volatile sig_atomic_t g_shutdown_requested;
 
 int create_timerfd_monotonic(void) {
     int fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
@@ -141,7 +145,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
     double debug_timer = 0.0;
     bool needs_render = true;
 
-    while (ctx->running) {
+    while (ctx->running && !g_shutdown_requested) {
         int current_fps = ctx->config.target_fps;
         if (current_fps <= 0) current_fps = HYPRLAX_DEFAULT_FPS;
         if (current_fps != prev_target_fps) {
@@ -153,6 +157,15 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             prev_target_fps = current_fps;
         }
         frame_time = 1.0 / (double)current_fps;
+
+        /* Check shutdown flag and exit cleanly if requested */
+        if (g_shutdown_requested) {
+            if (ctx->config.debug) {
+                LOG_DEBUG("Shutdown signal received, exiting main loop");
+            }
+            ctx->running = false;
+            break;
+        }
 
         /* diagnostics placeholders retained for future verbose tracing */
         double current_time = ev_get_time();
@@ -187,11 +200,17 @@ int hyprlax_run(hyprlax_context_t *ctx) {
 
         bool animations_active = false;
         {
+            /* Lock layer list for safe iteration */
+            pthread_mutex_lock(&ctx->layer_mutex);
+
             parallax_layer_t *layer = ctx->layers;
             while (layer) {
                 if ((layer->is_gif && layer->frame_count > 1) || animation_is_active(&layer->x_animation) || animation_is_active(&layer->y_animation)) { animations_active = true; break; }
                 layer = layer->next;
             }
+
+            pthread_mutex_unlock(&ctx->layer_mutex);
+
             if (!animations_active && ctx->monitors) {
             monitor_instance_t *m = ctx->monitors->head;
             while (m) { if (m->animating) { animations_active = true; break; } m = m->next; }
@@ -265,9 +284,31 @@ int hyprlax_run(hyprlax_context_t *ctx) {
 
             if (ctx->epoll_fd >= 0) {
                 struct epoll_event evlist[6];
-                int n = epoll_wait(ctx->epoll_fd, evlist, 6, -1);
+                /* Use 5-second timeout instead of infinite wait to prevent
+                 * tight loops on errors and allow periodic watchdog checks */
+                int n = epoll_wait(ctx->epoll_fd, evlist, 6, 5000);
                 if (n < 0) {
-                    if (errno == EINTR) { if (!ctx->running) break; continue; }
+                    /* Handle EINTR (interrupted by signal) - check shutdown and continue */
+                    if (errno == EINTR) {
+                        if (!ctx->running || g_shutdown_requested) break;
+                        continue;
+                    }
+                    /* Any other error is critical - log and exit gracefully */
+                    LOG_ERROR("epoll_wait failed: %s (errno=%d)", strerror(errno), errno);
+                    LOG_ERROR("Initiating graceful shutdown due to epoll error");
+                    ctx->running = false;
+                    break;
+                }
+                if (n == 0) {
+                    /* Timeout occurred - no events for 5 seconds (watchdog) */
+                    if (ctx->config.debug) {
+                        LOG_DEBUG("Event loop watchdog: no events for 5 seconds");
+                    }
+                    /* Check shutdown flag before continuing */
+                    if (g_shutdown_requested) {
+                        ctx->running = false;
+                        break;
+                    }
                     continue;
                 }
                 if (n > 0) {

@@ -558,13 +558,17 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 break;
             }
             /* Capture previous max id */
+            pthread_mutex_lock(&app->layer_mutex);
             uint32_t prev_max_id = 0;
             for (parallax_layer_t *it = app->layers; it; it = it->next) {
                 if (it->id > prev_max_id) prev_max_id = it->id;
             }
+            pthread_mutex_unlock(&app->layer_mutex);
+
             int rc_add = hyprlax_add_layer(app, path, 1.0f, 1.0f, 0.0f);
             if (rc_add == 0) {
                 /* Find the new layer and apply initial params */
+                pthread_mutex_lock(&app->layer_mutex);
                 uint32_t new_id = 0; parallax_layer_t *new_layer = NULL;
                 for (parallax_layer_t *it = app->layers; it; it = it->next) {
                     if (it->id > prev_max_id) { new_id = it->id; new_layer = it; }
@@ -582,6 +586,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 }
                 /* Maintain draw order by z */
                 app->layers = layer_list_sort_by_z(app->layers);
+                pthread_mutex_unlock(&app->layer_mutex);
                 if (response[0] && strncmp(response, "Error", 5) == 0) { success = false; }
                 else { snprintf(response, sizeof(response), new_layer ? "Layer added with ID: %u\n" : "Layer added\n", new_id); success = true; }
             } else {
@@ -603,7 +608,10 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 break;
             }
             hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
-            if (app && layer_list_find(app->layers, id)) {
+            pthread_mutex_lock(&app->layer_mutex);
+            bool found = (app && layer_list_find(app->layers, id));
+            pthread_mutex_unlock(&app->layer_mutex);
+            if (found) {
                 hyprlax_remove_layer(app, id);
                 snprintf(response, sizeof(response), "Layer %u removed\n", id);
                 success = true;
@@ -632,15 +640,20 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 break;
             }
             hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
+            pthread_mutex_lock(&app->layer_mutex);
             parallax_layer_t *layer = app ? layer_list_find(app->layers, id) : NULL;
             if (!layer) {
+                pthread_mutex_unlock(&app->layer_mutex);
                 ipc_errorf(response, sizeof(response), 1102, "Failed to modify layer %u\n", id);
                 break;
             }
             if (apply_layer_property(app, layer, property, value, response, sizeof(response))) {
                 /* Re-sort list by z if z was modified */
                 if (strcmp(property, "z") == 0) app->layers = layer_list_sort_by_z(app->layers);
+                pthread_mutex_unlock(&app->layer_mutex);
                 snprintf(response, sizeof(response), "Layer %u modified\n", id); success = true;
+            } else {
+                pthread_mutex_unlock(&app->layer_mutex);
             }
             break;
         }
@@ -675,6 +688,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
             }
 
             size_t off = 0; response[0] = '\0';
+            pthread_mutex_lock(&app->layer_mutex);
             if (json) {
                 off += snprintf(response + off, sizeof(response) - off, "[");
                 bool first = true;
@@ -766,6 +780,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                 }
                 success = true;
             }
+            pthread_mutex_unlock(&app->layer_mutex);
             break;
         }
 
@@ -851,7 +866,15 @@ bool ipc_process_commands(ipc_context_t* ctx) {
             {
                 hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
                 if (!app) { snprintf(response, sizeof(response), "Error: Runtime context unavailable\n"); break; }
-                while (app->layers) { uint32_t id = app->layers->id; hyprlax_remove_layer(app, id); }
+                /* hyprlax_remove_layer protects the removal, but we need to repeatedly check the head */
+                while (true) {
+                    pthread_mutex_lock(&app->layer_mutex);
+                    parallax_layer_t *head = app->layers;
+                    uint32_t id = head ? head->id : 0;
+                    pthread_mutex_unlock(&app->layer_mutex);
+                    if (!head) break;
+                    hyprlax_remove_layer(app, id);
+                }
                 snprintf(response, sizeof(response), "All layers cleared\n");
                 success = true;
                 break;

@@ -89,6 +89,9 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
 
     input_manager_tick(&ctx->input, monitor, now_time, NULL, NULL);
 
+    /* Lock layer list for safe iteration during rendering */
+    pthread_mutex_lock(&ctx->layer_mutex);
+
     parallax_layer_t *layer = ctx->layers;
     while (layer) {
         if (layer->hidden) { layer = layer->next; continue; }
@@ -212,6 +215,9 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
 
         layer = layer->next;
     }
+
+    /* Unlock layer list after iteration completes */
+    pthread_mutex_unlock(&ctx->layer_mutex);
 
     RENDERER_END_FRAME(ctx->renderer);
     double t_draw_end = s_profile ? rc_get_time() : 0.0;

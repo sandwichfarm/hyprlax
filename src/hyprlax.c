@@ -586,7 +586,7 @@ void sync_ipc_layers() {
                 struct layer* new_layer = &state.layers[state.layer_count];
                 if (load_layer(new_layer, ipc_layer->image_path,
                               ipc_layer->scale, ipc_layer->opacity, 0.0f) == 0) {
-                    new_layer->image_path = strdup(ipc_layer->image_path);
+                    // Note: load_layer already allocates and sets image_path via strdup
                     state.layer_count++;
                 }
             }

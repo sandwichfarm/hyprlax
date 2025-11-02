@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include <time.h>
 #include <poll.h>
+#include <errno.h>
 #include <wayland-client.h>
 #include <wayland-egl.h>
 #include <GLES2/gl2.h>
@@ -250,10 +251,31 @@ static void registry_global(void *data, struct wl_registry *registry,
 
 static void registry_global_remove(void *data, struct wl_registry *registry,
                                   uint32_t id) {
-    /* Handle removal if needed */
-    (void)data;
+    wayland_data_t *wl_data = (wayland_data_t *)data;
     (void)registry;
-    (void)id;
+
+    if (!wl_data) return;
+
+    /* Find and remove output info from linked list */
+    output_info_t **curr = &wl_data->outputs;
+    while (*curr) {
+        if ((*curr)->global_id == id) {
+            output_info_t *to_free = *curr;
+            *curr = to_free->next;  /* Unlink from list */
+
+            /* Clean up Wayland objects */
+            if (to_free->output) {
+                wl_output_destroy(to_free->output);
+            }
+
+            /* Free structure */
+            free(to_free);
+            wl_data->output_count--;
+            LOG_DEBUG("Cleaned up output info for ID %u", id);
+            return;
+        }
+        curr = &(*curr)->next;
+    }
 }
 
 /* Layer surface listener callbacks */
@@ -717,8 +739,19 @@ static int wayland_poll_events(platform_event_t *event) {
     if (g_wayland_data && g_wayland_data->display) {
         /* First dispatch any pending events */
         wl_display_dispatch_pending(g_wayland_data->display);
-        /* Then flush any pending requests */
-        wl_display_flush(g_wayland_data->display);
+
+        /* Then flush any pending requests - check for errors */
+        if (wl_display_flush(g_wayland_data->display) < 0) {
+            int err = wl_display_get_error(g_wayland_data->display);
+            LOG_ERROR("Wayland display connection lost during flush: error %d (%s)",
+                      err, strerror(errno));
+            /* Signal graceful shutdown - compositor disconnect detected */
+            if (g_wayland_data->ctx) {
+                g_wayland_data->ctx->running = false;
+            }
+            event->type = PLATFORM_EVENT_CLOSE;
+            return HYPRLAX_SUCCESS;
+        }
 
         /* Opportunistically drain readable Wayland events without blocking */
         int fd = wl_display_get_fd(g_wayland_data->display);
@@ -726,7 +759,16 @@ static int wayland_poll_events(platform_event_t *event) {
             struct pollfd pfd = { .fd = fd, .events = POLLIN, .revents = 0 };
             int pret = poll(&pfd, 1, 0);
             if (pret > 0) {
-                wl_display_read_events(g_wayland_data->display);
+                if (wl_display_read_events(g_wayland_data->display) < 0) {
+                    int err = wl_display_get_error(g_wayland_data->display);
+                    LOG_ERROR("Wayland protocol error during read_events: %d", err);
+                    /* Signal graceful shutdown - protocol error detected */
+                    if (g_wayland_data->ctx) {
+                        g_wayland_data->ctx->running = false;
+                    }
+                    event->type = PLATFORM_EVENT_CLOSE;
+                    return HYPRLAX_SUCCESS;
+                }
             } else {
                 wl_display_cancel_read(g_wayland_data->display);
             }
@@ -812,8 +854,16 @@ static void wayland_flush_events(void) {
         if (g_wayland_data->surface) {
             wl_surface_commit(g_wayland_data->surface);
         }
-        /* Flush display to send all pending requests */
-        wl_display_flush(g_wayland_data->display);
+        /* Flush display to send all pending requests - check for errors */
+        if (wl_display_flush(g_wayland_data->display) < 0) {
+            int err = wl_display_get_error(g_wayland_data->display);
+            LOG_ERROR("Wayland display connection lost during flush_events: error %d (%s)",
+                      err, strerror(errno));
+            /* Signal graceful shutdown */
+            if (g_wayland_data->ctx) {
+                g_wayland_data->ctx->running = false;
+            }
+        }
     }
 }
 
