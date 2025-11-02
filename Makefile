@@ -100,7 +100,7 @@ PROTOCOL_HDRS =
 endif
 
 # Core module sources (always included)
-CORE_SRCS = src/core/easing.c src/core/animation.c src/core/layer.c src/core/config.c src/core/monitor.c src/core/log.c src/core/cursor.c src/core/render_core.c src/core/event_loop.c \
+CORE_SRCS = src/core/easing.c src/core/animation.c src/core/layer.c src/core/config.c src/core/monitor.c src/core/log.c src/core/cursor.c src/core/render_core.c src/core/event_loop.c src/core/resource_monitor.c src/core/time_utils.c \
             src/core/input/input_manager.c src/core/input/providers.c src/core/input/modes/workspace.c src/core/input/modes/cursor.c src/core/input/modes/window.c
 
 # Renderer module sources (conditional)
@@ -322,7 +322,8 @@ tests/test_toml_config: tests/test_toml_config.c src/core/config_toml.c src/core
 
 tests/test_runtime_properties: tests/test_runtime_properties.c tests/stubs_gfx.c \
     src/hyprlax_main.c src/core/log.c src/core/config.c src/core/layer.c \
-    src/core/monitor.c src/core/event_loop.c src/core/input/input_manager.c src/core/input/providers.c \
+    src/core/monitor.c src/core/event_loop.c src/core/resource_monitor.c src/core/time_utils.c \
+    src/core/input/input_manager.c src/core/input/providers.c \
     src/core/input/modes/workspace.c src/core/input/modes/cursor.c src/core/input/modes/window.c \
     src/core/animation.c src/core/easing.c src/vendor/toml.c src/core/config_toml.c
 	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) $(PKG_LIBS) -o $@
@@ -337,6 +338,10 @@ tests/test_texture_atlas: tests/test_texture_atlas.c \
 
 tests/test_event_loop: tests/test_event_loop.c \
     src/core/event_loop.c src/core/log.c
+	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) -o $@
+
+tests/test_resource_monitor: tests/test_resource_monitor.c \
+    src/core/resource_monitor.c src/core/log.c
 	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) -o $@
 
 # Run all tests
