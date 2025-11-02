@@ -136,10 +136,12 @@ extern const renderer_ops_t renderer_gles2_ops;
 /* Multi-monitor support functions for GLES2 backend */
 #ifdef __EGL_H__
 EGLSurface gles2_create_monitor_surface(void *native_window);
+void gles2_destroy_monitor_surface(EGLSurface surface);
 int gles2_make_current(EGLSurface surface);
 #else
 /* Forward declaration for when EGL types aren't available */
 void* gles2_create_monitor_surface(void *native_window);
+void gles2_destroy_monitor_surface(void *surface);
 int gles2_make_current(void *surface);
 #endif
 

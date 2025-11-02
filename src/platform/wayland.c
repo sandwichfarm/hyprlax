@@ -712,10 +712,39 @@ int wayland_create_monitor_surface(monitor_instance_t *monitor) {
             /* Get the EGL surface creation function from renderer */
             monitor->egl_surface = gles2_create_monitor_surface(monitor->wl_egl_window);
 
-            if (monitor->egl_surface) {
-                LOG_DEBUG("Created EGL surface for monitor %s", monitor->name);
+            if (!monitor->egl_surface) {
+                LOG_ERROR("Failed to create EGL surface for monitor %s", monitor->name);
+
+                /* CRITICAL: Clean up partial state to prevent Wayland resource leaks */
+                LOG_ERROR("  Cleaning up partial monitor state:");
+                LOG_ERROR("    - wl_surface: %p", (void*)monitor->wl_surface);
+                LOG_ERROR("    - layer_surface: %p", (void*)monitor->layer_surface);
+                LOG_ERROR("    - wl_egl_window: %p", (void*)monitor->wl_egl_window);
+
+                /* 1. Destroy EGL window */
+                if (monitor->wl_egl_window) {
+                    wl_egl_window_destroy(monitor->wl_egl_window);
+                    monitor->wl_egl_window = NULL;
+                }
+
+                /* 2. Destroy layer surface */
+                if (monitor->layer_surface) {
+                    zwlr_layer_surface_v1_destroy(monitor->layer_surface);
+                    monitor->layer_surface = NULL;
+                }
+
+                /* 3. Destroy Wayland surface */
+                if (monitor->wl_surface) {
+                    wl_surface_destroy(monitor->wl_surface);
+                    monitor->wl_surface = NULL;
+                }
+
+                LOG_ERROR("Monitor %s initialization failed - resources cleaned up", monitor->name);
+                monitor->failed = true;
+                return HYPRLAX_ERROR_GL_INIT;
             } else {
-                LOG_WARN("Failed to create EGL surface for monitor %s", monitor->name);
+                LOG_INFO("Created EGL surface for monitor %s", monitor->name);
+                monitor->failed = false;
             }
         }
     }

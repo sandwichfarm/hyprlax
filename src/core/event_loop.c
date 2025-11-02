@@ -15,6 +15,8 @@
 #include "../include/platform.h"
 #include "../include/compositor.h"
 #include "../include/log.h"
+#include "../include/resource_monitor.h"
+#include "../include/time_utils.h"
 #include "../ipc.h"
 #include "../include/defaults.h"
 
@@ -35,11 +37,20 @@ void disarm_timerfd(int fd) {
 void arm_timerfd_ms(int fd, int initial_ms, int interval_ms) {
     if (fd < 0) return;
     struct itimerspec its;
-    its.it_value.tv_sec = initial_ms / 1000;
-    its.it_value.tv_nsec = (initial_ms % 1000) * 1000000L;
-    its.it_interval.tv_sec = interval_ms / 1000;
-    its.it_interval.tv_nsec = (interval_ms % 1000) * 1000000L;
-    timerfd_settime(fd, 0, &its, NULL);
+
+    /* Use 64-bit intermediate calculation to prevent overflow */
+    int64_t initial_ns = (int64_t)initial_ms * 1000000LL;
+    int64_t interval_ns = (int64_t)interval_ms * 1000000LL;
+
+    its.it_value.tv_sec = initial_ns / 1000000000LL;
+    its.it_value.tv_nsec = initial_ns % 1000000000LL;
+
+    its.it_interval.tv_sec = interval_ns / 1000000000LL;
+    its.it_interval.tv_nsec = interval_ns % 1000000000LL;
+
+    if (timerfd_settime(fd, 0, &its, NULL) < 0) {
+        LOG_ERROR("Failed to arm timerfd: %s", strerror(errno));
+    }
 }
 
 int epoll_add_fd(int epfd, int fd, uint32_t events) {
@@ -116,11 +127,15 @@ void hyprlax_clear_timerfd(int fd) {
     (void)read(fd, &expirations, sizeof(expirations));
 }
 
-/* Internal time helper */
+/* Internal time helper - returns milliseconds for overflow safety */
+static timestamp_ms_t ev_get_time_ms(void) {
+    return time_get_monotonic_ms();
+}
+
+/* Legacy compatibility wrapper - returns seconds as double */
 static double ev_get_time(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec + ts.tv_nsec / 1000000000.0;
+    timestamp_ms_t ms = time_get_monotonic_ms();
+    return time_ms_to_seconds(ms);
 }
 
 /* Main run loop */
@@ -172,6 +187,12 @@ int hyprlax_run(hyprlax_context_t *ctx) {
         ctx->delta_time = current_time - last_frame_time;
         last_frame_time = current_time;
 
+        /* Resource monitoring check (periodic) */
+        if (ctx->resource_monitor &&
+            resource_monitor_should_check(ctx->resource_monitor, current_time)) {
+            resource_monitor_check(ctx->resource_monitor);
+        }
+
         platform_event_t platform_event;
         if (PLATFORM_POLL_EVENTS(ctx->platform, &platform_event) == HYPRLAX_SUCCESS) {
             switch (platform_event.type) {
@@ -193,6 +214,21 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                 if (comp_event.type == COMPOSITOR_EVENT_WORKSPACE_CHANGE) {
                     extern void process_workspace_event(hyprlax_context_t *ctx, const compositor_event_t *comp_event);
                     process_workspace_event(ctx, &comp_event);
+                    needs_render = true;
+                } else if (comp_event.type == COMPOSITOR_EVENT_SCREEN_LOCK) {
+                    /* Screen locked - update context state and stop rendering */
+                    ctx->screen_locked = comp_event.data.lock.locked;
+                    if (ctx->config.debug) {
+                        LOG_DEBUG("Processing screen lock event (locked=%d)", ctx->screen_locked);
+                    }
+                    /* Don't trigger animations or renders while locked */
+                } else if (comp_event.type == COMPOSITOR_EVENT_SCREEN_UNLOCK) {
+                    /* Screen unlocked - update context state and force render */
+                    ctx->screen_locked = comp_event.data.lock.locked;
+                    if (ctx->config.debug) {
+                        LOG_DEBUG("Processing screen unlock event (locked=%d)", ctx->screen_locked);
+                    }
+                    /* Force a render to refresh display immediately */
                     needs_render = true;
                 }
             }

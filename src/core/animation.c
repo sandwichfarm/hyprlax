@@ -3,6 +3,7 @@
  *
  * Handles time-based animations with easing functions.
  * No allocations in the evaluate path for maximum performance.
+ * Uses 64-bit millisecond timestamps to prevent overflow.
  */
 
 #include <string.h>
@@ -11,14 +12,14 @@
 
 /* Start a new animation */
 void animation_start(animation_state_t *anim, float from, float to,
-                    double duration, easing_type_t easing) {
+                    int duration_ms, easing_type_t easing) {
     if (!anim) return;
 
     anim->from_value = from;
     anim->to_value = to;
-    anim->duration = duration;
+    anim->duration_ms = duration_ms;
     anim->easing = easing;
-    anim->start_time = -1.0;  // Will be set on first evaluate
+    anim->start_time = -1;  /* Will be set on first evaluate */
     anim->active = true;
     anim->completed = false;
 }
@@ -32,41 +33,41 @@ void animation_stop(animation_state_t *anim) {
 }
 
 /* Evaluate animation at current time - no allocations */
-float animation_evaluate(animation_state_t *anim, double current_time) {
+float animation_evaluate(animation_state_t *anim, timestamp_ms_t current_time) {
     if (!anim || !anim->active) {
         return anim ? anim->to_value : 0.0f;
     }
 
-    // Lazy initialization of start time
+    /* Lazy initialization of start time */
     if (anim->start_time < 0) {
-        // Initialize start time on first evaluation
         anim->start_time = current_time;
     }
 
-    // Calculate progress
-    double elapsed = current_time - anim->start_time;
-    if (elapsed <= 0.0) {
+    /* Calculate elapsed time in milliseconds */
+    int64_t elapsed_ms = time_elapsed_ms(anim->start_time, current_time);
+
+    if (elapsed_ms <= 0) {
         return anim->from_value;
     }
 
-    if (elapsed >= anim->duration) {
+    if (elapsed_ms >= anim->duration_ms) {
         anim->completed = true;
         anim->active = false;
         return anim->to_value;
     }
 
-    // Calculate normalized time [0, 1]
-    float t = (float)(elapsed / anim->duration);
+    /* Calculate normalized time [0, 1] */
+    float t = (float)elapsed_ms / (float)anim->duration_ms;
 
-    // Smooth completion: treat very close to 1.0 as complete
+    /* Smooth completion: treat very close to 1.0 as complete */
     if (t > HYPRLAX_ANIM_COMPLETE_EPS) {
         t = 1.0f;
     }
 
-    // Apply easing
+    /* Apply easing */
     float eased_t = apply_easing(t, anim->easing);
 
-    // Interpolate value
+    /* Interpolate value */
     return anim->from_value + (anim->to_value - anim->from_value) * eased_t;
 }
 
@@ -76,13 +77,13 @@ bool animation_is_active(const animation_state_t *anim) {
 }
 
 /* Check if animation is complete */
-bool animation_is_complete(const animation_state_t *anim, double current_time) {
+bool animation_is_complete(const animation_state_t *anim, timestamp_ms_t current_time) {
     if (!anim) return true;
     if (anim->completed) return true;
     if (!anim->active) return true;
 
     if (anim->start_time < 0) return false;
 
-    double elapsed = current_time - anim->start_time;
-    return elapsed >= anim->duration;
+    int64_t elapsed_ms = time_elapsed_ms(anim->start_time, current_time);
+    return elapsed_ms >= anim->duration_ms;
 }

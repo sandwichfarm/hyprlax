@@ -56,6 +56,10 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
         LOG_TRACE("Skipping render: ctx=%p, renderer=%p, monitor=%p", ctx, ctx ? ctx->renderer : NULL, monitor);
         return;
     }
+    if (monitor->failed) {
+        LOG_TRACE("Skipping failed monitor %s", monitor->name);
+        return;
+    }
     if (!monitor->egl_surface) {
         LOG_WARN("Monitor %s has no EGL surface", monitor->name);
         return;
@@ -239,6 +243,17 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
         LOG_ERROR("render_frame: No renderer available");
         return;
     }
+
+    /* Phase 2: Skip rendering if screen is locked (hyprlock integration) */
+    if (ctx->screen_locked) {
+        if (ctx->config.debug) {
+            LOG_TRACE("Skipping render (screen locked)");
+        }
+        /* Still update animations so they complete properly when unlocked,
+         * but don't actually render to save GPU resources */
+        return;
+    }
+
     if (!ctx->monitors || ctx->monitors->count == 0) {
         LOG_WARN("No monitors available for rendering");
         return;

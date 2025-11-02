@@ -2,17 +2,21 @@
  * monitor.c - Multi-monitor management implementation
  */
 
-#include "monitor.h"
-#include "hyprlax.h"
-#include "core.h"
-#include "log.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
 #include <time.h>
 #include <wayland-client.h>
+#include <wayland-egl.h>
+#include <EGL/egl.h>
+#include "monitor.h"
+#include "hyprlax.h"
+#include "core.h"
+#include "log.h"
 #include "include/defaults.h"
+#include "include/renderer.h"
+#include "../protocols/wlr-layer-shell-client-protocol.h"
 
 /* Get current time in seconds */
 static double get_time(void) {
@@ -58,6 +62,7 @@ monitor_instance_t* monitor_instance_create(const char *name) {
     strncpy(monitor->name, name ? name : "unknown", sizeof(monitor->name) - 1);
     monitor->scale = 1;
     monitor->refresh_rate = 60;
+    monitor->failed = false;
 
     /* Initialize workspace context (default to numeric) */
     monitor->current_context.model = WS_MODEL_GLOBAL_NUMERIC;
@@ -76,18 +81,52 @@ monitor_instance_t* monitor_instance_create(const char *name) {
 void monitor_instance_destroy(monitor_instance_t *monitor) {
     if (!monitor) return;
 
-    /* Clean up pending frame callback to prevent dangling Wayland objects */
+    LOG_DEBUG("Destroying monitor %s", monitor->name);
+
+    /* Clean up resources in reverse order of creation to ensure proper cleanup */
+
+    /* 1. Clean up pending frame callback to prevent dangling Wayland objects */
     if (monitor->frame_callback) {
         wl_callback_destroy(monitor->frame_callback);
         monitor->frame_callback = NULL;
     }
     monitor->frame_pending = false;
 
-    /* Free config if allocated */
-    if (monitor->config) {
-        free(monitor->config);
+    /* 2. Destroy EGL surface (if exists) */
+    if (monitor->egl_surface) {
+        gles2_destroy_monitor_surface(monitor->egl_surface);
+        monitor->egl_surface = NULL;
+        LOG_DEBUG("  Destroyed EGL surface for monitor %s", monitor->name);
     }
 
+    /* 3. Destroy EGL window (if exists) */
+    if (monitor->wl_egl_window) {
+        wl_egl_window_destroy(monitor->wl_egl_window);
+        monitor->wl_egl_window = NULL;
+        LOG_DEBUG("  Destroyed EGL window for monitor %s", monitor->name);
+    }
+
+    /* 4. Destroy layer surface (if exists) */
+    if (monitor->layer_surface) {
+        zwlr_layer_surface_v1_destroy(monitor->layer_surface);
+        monitor->layer_surface = NULL;
+        LOG_DEBUG("  Destroyed layer surface for monitor %s", monitor->name);
+    }
+
+    /* 5. Destroy Wayland surface (if exists) */
+    if (monitor->wl_surface) {
+        wl_surface_destroy(monitor->wl_surface);
+        monitor->wl_surface = NULL;
+        LOG_DEBUG("  Destroyed Wayland surface for monitor %s", monitor->name);
+    }
+
+    /* 6. Free config if allocated */
+    if (monitor->config) {
+        free(monitor->config);
+        monitor->config = NULL;
+    }
+
+    LOG_DEBUG("Monitor %s fully destroyed", monitor->name);
     free(monitor);
 }
 

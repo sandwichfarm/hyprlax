@@ -90,19 +90,19 @@ void layer_destroy(parallax_layer_t *layer) {
 
 /* Update layer target offset with animation */
 void layer_update_offset(parallax_layer_t *layer, float target_x, float target_y,
-                        double duration, easing_type_t easing) {
+                        int duration_ms, easing_type_t easing) {
     if (!layer) return;
 
-    // Start animations from current position to target
-    animation_start(&layer->x_animation, layer->current_x, target_x, duration, easing);
-    animation_start(&layer->y_animation, layer->current_y, target_y, duration, easing);
+    /* Start animations from current position to target */
+    animation_start(&layer->x_animation, layer->current_x, target_x, duration_ms, easing);
+    animation_start(&layer->y_animation, layer->current_y, target_y, duration_ms, easing);
 }
 
 /* Update layer animations */
-void layer_tick(parallax_layer_t *layer, double current_time) {
+void layer_tick(parallax_layer_t *layer, timestamp_ms_t current_time) {
     if (!layer) return;
 
-    // Update current position from animations
+    /* Update current position from animations */
     if (animation_is_active(&layer->x_animation)) {
         layer->current_x = animation_evaluate(&layer->x_animation, current_time);
         layer->offset_x = layer->current_x;  /* Update offset for rendering */

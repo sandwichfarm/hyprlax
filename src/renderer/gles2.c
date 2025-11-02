@@ -1061,6 +1061,15 @@ int gles2_make_current(EGLSurface surface) {
     return HYPRLAX_SUCCESS;
 }
 
+/* Destroy a monitor's EGL surface */
+void gles2_destroy_monitor_surface(EGLSurface surface) {
+    if (!g_gles2_data || surface == EGL_NO_SURFACE) {
+        return;
+    }
+
+    eglDestroySurface(g_gles2_data->egl_display, surface);
+}
+
 /* OpenGL ES 2.0 renderer operations */
 const renderer_ops_t renderer_gles2_ops = {
     .init = gles2_init,

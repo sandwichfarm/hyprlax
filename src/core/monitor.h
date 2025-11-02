@@ -16,7 +16,9 @@ struct wl_output;
 struct wl_surface;
 struct zwlr_layer_surface_v1;
 struct wl_callback;
+#ifndef __egl_h_
 typedef struct EGLSurface_* EGLSurface;
+#endif
 typedef struct hyprlax_context hyprlax_context_t;
 
 /* Include workspace models for flexible workspace tracking */
@@ -74,6 +76,9 @@ typedef struct monitor_instance {
 
     /* Compositor capabilities for this monitor */
     compositor_capabilities_t capabilities;
+
+    /* Initialization state */
+    bool failed;  /* Set to true if monitor initialization failed */
 
     /* Animation state */
     bool animating;

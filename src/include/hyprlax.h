@@ -16,6 +16,7 @@
 #include "renderer.h"
 #include "platform.h"
 #include "compositor.h"
+#include "resource_monitor.h"
 #include "../core/monitor.h"
 
 /* Application state */
@@ -90,6 +91,9 @@ typedef struct hyprlax_context {
     /* IPC context (legacy, will be removed) */
     void *ipc_ctx;
 
+    /* Resource monitoring */
+    resource_monitor_t *resource_monitor;
+
     /* Event-driven loop (Linux) */
     int epoll_fd;              /* epoll instance for unified waits */
     int frame_timer_fd;        /* timerfd for frame pacing */
@@ -103,6 +107,11 @@ typedef struct hyprlax_context {
 
     /* Internal: request an immediate retry render (e.g., pending texture load) */
     bool deferred_render_needed;
+
+    /* Screen lock state tracking (Phase 2: hyprlock integration) */
+    bool screen_locked;           /* Is screen currently locked? */
+    double lock_time;             /* When was screen locked (for metrics) */
+    uint32_t lock_cycle_count;    /* How many lock/unlock cycles */
 
 } hyprlax_context_t;
 

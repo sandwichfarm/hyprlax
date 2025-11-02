@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <poll.h>
+#include <time.h>
 #include "../include/compositor.h"
 #include "../include/hyprlax_internal.h"
 #include "../include/log.h"
@@ -47,6 +48,10 @@ typedef struct {
     int workspace_map_count;
     /* Plugin detection */
     bool has_split_monitor_plugin;  /* split-monitor-workspaces changes behavior */
+    /* Screen lock state (Phase 2: hyprlock integration) */
+    bool screen_locked;           /* Is screen currently locked? */
+    double lock_time;             /* When was screen locked (for metrics) */
+    uint32_t lock_cycle_count;    /* How many lock/unlock cycles */
 } hyprland_data_t;
 
 /* Global instance (simplified for now) */
@@ -91,6 +96,13 @@ static void update_workspace_owner(int workspace_id, const char *monitor_name) {
 
 /* Forward declaration */
 static int hyprland_send_command(const char *command, char *response, size_t response_size);
+
+/* Helper: Get current time for lock metrics */
+static double get_current_time(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec / 1000000000.0;
+}
 
 /* Detect split-monitor-workspaces plugin */
 static bool detect_split_monitor_plugin(void) {
@@ -271,6 +283,11 @@ static int hyprland_init(void *platform_data) {
     g_hyprland_data->current_monitor = 0;
     g_hyprland_data->current_monitor_name[0] = '\0';
     g_hyprland_data->workspace_map_count = 0;
+
+    /* Initialize lock state */
+    g_hyprland_data->screen_locked = false;
+    g_hyprland_data->lock_time = 0.0;
+    g_hyprland_data->lock_cycle_count = 0;
 
     return HYPRLAX_SUCCESS;
 }
@@ -585,6 +602,44 @@ static int hyprland_poll_events(compositor_event_t *event) {
                     LOG_DEBUG("Monitor focus changed to %s (ws %d)",
                               g_hyprland_data->current_monitor_name, focused_workspace);
                 }
+            }
+        } else if (strncmp(line, "screenlock>>", 12) == 0) {
+            /* Parse screen lock event: "screenlock>>1" (locked) or "screenlock>>0" (unlocked) */
+            const char *state_str = line + 12;
+            int lock_state = atoi(state_str);
+
+            /* Check for debug lock logging */
+            const char *debug_lock = getenv("HYPRLAX_DEBUG_LOCK");
+            bool debug_lock_enabled = (debug_lock && strcmp(debug_lock, "1") == 0);
+
+            if (lock_state == 1 && !g_hyprland_data->screen_locked) {
+                /* Screen just locked */
+                g_hyprland_data->screen_locked = true;
+                g_hyprland_data->lock_time = get_current_time();
+                g_hyprland_data->lock_cycle_count++;
+
+                LOG_INFO("Screen locked (cycle #%u), suspending rendering", g_hyprland_data->lock_cycle_count);
+                if (debug_lock_enabled) {
+                    LOG_DEBUG("Lock event: state=%d, time=%.3f", lock_state, g_hyprland_data->lock_time);
+                }
+
+                event->type = COMPOSITOR_EVENT_SCREEN_LOCK;
+                event->data.lock.locked = true;
+                return HYPRLAX_SUCCESS;
+
+            } else if (lock_state == 0 && g_hyprland_data->screen_locked) {
+                /* Screen just unlocked */
+                double lock_duration = get_current_time() - g_hyprland_data->lock_time;
+                g_hyprland_data->screen_locked = false;
+
+                LOG_INFO("Screen unlocked after %.1f seconds, resuming rendering", lock_duration);
+                if (debug_lock_enabled) {
+                    LOG_DEBUG("Unlock event: state=%d, duration=%.3f", lock_state, lock_duration);
+                }
+
+                event->type = COMPOSITOR_EVENT_SCREEN_UNLOCK;
+                event->data.lock.locked = false;
+                return HYPRLAX_SUCCESS;
             }
         }
 

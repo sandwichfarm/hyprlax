@@ -85,6 +85,8 @@ typedef enum {
     COMPOSITOR_EVENT_MONITOR_CHANGE,
     COMPOSITOR_EVENT_FOCUS_CHANGE,
     COMPOSITOR_EVENT_BLUR_CHANGE,
+    COMPOSITOR_EVENT_SCREEN_LOCK,      /* Screen locked (hyprlock active) */
+    COMPOSITOR_EVENT_SCREEN_UNLOCK,    /* Screen unlocked */
 } compositor_event_type_t;
 
 typedef struct {
@@ -105,6 +107,9 @@ typedef struct {
         struct {
             bool focused;
         } focus;
+        struct {
+            bool locked;  /* true = locked, false = unlocked */
+        } lock;
     } data;
 } compositor_event_t;
 

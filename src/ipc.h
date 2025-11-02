@@ -33,6 +33,7 @@ typedef enum {
     IPC_CMD_GET_PROPERTY,
     IPC_CMD_DIAG,
     IPC_CMD_COMPUTED,
+    IPC_CMD_RESOURCE_STATUS,
     IPC_CMD_UNKNOWN
 } ipc_command_t;
 

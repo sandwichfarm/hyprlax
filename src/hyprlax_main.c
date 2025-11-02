@@ -25,6 +25,7 @@
 #include "include/config_toml.h"
 #include "include/wayland_api.h"
 #include "include/defaults.h"
+#include "include/resource_monitor.h"
 #include "core/monitor.h"
 #include "ipc.h"
 #include "vendor/gifdec.h"
@@ -302,6 +303,17 @@ hyprlax_context_t* hyprlax_create(void) {
     ctx->frame_timer_armed = false;
     ctx->debounce_pending = false;
 
+    /* Initialize resource monitor (check every 5 minutes) */
+    ctx->resource_monitor = resource_monitor_create(300.0);
+    if (!ctx->resource_monitor) {
+        LOG_WARN("Failed to create resource monitor");
+    }
+
+    /* Initialize lock state (Phase 2: hyprlock integration) */
+    ctx->screen_locked = false;
+    ctx->lock_time = 0.0;
+    ctx->lock_cycle_count = 0;
+
     return ctx;
 }
 
@@ -310,6 +322,12 @@ void hyprlax_destroy(hyprlax_context_t *ctx) {
     if (!ctx) return;
 
     hyprlax_shutdown(ctx);
+
+    /* Destroy resource monitor */
+    if (ctx->resource_monitor) {
+        resource_monitor_destroy(ctx->resource_monitor);
+        ctx->resource_monitor = NULL;
+    }
 
     /* Destroy layer mutex */
     pthread_mutex_destroy(&ctx->layer_mutex);
@@ -1172,9 +1190,16 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
             if (monitor->wl_egl_window && !monitor->egl_surface) {
                 monitor->egl_surface = gles2_create_monitor_surface(monitor->wl_egl_window);
                 if (monitor->egl_surface) {
-                    LOG_DEBUG("Created EGL surface for monitor %s", monitor->name);
+                    LOG_INFO("Created EGL surface for monitor %s", monitor->name);
+                    monitor->failed = false;
                 } else {
                     LOG_ERROR("Failed to create EGL surface for monitor %s", monitor->name);
+                    LOG_ERROR("  Monitor state:");
+                    LOG_ERROR("    - wl_surface: %p", (void*)monitor->wl_surface);
+                    LOG_ERROR("    - layer_surface: %p", (void*)monitor->layer_surface);
+                    LOG_ERROR("    - wl_egl_window: %p", (void*)monitor->wl_egl_window);
+                    LOG_ERROR("  This monitor will be skipped during rendering");
+                    monitor->failed = true;
                 }
             }
             monitor = monitor->next;

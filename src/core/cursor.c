@@ -104,30 +104,31 @@ bool hyprlax_cursor_tick(hyprlax_context_t *ctx) {
             ctx->cursor_ease_initialized = true;
         }
         const float thr = HYPRLAX_CURSOR_EASE_EPS;
+        int duration_ms = (int)(ctx->config.cursor_anim_duration * 1000.0);
         if (animation_is_active(&ctx->cursor_anim_x)) {
             if (fabsf(ctx->cursor_anim_x.to_value - ctx->cursor_norm_x) > thr) {
                 ctx->cursor_anim_x.to_value = ctx->cursor_norm_x;
-                ctx->cursor_anim_x.duration = ctx->config.cursor_anim_duration;
+                ctx->cursor_anim_x.duration_ms = duration_ms;
                 ctx->cursor_anim_x.easing = ctx->config.cursor_easing;
             }
         } else {
             float ex = ctx->cursor_eased_x;
             if (fabsf(ctx->cursor_norm_x - ex) > thr) {
                 animation_start(&ctx->cursor_anim_x, ex, ctx->cursor_norm_x,
-                                ctx->config.cursor_anim_duration, ctx->config.cursor_easing);
+                                duration_ms, ctx->config.cursor_easing);
             }
         }
         if (animation_is_active(&ctx->cursor_anim_y)) {
             if (fabsf(ctx->cursor_anim_y.to_value - ctx->cursor_norm_y) > thr) {
                 ctx->cursor_anim_y.to_value = ctx->cursor_norm_y;
-                ctx->cursor_anim_y.duration = ctx->config.cursor_anim_duration;
+                ctx->cursor_anim_y.duration_ms = duration_ms;
                 ctx->cursor_anim_y.easing = ctx->config.cursor_easing;
             }
         } else {
             float ey = ctx->cursor_eased_y;
             if (fabsf(ctx->cursor_norm_y - ey) > thr) {
                 animation_start(&ctx->cursor_anim_y, ey, ctx->cursor_norm_y,
-                                ctx->config.cursor_anim_duration, ctx->config.cursor_easing);
+                                duration_ms, ctx->config.cursor_easing);
             }
         }
     }

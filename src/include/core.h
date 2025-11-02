@@ -9,6 +9,7 @@
 #define HYPRLAX_CORE_H
 
 #include "hyprlax_internal.h"
+#include "time_utils.h"
 
 /* Easing function types */
 typedef enum {
@@ -29,8 +30,8 @@ typedef enum {
 
 /* Animation state - no allocations in evaluate path */
 typedef struct animation_state {
-    double start_time;
-    double duration;
+    timestamp_ms_t start_time;  /* 64-bit milliseconds (prevents overflow) */
+    int duration_ms;             /* Duration in milliseconds */
     float from_value;
     float to_value;
     easing_type_t easing;
@@ -212,18 +213,18 @@ const char* easing_to_string(easing_type_t type);
 
 /* Animation functions - no allocations in evaluate path */
 void animation_start(animation_state_t *anim, float from, float to,
-                    double duration, easing_type_t easing);
+                    int duration_ms, easing_type_t easing);
 void animation_stop(animation_state_t *anim);
-float animation_evaluate(animation_state_t *anim, double current_time);
+float animation_evaluate(animation_state_t *anim, timestamp_ms_t current_time);
 bool animation_is_active(const animation_state_t *anim);
-bool animation_is_complete(const animation_state_t *anim, double current_time);
+bool animation_is_complete(const animation_state_t *anim, timestamp_ms_t current_time);
 
 /* Layer management */
 parallax_layer_t* layer_create(const char *image_path, float shift_multiplier, float opacity);
 void layer_destroy(parallax_layer_t *layer);
 void layer_update_offset(parallax_layer_t *layer, float target_x, float target_y,
-                        double duration, easing_type_t easing);
-void layer_tick(parallax_layer_t *layer, double current_time);
+                        int duration_ms, easing_type_t easing);
+void layer_tick(parallax_layer_t *layer, timestamp_ms_t current_time);
 
 /* Layer list management */
 parallax_layer_t* layer_list_add(parallax_layer_t *head, parallax_layer_t *new_layer);
