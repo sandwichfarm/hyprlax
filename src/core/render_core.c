@@ -68,7 +68,10 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
         LOG_ERROR("Failed to make EGL surface current for monitor %s", monitor->name);
         return;
     }
-    glViewport(0, 0, monitor->width * monitor->scale, monitor->height * monitor->scale);
+    double eff_scale = monitor_get_effective_scale(monitor);
+    int vp_width = (int)ceil(monitor->width * eff_scale);
+    int vp_height = (int)ceil(monitor->height * eff_scale);
+    glViewport(0, 0, vp_width, vp_height);
 
     static int s_profile = -1;
     if (s_profile == -1) {

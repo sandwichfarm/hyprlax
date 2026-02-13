@@ -40,7 +40,8 @@ typedef struct monitor_instance {
 
     /* Physical properties */
     int width, height;                 /* Resolution in pixels */
-    int scale;                        /* Output scale factor */
+    int scale;                        /* Output scale factor (integer, from wl_output) */
+    double fractional_scale;          /* Fractional scale (from wp_fractional_scale_v1, 0 if unsupported) */
     int refresh_rate;                 /* Hz */
     int transform;                    /* Rotation/flip */
 
@@ -52,6 +53,8 @@ typedef struct monitor_instance {
     struct wl_surface *wl_surface;
     struct zwlr_layer_surface_v1 *layer_surface;
     void *wl_egl_window;              /* EGL window for this surface */
+    void *wp_viewport;                /* wp_viewport for logical surface sizing (fractional scale) */
+    void *wp_fractional_scale;        /* wp_fractional_scale_v1 for this surface */
 
     /* EGL surface (shares context with others) */
     EGLSurface egl_surface;
@@ -154,6 +157,10 @@ void monitor_update_geometry(monitor_instance_t *monitor,
 void monitor_set_global_position(monitor_instance_t *monitor, int x, int y);
 const char* monitor_get_name(monitor_instance_t *monitor);
 bool monitor_is_active(monitor_instance_t *monitor);
+
+/* Get effective scale factor (fractional if available, otherwise integer).
+ * Returns fractional_scale if > 0, else integer scale. */
+double monitor_get_effective_scale(const monitor_instance_t *monitor);
 
 /* Compute effective shift in pixels given config and a monitor.
  * Falls back to defaults if values are unset. */

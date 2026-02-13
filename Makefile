@@ -87,8 +87,12 @@ ifeq ($(ENABLE_WAYLAND),1)
 XDG_SHELL_PROTOCOL = $(WAYLAND_PROTOCOLS_DIR)/stable/xdg-shell/xdg-shell.xml
 LAYER_SHELL_PROTOCOL = protocols/wlr-layer-shell-unstable-v1.xml
 RIVER_STATUS_PROTOCOL = protocols/river-status-unstable-v1.xml
-PROTOCOL_SRCS = protocols/xdg-shell-protocol.c protocols/wlr-layer-shell-protocol.c
-PROTOCOL_HDRS = protocols/xdg-shell-client-protocol.h protocols/wlr-layer-shell-client-protocol.h
+FRACTIONAL_SCALE_PROTOCOL = $(WAYLAND_PROTOCOLS_DIR)/staging/fractional-scale/fractional-scale-v1.xml
+VIEWPORTER_PROTOCOL = $(WAYLAND_PROTOCOLS_DIR)/stable/viewporter/viewporter.xml
+PROTOCOL_SRCS = protocols/xdg-shell-protocol.c protocols/wlr-layer-shell-protocol.c \
+                protocols/fractional-scale-v1-protocol.c protocols/viewporter-protocol.c
+PROTOCOL_HDRS = protocols/xdg-shell-client-protocol.h protocols/wlr-layer-shell-client-protocol.h \
+                protocols/fractional-scale-v1-client-protocol.h protocols/viewporter-client-protocol.h
 # River status protocol is optional, only include if River is enabled
 ifeq ($(ENABLE_RIVER),1)
 PROTOCOL_SRCS += protocols/river-status-protocol.c
@@ -186,6 +190,22 @@ protocols/river-status-protocol.c: $(RIVER_STATUS_PROTOCOL)
 	$(WAYLAND_SCANNER) private-code < $< > $@
 
 protocols/river-status-client-protocol.h: $(RIVER_STATUS_PROTOCOL)
+	@mkdir -p protocols
+	$(WAYLAND_SCANNER) client-header < $< > $@
+
+protocols/fractional-scale-v1-protocol.c: $(FRACTIONAL_SCALE_PROTOCOL)
+	@mkdir -p protocols
+	$(WAYLAND_SCANNER) private-code < $< > $@
+
+protocols/fractional-scale-v1-client-protocol.h: $(FRACTIONAL_SCALE_PROTOCOL)
+	@mkdir -p protocols
+	$(WAYLAND_SCANNER) client-header < $< > $@
+
+protocols/viewporter-protocol.c: $(VIEWPORTER_PROTOCOL)
+	@mkdir -p protocols
+	$(WAYLAND_SCANNER) private-code < $< > $@
+
+protocols/viewporter-client-protocol.h: $(VIEWPORTER_PROTOCOL)
 	@mkdir -p protocols
 	$(WAYLAND_SCANNER) client-header < $< > $@
 

@@ -11,6 +11,8 @@
 #include <wayland-egl.h>
 #include <EGL/egl.h>
 #include "../protocols/wlr-layer-shell-client-protocol.h"
+#include "../protocols/fractional-scale-v1-client-protocol.h"
+#include "../protocols/viewporter-client-protocol.h"
 #include "monitor.h"
 #include "hyprlax.h"
 #include "core.h"
@@ -91,6 +93,20 @@ void monitor_instance_destroy(monitor_instance_t *monitor) {
         monitor->frame_callback = NULL;
     }
     monitor->frame_pending = false;
+
+    /* 1b. Destroy fractional scale object (if exists) */
+    if (monitor->wp_fractional_scale) {
+        wp_fractional_scale_v1_destroy((struct wp_fractional_scale_v1 *)monitor->wp_fractional_scale);
+        monitor->wp_fractional_scale = NULL;
+        LOG_DEBUG("  Destroyed fractional scale for monitor %s", monitor->name);
+    }
+
+    /* 1c. Destroy viewport object (if exists) */
+    if (monitor->wp_viewport) {
+        wp_viewport_destroy((struct wp_viewport *)monitor->wp_viewport);
+        monitor->wp_viewport = NULL;
+        LOG_DEBUG("  Destroyed viewport for monitor %s", monitor->name);
+    }
 
     /* 2. Destroy EGL surface (if exists) */
     if (monitor->egl_surface) {
@@ -719,6 +735,13 @@ const char* monitor_get_name(monitor_instance_t *monitor) {
 /* Check if monitor is active */
 bool monitor_is_active(monitor_instance_t *monitor) {
     return monitor && monitor->wl_surface != NULL;
+}
+
+/* Get effective scale factor (fractional if available, otherwise integer) */
+double monitor_get_effective_scale(const monitor_instance_t *monitor) {
+    if (!monitor) return 1.0;
+    if (monitor->fractional_scale > 0.0) return monitor->fractional_scale;
+    return (double)monitor->scale;
 }
 
 /* Compute effective shift in pixels given config and monitor width.

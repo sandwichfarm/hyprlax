@@ -12,6 +12,7 @@
 #include <time.h>
 #include <poll.h>
 #include <errno.h>
+#include <math.h>
 #include <wayland-client.h>
 #include <wayland-egl.h>
 #include <GLES2/gl2.h>
@@ -22,6 +23,8 @@
 #include "../include/defaults.h"
 #include "../include/renderer.h"
 #include "../../protocols/wlr-layer-shell-client-protocol.h"
+#include "../../protocols/fractional-scale-v1-client-protocol.h"
+#include "../../protocols/viewporter-client-protocol.h"
 #include "../include/hyprlax.h"
 #include "../core/monitor.h"
 #include "../include/wayland_api.h"
@@ -57,6 +60,10 @@ typedef struct {
     /* Layer shell protocol */
     struct zwlr_layer_shell_v1 *layer_shell;
     struct zwlr_layer_surface_v1 *layer_surface;  /* Legacy single surface */
+
+    /* Fractional scaling protocols */
+    struct wp_fractional_scale_manager_v1 *fractional_scale_manager;
+    struct wp_viewporter *viewporter;
 
     /* Window state */
     int width;
@@ -241,6 +248,14 @@ static void registry_global(void *data, struct wl_registry *registry,
 } else if (strcmp(interface, "zwlr_layer_shell_v1") == 0) {
     wl_data->layer_shell = wl_registry_bind(registry, id,
                                            &zwlr_layer_shell_v1_interface, 1);
+} else if (strcmp(interface, "wp_fractional_scale_manager_v1") == 0) {
+    wl_data->fractional_scale_manager = wl_registry_bind(registry, id,
+        &wp_fractional_scale_manager_v1_interface, 1);
+    LOG_DEBUG("Bound wp_fractional_scale_manager_v1");
+} else if (strcmp(interface, "wp_viewporter") == 0) {
+    wl_data->viewporter = wl_registry_bind(registry, id,
+        &wp_viewporter_interface, 1);
+    LOG_DEBUG("Bound wp_viewporter");
 } else if (strcmp(interface, "wl_seat") == 0) {
     wl_data->seat = wl_registry_bind(registry, id, &wl_seat_interface, 5);
     if (wl_data->seat) {
@@ -623,6 +638,40 @@ static void wayland_show_window(void) {
     }
 }
 
+/* Fractional scale preferred_scale event: scale is in 1/120ths */
+static void fractional_scale_preferred(void *data,
+                                       struct wp_fractional_scale_v1 *frac_scale,
+                                       uint32_t scale_times_120) {
+    (void)frac_scale;
+    monitor_instance_t *monitor = (monitor_instance_t *)data;
+    if (!monitor) return;
+
+    double new_scale = scale_times_120 / 120.0;
+    LOG_INFO("Monitor %s: fractional scale preferred: %.4f (raw: %u/120)",
+             monitor->name, new_scale, scale_times_120);
+    monitor->fractional_scale = new_scale;
+
+    /* Resize EGL window to match new physical pixel dimensions */
+    if (monitor->wl_egl_window && monitor->width > 0 && monitor->height > 0) {
+        int phys_w = (int)ceil(monitor->width * new_scale);
+        int phys_h = (int)ceil(monitor->height * new_scale);
+        wl_egl_window_resize(monitor->wl_egl_window, phys_w, phys_h, 0, 0);
+
+        /* Update viewport to set logical surface size */
+        if (monitor->wp_viewport) {
+            wp_viewport_set_destination((struct wp_viewport *)monitor->wp_viewport,
+                                       monitor->width, monitor->height);
+        }
+
+        LOG_DEBUG("Monitor %s: resized EGL window to %dx%d (logical %dx%d, scale %.4f)",
+                  monitor->name, phys_w, phys_h, monitor->width, monitor->height, new_scale);
+    }
+}
+
+static const struct wp_fractional_scale_v1_listener fractional_scale_listener = {
+    .preferred_scale = fractional_scale_preferred,
+};
+
 /* Create surface for a specific monitor */
 int wayland_create_monitor_surface(monitor_instance_t *monitor) {
     if (!monitor || !g_wayland_data || !g_wayland_data->compositor) {
@@ -688,12 +737,36 @@ int wayland_create_monitor_surface(monitor_instance_t *monitor) {
         }
     }
 
+    /* Set up fractional scale and viewport for this monitor surface */
+    if (monitor->wl_surface && g_wayland_data->fractional_scale_manager) {
+        struct wp_fractional_scale_v1 *frac = wp_fractional_scale_manager_v1_get_fractional_scale(
+            g_wayland_data->fractional_scale_manager, monitor->wl_surface);
+        if (frac) {
+            monitor->wp_fractional_scale = frac;
+            wp_fractional_scale_v1_add_listener(frac, &fractional_scale_listener, monitor);
+            LOG_DEBUG("Created fractional scale listener for monitor %s", monitor->name);
+        }
+    }
+    if (monitor->wl_surface && g_wayland_data->viewporter) {
+        struct wp_viewport *vp = wp_viewporter_get_viewport(
+            g_wayland_data->viewporter, monitor->wl_surface);
+        if (vp) {
+            monitor->wp_viewport = vp;
+            /* Set logical destination size so compositor knows our intended size */
+            wp_viewport_set_destination(vp, monitor->width, monitor->height);
+            LOG_DEBUG("Created viewport for monitor %s (logical %dx%d)",
+                      monitor->name, monitor->width, monitor->height);
+        }
+    }
+
     /* Create EGL window for this surface */
     if (monitor->wl_surface) {
+        double eff_scale = monitor_get_effective_scale(monitor);
+        int phys_w = (int)ceil(monitor->width * eff_scale);
+        int phys_h = (int)ceil(monitor->height * eff_scale);
         monitor->wl_egl_window = wl_egl_window_create(
             monitor->wl_surface,
-            monitor->width * monitor->scale,
-            monitor->height * monitor->scale);
+            phys_w, phys_h);
 
         if (!monitor->wl_egl_window) {
             LOG_ERROR("Failed to create EGL window for monitor %s", monitor->name);
