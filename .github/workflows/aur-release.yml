@@ -23,12 +23,6 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:base
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag || github.ref }}
-          fetch-depth: 0
-
       - name: Install arch tooling
         run: |
           set -euxo pipefail
@@ -36,11 +30,21 @@ jobs:
           pacman-key --populate
           pacman -Sy --noconfirm archlinux-keyring
           pacman -Syu --noconfirm
-          pacman -S --noconfirm base-devel git openssh curl sudo
-          # Create build user for makepkg
-          useradd -m -G wheel builduser
-          echo "builduser ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builduser
-          chmod 440 /etc/sudoers.d/builduser
+          pacman -S --noconfirm base-devel git openssh curl
+          if ! id -u builder >/dev/null 2>&1; then
+            useradd -m builder
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Mark workspace safe for git
+        run: |
+          set -euxo pipefail
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
 
       - name: Configure SSH for AUR
         env:
@@ -51,21 +55,22 @@ jobs:
           chmod 700 ~/.ssh
           printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
-          # Add AUR host keys with retry logic
-          for i in 1 2 3; do
-            if ssh-keyscan -t rsa,ed25519 aur.archlinux.org >> ~/.ssh/known_hosts 2>&1; then
-              break
-            fi
-            echo "ssh-keyscan attempt $i failed, retrying..."
-            sleep 2
-          done
-          # Verify we got the keys
-          if ! grep -q "aur.archlinux.org" ~/.ssh/known_hosts; then
-            echo "Failed to get AUR host keys, using StrictHostKeyChecking=no"
-            echo "Host aur.archlinux.org" >> ~/.ssh/config
-            echo "  StrictHostKeyChecking no" >> ~/.ssh/config
-            echo "  UserKnownHostsFile /dev/null" >> ~/.ssh/config
-          fi
+
+          # Debug: Verify key was written correctly
+          echo "Key file size: $(wc -c < ~/.ssh/aur) bytes"
+          echo "Key file lines: $(wc -l < ~/.ssh/aur) lines"
+          head -1 ~/.ssh/aur
+          tail -1 ~/.ssh/aur
+
+          # Verify key is valid and extract public key
+          ssh-keygen -y -f ~/.ssh/aur > ~/.ssh/aur.pub || { echo "ERROR: Invalid private key format"; exit 1; }
+          echo "Public key fingerprint:"
+          ssh-keygen -lf ~/.ssh/aur.pub
+          echo "Public key (verify this matches AUR account):"
+          cat ~/.ssh/aur.pub
+
+          # Add AUR host keys
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: Prepare PKGBUILD (stable)
         env:
@@ -77,7 +82,7 @@ jobs:
           TARBALL_URL="https://github.com/${REPO}/archive/refs/tags/v${VERSION}.tar.gz"
           SHA256="$(curl -L "$TARBALL_URL" | sha256sum | cut -d' ' -f1)"
 
-          git clone ssh://aur@aur.archlinux.org/hyprlax.git aur-hyprlax
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o StrictHostKeyChecking=accept-new" git clone ssh://aur@aur.archlinux.org/hyprlax.git aur-hyprlax
           cp packaging/arch/hyprlax/PKGBUILD aur-hyprlax/PKGBUILD
 
           cd aur-hyprlax
@@ -86,9 +91,10 @@ jobs:
           # Ensure removed optional dependency stays removed
           sed -i "/wayfire:/d" PKGBUILD
 
-          # Run makepkg as builduser
-          chown -R builduser:builduser .
-          sudo -u builduser makepkg --printsrcinfo > .SRCINFO
+          AUR_DIR="$(pwd)"
+          chown -R builder:builder "${AUR_DIR}"
+          su - builder -c "cd '${AUR_DIR}' && makepkg --printsrcinfo > .SRCINFO"
+          chown -R root:root "${AUR_DIR}"
           echo "Stable pkgver set to: ${VERSION}"
           echo "Stable sha256: ${SHA256}"
 
@@ -115,11 +121,6 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:base
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Install arch tooling
         run: |
           set -euxo pipefail
@@ -127,11 +128,20 @@ jobs:
           pacman-key --populate
           pacman -Sy --noconfirm archlinux-keyring
           pacman -Syu --noconfirm
-          pacman -S --noconfirm base-devel git openssh sudo
-          # Create build user for makepkg
-          useradd -m -G wheel builduser
-          echo "builduser ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builduser
-          chmod 440 /etc/sudoers.d/builduser
+          pacman -S --noconfirm base-devel git openssh
+          if ! id -u builder >/dev/null 2>&1; then
+            useradd -m builder
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mark workspace safe for git
+        run: |
+          set -euxo pipefail
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
 
       - name: Configure SSH for AUR
         env:
@@ -142,40 +152,42 @@ jobs:
           chmod 700 ~/.ssh
           printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
-          # Add AUR host keys with retry logic
-          for i in 1 2 3; do
-            if ssh-keyscan -t rsa,ed25519 aur.archlinux.org >> ~/.ssh/known_hosts 2>&1; then
-              break
-            fi
-            echo "ssh-keyscan attempt $i failed, retrying..."
-            sleep 2
-          done
-          # Verify we got the keys
-          if ! grep -q "aur.archlinux.org" ~/.ssh/known_hosts; then
-            echo "Failed to get AUR host keys, using StrictHostKeyChecking=no"
-            echo "Host aur.archlinux.org" >> ~/.ssh/config
-            echo "  StrictHostKeyChecking no" >> ~/.ssh/config
-            echo "  UserKnownHostsFile /dev/null" >> ~/.ssh/config
-          fi
+
+          # Debug: Verify key was written correctly
+          echo "Key file size: $(wc -c < ~/.ssh/aur) bytes"
+          echo "Key file lines: $(wc -l < ~/.ssh/aur) lines"
+          head -1 ~/.ssh/aur
+          tail -1 ~/.ssh/aur
+
+          # Verify key is valid and extract public key
+          ssh-keygen -y -f ~/.ssh/aur > ~/.ssh/aur.pub || { echo "ERROR: Invalid private key format"; exit 1; }
+          echo "Public key fingerprint:"
+          ssh-keygen -lf ~/.ssh/aur.pub
+          echo "Public key (verify this matches AUR account):"
+          cat ~/.ssh/aur.pub
+
+          # Add AUR host keys
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: Prepare PKGBUILD (-git)
         id: prep_git
         run: |
           set -euxo pipefail
-          REV_COUNT="$(git rev-list --count HEAD)"
-          SHORT_HASH="$(git rev-parse --short HEAD)"
+          REV_COUNT="$(git -C "${GITHUB_WORKSPACE}" rev-list --count HEAD)"
+          SHORT_HASH="$(git -C "${GITHUB_WORKSPACE}" rev-parse --short HEAD)"
           PKGVER="r${REV_COUNT}.${SHORT_HASH}"
           echo "pkgver=${PKGVER}" >> "$GITHUB_OUTPUT"
 
-          git clone ssh://aur@aur.archlinux.org/hyprlax-git.git aur-hyprlax-git
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o StrictHostKeyChecking=accept-new" git clone ssh://aur@aur.archlinux.org/hyprlax-git.git aur-hyprlax-git
           cp packaging/arch/hyprlax-git/PKGBUILD aur-hyprlax-git/PKGBUILD
           cd aur-hyprlax-git
           sed -i "s/^pkgver=.*/pkgver=${PKGVER}/" PKGBUILD
           # Ensure removed optional dependency stays removed
           sed -i "/wayfire:/d" PKGBUILD
-          # Run makepkg as builduser
-          chown -R builduser:builduser .
-          sudo -u builduser makepkg --printsrcinfo > .SRCINFO
+          AUR_DIR="$(pwd)"
+          chown -R builder:builder "${AUR_DIR}"
+          su - builder -c "cd '${AUR_DIR}' && makepkg --printsrcinfo > .SRCINFO"
+          chown -R root:root "${AUR_DIR}"
           echo "-git pkgver set to: ${PKGVER}"
 
       - name: Commit and push (-git)
@@ -196,4 +208,3 @@ jobs:
           else
             echo "No changes to push for -git"
           fi
-

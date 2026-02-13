@@ -3,6 +3,7 @@
 Dynamic parallax wallpaper engine with multi-compositor support for Linux.
 
 <p align="center">
+  <a href="https://deepwiki.com/sandwichfarm/hyprlax"><img src="https://img.shields.io/badge/DeepWiki-blue" alt="DeepWiki"></a>
   <img src="https://img.shields.io/badge/Wayland-Native-green" alt="Wayland Native">
   <img src="https://img.shields.io/badge/GPU-Accelerated-orange" alt="GPU Accelerated">
   <img src="https://img.shields.io/badge/Multi--Compositor-Support-purple" alt="Multi-Compositor">
