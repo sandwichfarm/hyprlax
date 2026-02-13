@@ -93,7 +93,7 @@ void layer_update_offset(parallax_layer_t *layer, float target_x, float target_y
                         int duration_ms, easing_type_t easing) {
     if (!layer) return;
 
-    /* Start animations from current position to target */
+    /* Start animation from current position to target */
     animation_start(&layer->x_animation, layer->current_x, target_x, duration_ms, easing);
     animation_start(&layer->y_animation, layer->current_y, target_y, duration_ms, easing);
 }

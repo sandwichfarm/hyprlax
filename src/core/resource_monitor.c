@@ -4,8 +4,8 @@
  * Monitors system resources (FDs, memory, GPU) for leak detection.
  */
 
-#include "resource_monitor.h"
-#include "log.h"
+#include "../include/resource_monitor.h"
+#include "../include/log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

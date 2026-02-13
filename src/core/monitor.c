@@ -10,13 +10,13 @@
 #include <wayland-client.h>
 #include <wayland-egl.h>
 #include <EGL/egl.h>
+#include "../protocols/wlr-layer-shell-client-protocol.h"
 #include "monitor.h"
 #include "hyprlax.h"
 #include "core.h"
 #include "log.h"
 #include "include/defaults.h"
 #include "include/renderer.h"
-#include "../protocols/wlr-layer-shell-client-protocol.h"
 
 /* Get current time in seconds */
 static double get_time(void) {
