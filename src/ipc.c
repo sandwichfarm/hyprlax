@@ -28,7 +28,6 @@
 #include <poll.h>
 
 /* IPC timeout configuration */
-#define IPC_ACCEPT_TIMEOUT_SEC 5
 #define IPC_READ_TIMEOUT_SEC 10
 #define IPC_WRITE_TIMEOUT_SEC 5
 
@@ -488,21 +487,14 @@ bool ipc_process_commands(ipc_context_t* ctx) {
     socklen_t client_len = sizeof(client_addr);
     int client_fd = -1;
 
-    /* Poll with timeout to prevent slow clients from blocking daemon */
+    /* Non-blocking poll: the main event loop already handles IPC socket
+     * readiness via epoll, so we only need to check if data is available
+     * right now. A blocking timeout here would stall the entire render loop. */
     struct pollfd pfd;
     pfd.fd = ctx->socket_fd;
     pfd.events = POLLIN;
 
-    int timeout_ms = IPC_ACCEPT_TIMEOUT_SEC * 1000;
-    const char *timeout_env = getenv("HYPRLAX_IPC_TIMEOUT");
-    if (timeout_env && *timeout_env) {
-        int custom_timeout = atoi(timeout_env);
-        if (custom_timeout > 0) {
-            timeout_ms = custom_timeout * 1000;
-        }
-    }
-
-    int ret = poll(&pfd, 1, timeout_ms);
+    int ret = poll(&pfd, 1, 0);
     if (ret > 0 && (pfd.revents & POLLIN)) {
         client_fd = accept(ctx->socket_fd, (struct sockaddr*)&client_addr, &client_len);
         if (client_fd >= 0) {

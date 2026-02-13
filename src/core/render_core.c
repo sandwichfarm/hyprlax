@@ -13,6 +13,7 @@
 #include "../include/renderer.h"
 #include "../core/monitor.h"
 #include "../include/log.h"
+#include "../include/time_utils.h"
 #include "../vendor/gifdec.h"
 
 static double rc_get_time(void) {
@@ -52,12 +53,15 @@ GLuint load_texture(const char *path, int *width, int *height) {
     return texture;
 }
 
-/* Check if frame-callback pacing is enabled (default: on) */
+/* Check if frame-callback pacing is enabled (default: off).
+ * Enable with HYPRLAX_FRAME_CALLBACK=1 for compositors like Niri where
+ * occluded surfaces should be throttled. On Hyprland/Sway, eglSwapBuffers
+ * already provides buffer pacing so this is not needed. */
 static bool rc_frame_callback_enabled(void) {
-    const char *v = getenv("HYPRLAX_NO_FRAME_CALLBACK");
+    const char *v = getenv("HYPRLAX_FRAME_CALLBACK");
     if (v && (*v == '1' || strcasecmp(v, "true") == 0 || strcasecmp(v, "yes") == 0))
-        return false;
-    return true;
+        return true;
+    return false;
 }
 
 static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *monitor, double now_time) {
@@ -74,12 +78,26 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
         return;
     }
 
-    /* Skip draw/present for monitors whose frame callback hasn't fired yet.
-     * This prevents wasting GPU cycles on occluded/fullscreen-covered monitors
-     * (e.g. Niri fullscreen windows covering the wallpaper surface). */
+    /* Frame-callback pacing: skip draw/present if a frame callback is pending
+     * AND we haven't waited too long.  Some compositors (Hyprland) may not
+     * reliably deliver frame callbacks for layer-shell background surfaces,
+     * so we use a timeout of 2x the target frame interval to avoid stalling.
+     * This still helps Niri-style compositors where occluded surfaces should
+     * genuinely be throttled. */
     if (rc_frame_callback_enabled() && monitor->frame_pending) {
-        LOG_TRACE("Monitor %s: skipping draw/present (frame pending)", monitor->name);
-        return;
+        double elapsed = now_time - monitor->last_frame_time;
+        double timeout = monitor->target_frame_time * 2.0 / 1000.0; /* ms → seconds */
+        if (timeout < 0.05) timeout = 0.05; /* at least 50ms */
+        if (elapsed < timeout) {
+            LOG_TRACE("Monitor %s: skipping draw/present (frame pending, %.1fms < %.1fms)",
+                      monitor->name, elapsed * 1000.0, timeout * 1000.0);
+            return;
+        }
+        /* Timeout expired — compositor isn't sending callbacks for this surface.
+         * Clear pending flag and render anyway. */
+        monitor->frame_pending = false;
+        LOG_TRACE("Monitor %s: frame callback timeout (%.1fms), rendering anyway",
+                  monitor->name, elapsed * 1000.0);
     }
 
     if (gles2_make_current(monitor->egl_surface) != HYPRLAX_SUCCESS) {
@@ -90,14 +108,6 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
     int vp_width = (int)ceil(monitor->width * eff_scale);
     int vp_height = (int)ceil(monitor->height * eff_scale);
     glViewport(0, 0, vp_width, vp_height);
-
-    static int s_profile = -1;
-    if (s_profile == -1) {
-        const char *p = getenv("HYPRLAX_PROFILE");
-        s_profile = (p && *p) ? 1 : 0;
-    }
-    double t_draw_start = 0.0, t_present_start = 0.0;
-    if (s_profile) t_draw_start = rc_get_time();
 
     RENDERER_BEGIN_FRAME(ctx->renderer);
     /* Frame prep: either clear (default) or fade previous frame for trails */
@@ -245,15 +255,7 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
     pthread_mutex_unlock(&ctx->layer_mutex);
 
     RENDERER_END_FRAME(ctx->renderer);
-    double t_draw_end = s_profile ? rc_get_time() : 0.0;
-    if (s_profile) t_present_start = t_draw_end;
     RENDERER_PRESENT(ctx->renderer);
-    double t_present_end = s_profile ? rc_get_time() : 0.0;
-    if (s_profile && ctx->config.debug) {
-        double draw_ms = (t_draw_end - t_draw_start) * 1000.0;
-        double present_ms = (t_present_end - t_present_start) * 1000.0;
-        LOG_DEBUG("[PROFILE] monitor=%s draw=%.2f ms present=%.2f ms", monitor->name, draw_ms, present_ms);
-    }
     if (monitor->wl_surface && ctx->platform && ctx->platform->ops && ctx->platform->ops->commit_monitor_surface) {
         ctx->platform->ops->commit_monitor_surface(monitor);
     }
@@ -280,13 +282,14 @@ void hyprlax_render_frame(hyprlax_context_t *ctx) {
         return;
     }
     double now_time = rc_get_time();
+    timestamp_ms_t now_time_ms = time_seconds_to_ms(now_time);
     if (ctx->config.cursor_anim_duration > 0.0) {
         if (animation_is_active(&ctx->cursor_anim_x))
-            ctx->cursor_eased_x = animation_evaluate(&ctx->cursor_anim_x, now_time);
+            ctx->cursor_eased_x = animation_evaluate(&ctx->cursor_anim_x, now_time_ms);
         else
             ctx->cursor_eased_x = ctx->cursor_norm_x;
         if (animation_is_active(&ctx->cursor_anim_y))
-            ctx->cursor_eased_y = animation_evaluate(&ctx->cursor_anim_y, now_time);
+            ctx->cursor_eased_y = animation_evaluate(&ctx->cursor_anim_y, now_time_ms);
         else
             ctx->cursor_eased_y = ctx->cursor_norm_y;
     } else {

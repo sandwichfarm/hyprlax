@@ -26,6 +26,7 @@
 #include "include/wayland_api.h"
 #include "include/defaults.h"
 #include "include/resource_monitor.h"
+#include "include/time_utils.h"
 #include "core/monitor.h"
 #include "ipc.h"
 #include "vendor/gifdec.h"
@@ -1401,7 +1402,7 @@ void hyprlax_handle_workspace_change(hyprlax_context_t *ctx, int new_workspace) 
         float layer_target_y = target_y * layer->shift_multiplier;
 
         layer_update_offset(layer, layer_target_x, layer_target_y,
-                          ctx->config.animation_duration,
+                          (int)(ctx->config.animation_duration * 1000.0),
                           ctx->config.default_easing);
 
         layer = layer->next;
@@ -1444,7 +1445,7 @@ void hyprlax_handle_workspace_change_2d(hyprlax_context_t *ctx,
         float layer_target_y = target_y * layer->shift_multiplier;
 
         layer_update_offset(layer, layer_target_x, layer_target_y,
-                          ctx->config.animation_duration,
+                          (int)(ctx->config.animation_duration * 1000.0),
                           ctx->config.default_easing);
 
         layer = layer->next;
@@ -1461,10 +1462,13 @@ void hyprlax_handle_workspace_change_2d(hyprlax_context_t *ctx,
 void hyprlax_update_layers(hyprlax_context_t *ctx, double current_time) {
     if (!ctx) return;
 
+    /* Convert seconds to milliseconds for the animation system */
+    timestamp_ms_t current_time_ms = time_seconds_to_ms(current_time);
+
     pthread_mutex_lock(&ctx->layer_mutex);
     parallax_layer_t *layer = ctx->layers;
     while (layer) {
-        layer_tick(layer, current_time);
+        layer_tick(layer, current_time_ms);
         layer = layer->next;
     }
     pthread_mutex_unlock(&ctx->layer_mutex);

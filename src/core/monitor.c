@@ -507,7 +507,7 @@ void monitor_handle_workspace_context_change(hyprlax_context_t *ctx,
                 }
 
                 layer_update_offset(layer, layer_target_x, layer_target_y,
-                                  monitor->config ? monitor->config->animation_duration : 1.0,
+                                  (int)((monitor->config ? monitor->config->animation_duration : 1.0) * 1000.0),
                                   monitor->config ? monitor->config->default_easing : EASE_CUBIC_OUT);
                 /* Defensive: if any callee scribbled over the linked-list pointer, restore it */
                 if (layer->next != next_layer) {

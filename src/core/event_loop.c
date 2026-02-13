@@ -133,12 +133,13 @@ static timestamp_ms_t ev_get_time_ms(void) {
     return time_get_monotonic_ms();
 }
 
-/* Check if frame-callback pacing is enabled (default: on) */
+/* Check if frame-callback pacing is enabled (default: off).
+ * Enable with HYPRLAX_FRAME_CALLBACK=1 for compositors like Niri. */
 static bool ev_frame_callback_enabled(void) {
-    const char *v = getenv("HYPRLAX_NO_FRAME_CALLBACK");
+    const char *v = getenv("HYPRLAX_FRAME_CALLBACK");
     if (v && (*v == '1' || strcasecmp(v, "true") == 0 || strcasecmp(v, "yes") == 0))
-        return false;
-    return true;
+        return true;
+    return false;
 }
 
 /* Legacy compatibility wrapper - returns seconds as double */
@@ -211,7 +212,6 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                 default: break;
             }
         }
-
         if (ctx->ipc_ctx && ipc_process_commands((ipc_context_t*)ctx->ipc_ctx)) {
             needs_render = true;
         }
@@ -241,7 +241,6 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                 }
             }
         }
-
         bool animations_active = false;
         {
             /* Lock layer list for safe iteration */
@@ -266,7 +265,22 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             if (use_fc && ctx->monitors) {
                 bool can_render = false;
                 monitor_instance_t *m = ctx->monitors->head;
-                while (m) { if (!m->frame_pending) { can_render = true; break; } m = m->next; }
+                while (m) {
+                    if (!m->frame_pending) {
+                        can_render = true;
+                        break;
+                    }
+                    /* If frame_pending but enough time elapsed, the render path
+                     * will timeout and clear it — so allow render. */
+                    double elapsed = current_time - m->last_frame_time;
+                    double timeout = m->target_frame_time * 2.0 / 1000.0;
+                    if (timeout < 0.05) timeout = 0.05;
+                    if (elapsed >= timeout) {
+                        can_render = true;
+                        break;
+                    }
+                    m = m->next;
+                }
                 needs_render = needs_render || can_render;
             } else {
                 needs_render = true;

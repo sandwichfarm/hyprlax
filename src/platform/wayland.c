@@ -652,20 +652,40 @@ static void fractional_scale_preferred(void *data,
              monitor->name, new_scale, scale_times_120);
     monitor->fractional_scale = new_scale;
 
+    /* Check if scale is truly fractional (not integer) */
+    bool is_fractional = (scale_times_120 % 120) != 0;
+
     /* Resize EGL window to match new physical pixel dimensions */
     if (monitor->wl_egl_window && monitor->width > 0 && monitor->height > 0) {
         int phys_w = (int)ceil(monitor->width * new_scale);
         int phys_h = (int)ceil(monitor->height * new_scale);
         wl_egl_window_resize(monitor->wl_egl_window, phys_w, phys_h, 0, 0);
 
-        /* Update viewport to set logical surface size */
-        if (monitor->wp_viewport) {
-            wp_viewport_set_destination((struct wp_viewport *)monitor->wp_viewport,
-                                       monitor->width, monitor->height);
+        if (is_fractional) {
+            /* Fractional scale: need viewport to set logical surface size,
+             * since wl_surface.set_buffer_scale only handles integers. */
+            if (!monitor->wp_viewport && g_wayland_data && g_wayland_data->viewporter) {
+                struct wp_viewport *vp = wp_viewporter_get_viewport(
+                    g_wayland_data->viewporter, monitor->wl_surface);
+                if (vp) {
+                    monitor->wp_viewport = vp;
+                    LOG_DEBUG("Created viewport for monitor %s (fractional scale %.4f)",
+                              monitor->name, new_scale);
+                }
+            }
+            if (monitor->wp_viewport) {
+                wp_viewport_set_destination((struct wp_viewport *)monitor->wp_viewport,
+                                           monitor->width, monitor->height);
+            }
+        } else {
+            /* Integer scale: no viewport needed, existing integer scale
+             * from wl_output listener handles this case. */
+            LOG_DEBUG("Monitor %s: integer scale %d, no viewport needed",
+                      monitor->name, (int)(new_scale + 0.5));
         }
 
-        LOG_DEBUG("Monitor %s: resized EGL window to %dx%d (logical %dx%d, scale %.4f)",
-                  monitor->name, phys_w, phys_h, monitor->width, monitor->height, new_scale);
+        LOG_DEBUG("Monitor %s: resized EGL window to %dx%d (logical %dx%d, scale %.4f, fractional=%d)",
+                  monitor->name, phys_w, phys_h, monitor->width, monitor->height, new_scale, is_fractional);
     }
 }
 
@@ -738,7 +758,13 @@ int wayland_create_monitor_surface(monitor_instance_t *monitor) {
         }
     }
 
-    /* Set up fractional scale and viewport for this monitor surface */
+    /* Set up fractional scale listener for this monitor surface.
+     * Viewport is NOT created eagerly — it's only needed for fractional
+     * (non-integer) scaling and will be created on demand in the
+     * fractional_scale_preferred callback.  Creating viewport on surfaces
+     * with integer scale can cause compositors (e.g. Hyprland) to handle
+     * background layer-shell buffer management differently, leading to
+     * eglSwapBuffers blocking for seconds. */
     if (monitor->wl_surface && g_wayland_data->fractional_scale_manager) {
         struct wp_fractional_scale_v1 *frac = wp_fractional_scale_manager_v1_get_fractional_scale(
             g_wayland_data->fractional_scale_manager, monitor->wl_surface);
@@ -746,17 +772,6 @@ int wayland_create_monitor_surface(monitor_instance_t *monitor) {
             monitor->wp_fractional_scale = frac;
             wp_fractional_scale_v1_add_listener(frac, &fractional_scale_listener, monitor);
             LOG_DEBUG("Created fractional scale listener for monitor %s", monitor->name);
-        }
-    }
-    if (monitor->wl_surface && g_wayland_data->viewporter) {
-        struct wp_viewport *vp = wp_viewporter_get_viewport(
-            g_wayland_data->viewporter, monitor->wl_surface);
-        if (vp) {
-            monitor->wp_viewport = vp;
-            /* Set logical destination size so compositor knows our intended size */
-            wp_viewport_set_destination(vp, monitor->width, monitor->height);
-            LOG_DEBUG("Created viewport for monitor %s (logical %dx%d)",
-                      monitor->name, monitor->width, monitor->height);
         }
     }
 
@@ -1291,12 +1306,13 @@ static const char* wayland_get_backend_name(void) {
 }
 
 /* Commit a monitor's Wayland surface */
-/* Check if frame-callback pacing is enabled (default: on) */
+/* Check if frame-callback pacing is enabled (default: off).
+ * Enable with HYPRLAX_FRAME_CALLBACK=1 for compositors like Niri. */
 static bool wl_frame_callback_enabled(void) {
-    const char *v = getenv("HYPRLAX_NO_FRAME_CALLBACK");
+    const char *v = getenv("HYPRLAX_FRAME_CALLBACK");
     if (v && (*v == '1' || strcasecmp(v, "true") == 0 || strcasecmp(v, "yes") == 0))
-        return false;
-    return true;
+        return true;
+    return false;
 }
 
 void wayland_commit_monitor_surface(monitor_instance_t *monitor) {
