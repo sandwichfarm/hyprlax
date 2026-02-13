@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <strings.h>
 #include <time.h>
 #include <poll.h>
 #include <errno.h>
@@ -1290,11 +1291,19 @@ static const char* wayland_get_backend_name(void) {
 }
 
 /* Commit a monitor's Wayland surface */
+/* Check if frame-callback pacing is enabled (default: on) */
+static bool wl_frame_callback_enabled(void) {
+    const char *v = getenv("HYPRLAX_NO_FRAME_CALLBACK");
+    if (v && (*v == '1' || strcasecmp(v, "true") == 0 || strcasecmp(v, "yes") == 0))
+        return false;
+    return true;
+}
+
 void wayland_commit_monitor_surface(monitor_instance_t *monitor) {
     if (monitor && monitor->wl_surface) {
-        /* Request a frame callback to pace the next frame if not already pending */
-        const char *use_fc = getenv("HYPRLAX_FRAME_CALLBACK");
-        if (use_fc && *use_fc && !monitor->frame_pending) {
+        /* Request a frame callback to pace the next frame if not already pending.
+         * Frame callbacks are enabled by default; disable with HYPRLAX_NO_FRAME_CALLBACK=1. */
+        if (wl_frame_callback_enabled() && !monitor->frame_pending) {
             struct wl_callback *cb = wl_surface_frame(monitor->wl_surface);
             if (cb) {
                 monitor->frame_callback = cb;

@@ -6,6 +6,7 @@
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #include <errno.h>
 #include <poll.h>
@@ -132,6 +133,14 @@ static timestamp_ms_t ev_get_time_ms(void) {
     return time_get_monotonic_ms();
 }
 
+/* Check if frame-callback pacing is enabled (default: on) */
+static bool ev_frame_callback_enabled(void) {
+    const char *v = getenv("HYPRLAX_NO_FRAME_CALLBACK");
+    if (v && (*v == '1' || strcasecmp(v, "true") == 0 || strcasecmp(v, "yes") == 0))
+        return false;
+    return true;
+}
+
 /* Legacy compatibility wrapper - returns seconds as double */
 static double ev_get_time(void) {
     timestamp_ms_t ms = time_get_monotonic_ms();
@@ -164,8 +173,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
         int current_fps = ctx->config.target_fps;
         if (current_fps <= 0) current_fps = HYPRLAX_DEFAULT_FPS;
         if (current_fps != prev_target_fps) {
-            const char *fc_env = getenv("HYPRLAX_FRAME_CALLBACK");
-            bool use_frame_callback = (fc_env && *fc_env);
+            bool use_frame_callback = ev_frame_callback_enabled();
             if (!use_frame_callback) {
                 hyprlax_arm_frame_timer(ctx, current_fps);
             }
@@ -253,9 +261,9 @@ int hyprlax_run(hyprlax_context_t *ctx) {
             }
         }
 
-        const char *use_fc = getenv("HYPRLAX_FRAME_CALLBACK");
+        bool use_fc = ev_frame_callback_enabled();
         if (animations_active) {
-            if (use_fc && *use_fc && ctx->monitors) {
+            if (use_fc && ctx->monitors) {
                 bool can_render = false;
                 monitor_instance_t *m = ctx->monitors->head;
                 while (m) { if (!m->frame_pending) { can_render = true; break; } m = m->next; }
@@ -268,8 +276,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
         if (needs_render) {
             double time_since_render = current_time - last_render_time;
             if (time_since_render < frame_time) {
-                const char *fc_env = getenv("HYPRLAX_FRAME_CALLBACK");
-                bool use_frame_callback = (fc_env && *fc_env);
+                bool use_frame_callback = ev_frame_callback_enabled();
                 if (!use_frame_callback) {
                     int sleep_ms = (int)((frame_time - time_since_render) * 1000.0);
                     if (sleep_ms > 0) {
@@ -301,21 +308,27 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                 }
             }
         } else {
-            const char *fc_env = getenv("HYPRLAX_FRAME_CALLBACK");
-            bool use_frame_callback = (fc_env && *fc_env);
-            if (!use_frame_callback) {
-                if (animations_active) {
-                    if (!ctx->frame_timer_armed) hyprlax_arm_frame_timer(ctx, ctx->config.target_fps);
-                } else {
-                    if (ctx->frame_timer_armed) hyprlax_disarm_frame_timer(ctx);
-                    if (needs_render) {
-                        double target_wake_time = last_render_time + frame_time;
-                        double remain = target_wake_time - current_time;
-                        int remain_ms = (int)(remain * 1000.0);
-                        if (remain_ms < 1) remain_ms = 1;
-                        arm_timerfd_ms(ctx->frame_timer_fd, remain_ms, 0);
-                    }
+            bool use_frame_callback = ev_frame_callback_enabled();
+            if (animations_active) {
+                /* Always arm the frame timer as a fallback wakeup when
+                 * animations are active, even with frame callbacks enabled.
+                 * This prevents the epoll_wait from stalling when some
+                 * monitors are occluded and their frame callbacks never fire
+                 * (e.g., Niri fullscreen on 2 of 3 monitors). */
+                if (!ctx->frame_timer_armed) hyprlax_arm_frame_timer(ctx, ctx->config.target_fps);
+            } else if (!use_frame_callback) {
+                if (ctx->frame_timer_armed) hyprlax_disarm_frame_timer(ctx);
+                if (needs_render) {
+                    double target_wake_time = last_render_time + frame_time;
+                    double remain = target_wake_time - current_time;
+                    int remain_ms = (int)(remain * 1000.0);
+                    if (remain_ms < 1) remain_ms = 1;
+                    arm_timerfd_ms(ctx->frame_timer_fd, remain_ms, 0);
                 }
+            } else {
+                /* Frame callbacks enabled, no animations — disarm timer and
+                 * let epoll_wait block until Wayland events arrive. */
+                if (ctx->frame_timer_armed) hyprlax_disarm_frame_timer(ctx);
             }
 
             if (ctx->epoll_fd >= 0) {

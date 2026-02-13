@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <GLES2/gl2.h>
 #include <string.h>
+#include <strings.h>
 #include "../include/hyprlax.h"
 #include "../include/renderer.h"
 #include "../core/monitor.h"
@@ -51,6 +52,14 @@ GLuint load_texture(const char *path, int *width, int *height) {
     return texture;
 }
 
+/* Check if frame-callback pacing is enabled (default: on) */
+static bool rc_frame_callback_enabled(void) {
+    const char *v = getenv("HYPRLAX_NO_FRAME_CALLBACK");
+    if (v && (*v == '1' || strcasecmp(v, "true") == 0 || strcasecmp(v, "yes") == 0))
+        return false;
+    return true;
+}
+
 static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *monitor, double now_time) {
     if (!ctx || !ctx->renderer || !monitor) {
         LOG_TRACE("Skipping render: ctx=%p, renderer=%p, monitor=%p", ctx, ctx ? ctx->renderer : NULL, monitor);
@@ -64,6 +73,15 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
         LOG_WARN("Monitor %s has no EGL surface", monitor->name);
         return;
     }
+
+    /* Skip draw/present for monitors whose frame callback hasn't fired yet.
+     * This prevents wasting GPU cycles on occluded/fullscreen-covered monitors
+     * (e.g. Niri fullscreen windows covering the wallpaper surface). */
+    if (rc_frame_callback_enabled() && monitor->frame_pending) {
+        LOG_TRACE("Monitor %s: skipping draw/present (frame pending)", monitor->name);
+        return;
+    }
+
     if (gles2_make_current(monitor->egl_surface) != HYPRLAX_SUCCESS) {
         LOG_ERROR("Failed to make EGL surface current for monitor %s", monitor->name);
         return;
