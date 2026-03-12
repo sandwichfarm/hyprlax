@@ -402,7 +402,14 @@ static void compute_fit_params(int vw, int vh, int tw, int th, int fit_mode,
     if (scale <= 0.0f) scale = 1.0f;
 
     if (fit_mode == 0) {
-        /* STRETCH: defaults suffice */
+        /* STRETCH: fill viewport. If scale != 1.0, zoom by sampling
+         * a centered 1/scale UV window. */
+        if (scale != 1.0f) {
+            float inv = 1.0f / scale;
+            float margin = (1.0f - inv) * 0.5f;
+            *u0 = margin;  *v0 = margin;
+            *u1 = 1.0f - margin;  *v1 = 1.0f - margin;
+        }
         return;
     }
 
@@ -930,10 +937,7 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
     GLuint vbo = 0;
     if (persist_vbo && *persist_vbo && g_gles2_data->vbo) {
         glBindBuffer(GL_ARRAY_BUFFER, g_gles2_data->vbo);
-        /* If using uniform-offset or separable blur, keep default texcoords; otherwise update texcoords */
-        if (!uniform_offset_mode && !use_sep_blur) {
-            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
-        }
+        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
     } else {
         glGenBuffers(1, &vbo);
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
