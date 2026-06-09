@@ -139,6 +139,87 @@ static const struct wl_callback_listener frame_listener = {
 /* Forward for monitor surface creation */
 int wayland_create_monitor_surface(monitor_instance_t *monitor);
 
+static void wayland_clear_pointer_for_monitor(wayland_data_t *wl_data,
+                                              const monitor_instance_t *monitor) {
+    if (!wl_data || !monitor) return;
+    if (wl_data->pointer_surface == monitor->wl_surface) {
+        wl_data->pointer_surface = NULL;
+        wl_data->pointer_valid = false;
+    }
+}
+
+static struct wl_output *wayland_first_output_except(wayland_data_t *wl_data,
+                                                     struct wl_output *removed_output) {
+    if (!wl_data) return NULL;
+
+    for (output_info_t *info = wl_data->outputs; info; info = info->next) {
+        if (info->output && info->output != removed_output) {
+            return info->output;
+        }
+    }
+
+    return NULL;
+}
+
+static bool wayland_remove_monitor_for_output(wayland_data_t *wl_data,
+                                              struct wl_output *output) {
+    if (!wl_data || !wl_data->ctx || !wl_data->ctx->monitors || !output) {
+        return false;
+    }
+
+    monitor_instance_t *monitor = monitor_list_find_by_output(wl_data->ctx->monitors, output);
+    if (!monitor) {
+        return false;
+    }
+
+    char name[sizeof(monitor->name)];
+    snprintf(name, sizeof(name), "%s", monitor->name);
+    wayland_clear_pointer_for_monitor(wl_data, monitor);
+    if (wl_data->output == output) {
+        wl_data->output = wayland_first_output_except(wl_data, output);
+    }
+
+    bool removed = monitor_list_remove_by_output(wl_data->ctx->monitors, output);
+    if (removed) {
+        input_manager_reset_cache(&wl_data->ctx->input);
+        LOG_INFO("Removed Wayland monitor for output %s", name);
+    }
+    return removed;
+}
+
+static void wayland_destroy_all_monitors(wayland_data_t *wl_data) {
+    if (!wl_data || !wl_data->ctx || !wl_data->ctx->monitors) {
+        return;
+    }
+
+    monitor_instance_t *monitor = wl_data->ctx->monitors->head;
+    while (monitor) {
+        monitor_instance_t *next = monitor->next;
+        wayland_clear_pointer_for_monitor(wl_data, monitor);
+        monitor_list_remove(wl_data->ctx->monitors, monitor);
+        monitor_instance_destroy(monitor);
+        monitor = next;
+    }
+}
+
+static void wayland_destroy_output_list(wayland_data_t *wl_data) {
+    if (!wl_data) return;
+
+    output_info_t *info = wl_data->outputs;
+    while (info) {
+        output_info_t *next = info->next;
+        if (info->output) {
+            wl_output_destroy(info->output);
+        }
+        free(info);
+        info = next;
+    }
+
+    wl_data->outputs = NULL;
+    wl_data->output = NULL;
+    wl_data->output_count = 0;
+}
+
 /* Store context for monitor detection - set by platform init */
 void wayland_set_context(hyprlax_context_t *ctx) {
     if (!g_wayland_data) return;
@@ -279,6 +360,10 @@ static void registry_global_remove(void *data, struct wl_registry *registry,
             output_info_t *to_free = *curr;
             *curr = to_free->next;  /* Unlink from list */
 
+            if (to_free->output) {
+                wayland_remove_monitor_for_output(wl_data, to_free->output);
+            }
+
             /* Clean up Wayland objects */
             if (to_free->output) {
                 wl_output_destroy(to_free->output);
@@ -375,6 +460,46 @@ static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
     .closed = layer_surface_closed,
 };
 
+static void monitor_layer_surface_configure(void *data,
+                                            struct zwlr_layer_surface_v1 *layer_surface,
+                                            uint32_t serial,
+                                            uint32_t width, uint32_t height) {
+    monitor_instance_t *monitor = (monitor_instance_t *)data;
+
+    if (monitor) {
+        LOG_DEBUG("Monitor %s layer surface configure: %ux%u",
+                  monitor->name, width, height);
+        monitor->configured = true;
+        if (monitor->width <= 0 && monitor->height <= 0 && width > 0 && height > 0) {
+            monitor_update_geometry(monitor, (int)width, (int)height,
+                                    monitor->scale, monitor->refresh_rate);
+        }
+    }
+
+    zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
+}
+
+static void monitor_layer_surface_closed(void *data,
+                                         struct zwlr_layer_surface_v1 *layer_surface) {
+    monitor_instance_t *monitor = (monitor_instance_t *)data;
+    (void)layer_surface;
+
+    if (!monitor || !g_wayland_data || !g_wayland_data->ctx ||
+        !g_wayland_data->ctx->monitors) {
+        return;
+    }
+
+    struct wl_output *output = monitor->wl_output;
+    if (output) {
+        wayland_remove_monitor_for_output(g_wayland_data, output);
+    }
+}
+
+static const struct zwlr_layer_surface_v1_listener monitor_layer_surface_listener = {
+    .configure = monitor_layer_surface_configure,
+    .closed = monitor_layer_surface_closed,
+};
+
 static const struct wl_registry_listener registry_listener = {
     .global = registry_global,
     .global_remove = registry_global_remove,
@@ -453,25 +578,7 @@ static int wayland_connect(const char *display_name) {
 static void wayland_disconnect(void) {
     if (!g_wayland_data) return;
 
-    /* Destroy per-monitor Wayland resources if context is present */
-    if (g_wayland_data->ctx && g_wayland_data->ctx->monitors) {
-        monitor_instance_t *mon = g_wayland_data->ctx->monitors->head;
-        while (mon) {
-            if (mon->wl_egl_window) {
-                wl_egl_window_destroy(mon->wl_egl_window);
-                mon->wl_egl_window = NULL;
-            }
-            if (mon->layer_surface) {
-                zwlr_layer_surface_v1_destroy(mon->layer_surface);
-                mon->layer_surface = NULL;
-            }
-            if (mon->wl_surface) {
-                wl_surface_destroy(mon->wl_surface);
-                mon->wl_surface = NULL;
-            }
-            mon = mon->next;
-        }
-    }
+    wayland_destroy_all_monitors(g_wayland_data);
 
     if (g_wayland_data->egl_window) {
         wl_egl_window_destroy(g_wayland_data->egl_window);
@@ -487,6 +594,28 @@ static void wayland_disconnect(void) {
         wl_surface_destroy(g_wayland_data->surface);
         g_wayland_data->surface = NULL;
     }
+
+    if (g_wayland_data->pointer) {
+        wl_pointer_destroy(g_wayland_data->pointer);
+        g_wayland_data->pointer = NULL;
+    }
+
+    if (g_wayland_data->seat) {
+        wl_seat_destroy(g_wayland_data->seat);
+        g_wayland_data->seat = NULL;
+    }
+
+    if (g_wayland_data->fractional_scale_manager) {
+        wp_fractional_scale_manager_v1_destroy(g_wayland_data->fractional_scale_manager);
+        g_wayland_data->fractional_scale_manager = NULL;
+    }
+
+    if (g_wayland_data->viewporter) {
+        wp_viewporter_destroy(g_wayland_data->viewporter);
+        g_wayland_data->viewporter = NULL;
+    }
+
+    wayland_destroy_output_list(g_wayland_data);
 
     if (g_wayland_data->layer_shell) {
         zwlr_layer_shell_v1_destroy(g_wayland_data->layer_shell);
@@ -755,8 +884,8 @@ int wayland_create_monitor_surface(monitor_instance_t *monitor) {
 
             /* Add listener for this monitor's layer surface */
             zwlr_layer_surface_v1_add_listener(monitor->layer_surface,
-                                              &layer_surface_listener,
-                                              g_wayland_data);
+                                              &monitor_layer_surface_listener,
+                                              monitor);
 
             /* Commit to get configure event */
             wl_surface_commit(monitor->wl_surface);
@@ -810,6 +939,8 @@ int wayland_create_monitor_surface(monitor_instance_t *monitor) {
             monitor->wl_surface = NULL;
             return HYPRLAX_ERROR_NO_MEMORY;
         }
+        LOG_DEBUG("Created EGL window for monitor %s: %p",
+                  monitor->name, monitor->wl_egl_window);
 
         /* Create EGL surface for this monitor if we have a renderer context */
         if (g_wayland_data->ctx && g_wayland_data->ctx->renderer) {

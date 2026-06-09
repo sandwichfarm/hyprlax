@@ -59,6 +59,12 @@ typedef struct {
 static gles2_renderer_data_t *g_gles2_data = NULL;
 static void gles2_create_blur_target(int width, int height);
 
+static void gles2_upload_quad_vertices(const GLfloat *vertices, size_t size) {
+    if (!g_gles2_data || !vertices || size == 0) return;
+    glBindBuffer(GL_ARRAY_BUFFER, g_gles2_data->vbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, size, vertices);
+}
+
 /* Quad vertices for layer rendering */
 static const GLfloat quad_vertices[] = {
     /* Position    Texture Coords */
@@ -256,6 +262,13 @@ static void gles2_destroy(void) {
         shader_destroy_program(g_gles2_data->blur_sep_shader);
     }
 
+    if (g_gles2_data->blur_tex) {
+        glDeleteTextures(1, &g_gles2_data->blur_tex);
+    }
+    if (g_gles2_data->blur_fbo) {
+        glDeleteFramebuffers(1, &g_gles2_data->blur_fbo);
+    }
+
     if (g_gles2_data->vbo) {
         glDeleteBuffers(1, &g_gles2_data->vbo);
     }
@@ -274,13 +287,6 @@ static void gles2_destroy(void) {
 
     if (g_gles2_data->egl_display != EGL_NO_DISPLAY) {
         eglTerminate(g_gles2_data->egl_display);
-    }
-
-    if (g_gles2_data->blur_tex) {
-        glDeleteTextures(1, &g_gles2_data->blur_tex);
-    }
-    if (g_gles2_data->blur_fbo) {
-        glDeleteFramebuffers(1, &g_gles2_data->blur_fbo);
     }
 
     free(g_gles2_data);
@@ -361,9 +367,7 @@ static void gles2_fade_frame(float r, float g, float b, float a) {
          1.0f,  1.0f,  1.0f, 0.0f
     };
 
-    GLuint vbo = 0; glGenBuffers(1, &vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    gles2_upload_quad_vertices(vertices, sizeof(vertices));
 
     GLint pos_attrib = shader_get_attrib_location(g_gles2_data->fill_shader, "a_position");
     GLint tex_attrib = shader_get_attrib_location(g_gles2_data->fill_shader, "a_texcoord");
@@ -381,7 +385,6 @@ static void gles2_fade_frame(float r, float g, float b, float a) {
 
     if (pos_attrib >= 0) glDisableVertexAttribArray(pos_attrib);
     if (tex_attrib >= 0) glDisableVertexAttribArray(tex_attrib);
-    glDeleteBuffers(1, &vbo);
 }
 
 /* Helpers for extended draw */
@@ -834,18 +837,7 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
         glViewport(0, 0, g_gles2_data->blur_w, g_gles2_data->blur_h);
         gles2_bind_texture(texture, 0);
 
-        /* Setup vertex data */
-        const char *persist_vbo = getenv("HYPRLAX_PERSISTENT_VBO");
-        GLuint vbo = 0;
-        if (persist_vbo && *persist_vbo && g_gles2_data->vbo) {
-            glBindBuffer(GL_ARRAY_BUFFER, g_gles2_data->vbo);
-            /* Use precomputed vertices (pos+texcoords) */
-            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
-        } else {
-            glGenBuffers(1, &vbo);
-            glBindBuffer(GL_ARRAY_BUFFER, vbo);
-            glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-        }
+        gles2_upload_quad_vertices(vertices, sizeof(vertices));
 
         GLint pos_attrib = shader_get_attrib_location(shader, "a_position");
         GLint tex_attrib = shader_get_attrib_location(shader, "a_texcoord");
@@ -880,26 +872,13 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
         texture_t tmp = { .id = g_gles2_data->blur_tex };
         gles2_bind_texture(&tmp, 0);
         /* Rebind vertex data and attrib pointers to be explicit for second pass */
-        if (persist_vbo && *persist_vbo && g_gles2_data->vbo) {
-            glBindBuffer(GL_ARRAY_BUFFER, g_gles2_data->vbo);
-            /* For separable path, sample the FBO texture; flip V for FBO sampling */
-            GLfloat v2[] = {
-                vertices[0], vertices[1], vertices[2], 1.0f - vertices[3],
-                vertices[4], vertices[5], vertices[6], 1.0f - vertices[7],
-                vertices[8], vertices[9], vertices[10],1.0f - vertices[11],
-                vertices[12],vertices[13],vertices[14],1.0f - vertices[15]
-            };
-            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(v2), v2);
-        } else {
-            glBindBuffer(GL_ARRAY_BUFFER, vbo);
-            GLfloat v2[] = {
-                vertices[0], vertices[1], vertices[2], 1.0f - vertices[3],
-                vertices[4], vertices[5], vertices[6], 1.0f - vertices[7],
-                vertices[8], vertices[9], vertices[10],1.0f - vertices[11],
-                vertices[12],vertices[13],vertices[14],1.0f - vertices[15]
-            };
-            glBufferData(GL_ARRAY_BUFFER, sizeof(v2), v2, GL_STATIC_DRAW);
-        }
+        GLfloat v2[] = {
+            vertices[0], vertices[1], vertices[2], 1.0f - vertices[3],
+            vertices[4], vertices[5], vertices[6], 1.0f - vertices[7],
+            vertices[8], vertices[9], vertices[10],1.0f - vertices[11],
+            vertices[12],vertices[13],vertices[14],1.0f - vertices[15]
+        };
+        gles2_upload_quad_vertices(v2, sizeof(v2));
         if (pos_attrib >= 0) {
             glEnableVertexAttribArray(pos_attrib);
             glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (void*)0);
@@ -912,10 +891,6 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
 
         if (pos_attrib >= 0) glDisableVertexAttribArray(pos_attrib);
         if (tex_attrib >= 0) glDisableVertexAttribArray(tex_attrib);
-        if (!(persist_vbo && *persist_vbo)) {
-            glDeleteBuffers(1, &vbo);
-        }
-
         goto done;
     }
 
@@ -932,17 +907,7 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
         }
     }
 
-    /* Setup vertex data */
-    const char *persist_vbo = getenv("HYPRLAX_PERSISTENT_VBO");
-    GLuint vbo = 0;
-    if (persist_vbo && *persist_vbo && g_gles2_data->vbo) {
-        glBindBuffer(GL_ARRAY_BUFFER, g_gles2_data->vbo);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
-    } else {
-        glGenBuffers(1, &vbo);
-        glBindBuffer(GL_ARRAY_BUFFER, vbo);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-    }
+    gles2_upload_quad_vertices(vertices, sizeof(vertices));
 
     GLint pos_attrib = shader_get_attrib_location(shader, "a_position");
     GLint tex_attrib = shader_get_attrib_location(shader, "a_texcoord");
@@ -975,9 +940,6 @@ static void gles2_draw_layer_internal(const texture_t *texture, float x, float y
     /* Cleanup */
     if (pos_attrib >= 0) glDisableVertexAttribArray(pos_attrib);
     if (tex_attrib >= 0) glDisableVertexAttribArray(tex_attrib);
-    if (!(persist_vbo && *persist_vbo)) {
-        glDeleteBuffers(1, &vbo);
-    }
 
     if (draw_count < 5 && getenv("HYPRLAX_DEBUG")) {
         fprintf(stderr, "[DEBUG] gles2_draw_layer %d: Complete\n", draw_count);
@@ -1068,6 +1030,9 @@ void gles2_destroy_monitor_surface(EGLSurface surface) {
         return;
     }
 
+    if (g_gles2_data->current_surface == surface) {
+        g_gles2_data->current_surface = EGL_NO_SURFACE;
+    }
     eglDestroySurface(g_gles2_data->egl_display, surface);
 }
 

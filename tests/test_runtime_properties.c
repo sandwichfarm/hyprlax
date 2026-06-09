@@ -41,7 +41,7 @@ START_TEST(test_runtime_set_get)
     ck_assert_int_eq(hyprlax_runtime_get_property(ctx, "parallax.sources.cursor.weight", buf, sizeof(buf)), 0);
     ck_assert_str_eq(buf, "0.420");
 
-    // Do not call hyprlax_destroy here to avoid pulling more deps
+    hyprlax_destroy(ctx);
 }
 END_TEST
 

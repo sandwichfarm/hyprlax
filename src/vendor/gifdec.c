@@ -48,6 +48,9 @@ gd_open_gif(const char *fname)
     int gct_sz;
     gd_GIF *gif;
 
+    if (!fname)
+        return NULL;
+
     fd = open(fname, O_RDONLY);
     if (fd == -1)
         return NULL;

@@ -115,6 +115,31 @@ START_TEST(test_resource_monitor_growth_tracking)
 }
 END_TEST
 
+/* Test: Reset baseline after expected startup resource allocation */
+START_TEST(test_resource_monitor_reset_baseline)
+{
+    resource_monitor_t *monitor = resource_monitor_create(10.0);
+    ck_assert_ptr_nonnull(monitor);
+
+    int fd = open("/dev/null", O_RDONLY);
+    ck_assert_int_ge(fd, 0);
+
+    int reset_fds = resource_monitor_get_fd_count();
+    resource_monitor_reset_baseline(monitor);
+    ck_assert_int_eq(monitor->fd_count_start, reset_fds);
+    ck_assert_int_eq(monitor->fd_count_current, reset_fds);
+    ck_assert_int_eq(monitor->fd_count_max, reset_fds);
+    ck_assert_uint_eq(monitor->check_count, 0);
+
+    resource_monitor_check(monitor);
+    ck_assert_int_eq(monitor->fd_count_current, reset_fds);
+    ck_assert_int_eq(monitor->fd_count_max, reset_fds);
+
+    close(fd);
+    resource_monitor_destroy(monitor);
+}
+END_TEST
+
 /* Test: Environment variable configuration */
 START_TEST(test_resource_monitor_env_config)
 {
@@ -172,6 +197,7 @@ Suite *resource_monitor_suite(void)
     tcase_add_test(tc_core, test_resource_monitor_memory);
     tcase_add_test(tc_core, test_resource_monitor_periodic_check);
     tcase_add_test(tc_core, test_resource_monitor_growth_tracking);
+    tcase_add_test(tc_core, test_resource_monitor_reset_baseline);
     tcase_add_test(tc_core, test_resource_monitor_env_config);
     tcase_add_test(tc_core, test_resource_monitor_disabled);
     suite_add_tcase(s, tc_core);

@@ -151,6 +151,7 @@ SRCS = $(MAIN_SRCS) src/ipc.c $(CORE_SRCS) $(RENDERER_SRCS) $(PLATFORM_SRCS) \
 #SRCS += src/vendor/toml.c src/core/config_toml.c src/core/config_legacy.c
 SRCS += src/vendor/toml.c src/vendor/gifdec.c src/core/config_toml.c src/core/config_legacy.c
 OBJS = $(SRCS:.c=.o)
+DEPS = $(OBJS:.o=.d)
 TARGET = hyprlax
 
 all: $(TARGET)
@@ -212,7 +213,7 @@ protocols/viewporter-client-protocol.h: $(VIEWPORTER_PROTOCOL)
 # Compile
 %.o: %.c $(PROTOCOL_HDRS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(PKG_CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(PKG_CFLAGS) -MMD -MP -c $< -o $@
 
 # Ensure VERSION file exists before building
 VERSION:
@@ -224,8 +225,10 @@ $(TARGET): VERSION $(OBJS)
 	$(CC) $(LDFLAGS) $(OBJS) $(PKG_LIBS) -lm -o $@
 
 clean:
-	rm -f $(TARGET) $(OBJS) $(PROTOCOL_SRCS) $(PROTOCOL_HDRS)
-	rm -rf protocols/*.o src/*.o
+	rm -f $(TARGET) $(OBJS) $(DEPS) $(PROTOCOL_SRCS) $(PROTOCOL_HDRS)
+	rm -rf protocols/*.o protocols/*.d src/*.o src/*.d
+
+-include $(DEPS)
 
 PREFIX ?= /usr/local
 BINDIR = $(PREFIX)/bin
@@ -252,6 +255,8 @@ TEST_LIBS = $(CHECK_LIBS) -lm
 # Valgrind settings for memory leak detection
 VALGRIND = valgrind
 VALGRIND_FLAGS = --leak-check=full --show-leak-kinds=definite,indirect --track-origins=yes --error-exitcode=1
+MEMCHECK_CFLAGS = -Wall -Wextra -O2 -flto -Isrc -Isrc/include -DHYPRLAX_VERSION=\"$(VERSION)\" $(BUILD_DEFINES)
+MEMCHECK_LDFLAGS = -flto
 # For Arch Linux, enable debuginfod for symbol resolution
 export DEBUGINFOD_URLS ?= https://debuginfod.archlinux.org
 
@@ -364,6 +369,11 @@ tests/test_resource_monitor: tests/test_resource_monitor.c \
     src/core/resource_monitor.c src/core/log.c
 	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) -o $@
 
+tests/test_monitor_lifecycle: tests/test_monitor_lifecycle.c \
+    src/core/monitor.c src/compositor/workspace_models.c src/core/layer.c \
+    src/core/animation.c src/core/easing.c src/core/log.c
+	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) $(PKG_LIBS) -o $@
+
 # Run all tests
 test: $(ALL_TEST_TARGETS)
 	@echo "=== Running Full Test Suite ==="
@@ -415,12 +425,14 @@ test-scripts: $(TARGET)
 	fi
 
 # Run tests with valgrind for memory leak detection
-memcheck: $(ALL_TEST_TARGETS)
+memcheck:
 	@if ! command -v valgrind >/dev/null 2>&1; then \
 		echo "Error: valgrind is not installed."; \
 		echo "Install it with: sudo pacman -S valgrind (Arch) or sudo apt-get install valgrind (Debian/Ubuntu)"; \
 		exit 1; \
 	fi
+	@$(MAKE) clean-tests >/dev/null
+	@$(MAKE) CFLAGS='$(MEMCHECK_CFLAGS)' LDFLAGS='$(MEMCHECK_LDFLAGS)' $(ALL_TEST_TARGETS)
 	@echo "=== Running Tests with Valgrind Memory Check ==="
 	@failed=0; \
 	passed=0; \

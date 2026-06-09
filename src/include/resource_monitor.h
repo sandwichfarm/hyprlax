@@ -53,6 +53,9 @@ resource_monitor_t* resource_monitor_create(double check_interval);
 /* Destroy resource monitor */
 void resource_monitor_destroy(resource_monitor_t *monitor);
 
+/* Reset baseline to the current resource footprint after expected allocations */
+void resource_monitor_reset_baseline(resource_monitor_t *monitor);
+
 /* Perform a health check (called periodically) */
 void resource_monitor_check(resource_monitor_t *monitor);
 
