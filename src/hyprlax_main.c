@@ -1188,6 +1188,9 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
     if (ctx->monitors) {
         monitor_instance_t *monitor = ctx->monitors->head;
         while (monitor) {
+            LOG_DEBUG("[INIT] Monitor %s surface state: wl_egl_window=%p egl_surface=%p configured=%d",
+                      monitor->name, monitor->wl_egl_window,
+                      (void*)monitor->egl_surface, monitor->configured ? 1 : 0);
             if (monitor->wl_egl_window && !monitor->egl_surface) {
                 monitor->egl_surface = gles2_create_monitor_surface(monitor->wl_egl_window);
                 if (monitor->egl_surface) {
@@ -1220,6 +1223,10 @@ int hyprlax_init(hyprlax_context_t *ctx, int argc, char **argv) {
 
     /* 8. Setup epoll/timerfd event loop */
     hyprlax_setup_epoll(ctx);
+
+    if (ctx->resource_monitor) {
+        resource_monitor_reset_baseline(ctx->resource_monitor);
+    }
 
     ctx->state = APP_STATE_RUNNING;
     ctx->running = true;
@@ -1536,6 +1543,13 @@ void hyprlax_shutdown(hyprlax_context_t *ctx) {
         ctx->ipc_ctx = NULL;
     }
 
+    /* Monitors must be destroyed before renderer/platform teardown because
+     * each monitor owns both an EGLSurface and Wayland objects. */
+    if (ctx->monitors) {
+        monitor_list_destroy(ctx->monitors);
+        ctx->monitors = NULL;
+    }
+
     /* Renderer */
     if (ctx->renderer) {
         renderer_destroy(ctx->renderer);
@@ -1552,12 +1566,6 @@ void hyprlax_shutdown(hyprlax_context_t *ctx) {
     if (ctx->platform) {
         platform_destroy(ctx->platform);
         ctx->platform = NULL;
-    }
-
-    /* Monitors */
-    if (ctx->monitors) {
-        monitor_list_destroy(ctx->monitors);
-        ctx->monitors = NULL;
     }
 
     if (ctx->config.debug) {

@@ -77,6 +77,10 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
         LOG_WARN("Monitor %s has no EGL surface", monitor->name);
         return;
     }
+    if (!monitor->configured) {
+        LOG_TRACE("Skipping unconfigured monitor %s", monitor->name);
+        return;
+    }
 
     /* Frame-callback pacing: skip draw/present if a frame callback is pending
      * AND we haven't waited too long.  Some compositors (Hyprland) may not

@@ -52,6 +52,7 @@ typedef struct monitor_instance {
     struct wl_output *wl_output;
     struct wl_surface *wl_surface;
     struct zwlr_layer_surface_v1 *layer_surface;
+    bool configured;                    /* Layer surface has received configure */
     void *wl_egl_window;              /* EGL window for this surface */
     void *wp_viewport;                /* wp_viewport for logical surface sizing (fractional scale) */
     void *wp_fractional_scale;        /* wp_fractional_scale_v1 for this surface */
@@ -117,6 +118,7 @@ void monitor_instance_destroy(monitor_instance_t *monitor);
 /* List operations */
 void monitor_list_add(monitor_list_t *list, monitor_instance_t *monitor);
 void monitor_list_remove(monitor_list_t *list, monitor_instance_t *monitor);
+bool monitor_list_remove_by_output(monitor_list_t *list, struct wl_output *output);
 monitor_instance_t* monitor_list_find_by_name(monitor_list_t *list, const char *name);
 monitor_instance_t* monitor_list_find_by_output(monitor_list_t *list, struct wl_output *output);
 monitor_instance_t* monitor_list_find_by_id(monitor_list_t *list, uint32_t id);

@@ -8,3 +8,11 @@ unsigned int load_texture(const char *path, int *width, int *height) {
     return 1; /* non-zero fake texture id */
 }
 
+void gles2_destroy_monitor_surface(void *surface) {
+    (void)surface;
+}
+
+typedef struct gd_GIF gd_GIF;
+void gd_close_gif(gd_GIF *gif) {
+    (void)gif;
+}

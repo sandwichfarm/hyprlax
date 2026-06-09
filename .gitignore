@@ -2,6 +2,7 @@
 hyprlax
 hyprlax-ctl
 *.o
+*.d
 *.a
 *.so
 
@@ -32,6 +33,7 @@ vgcore.*
 # Test files
 tests/test_*
 !tests/test_*.c
+!tests/test_*.sh
 *.test
 test_config/
 

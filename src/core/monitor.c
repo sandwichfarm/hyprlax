@@ -206,6 +206,17 @@ void monitor_list_remove(monitor_list_t *list, monitor_instance_t *monitor) {
     }
 }
 
+bool monitor_list_remove_by_output(monitor_list_t *list, struct wl_output *output) {
+    monitor_instance_t *monitor = monitor_list_find_by_output(list, output);
+    if (!monitor) {
+        return false;
+    }
+
+    monitor_list_remove(list, monitor);
+    monitor_instance_destroy(monitor);
+    return true;
+}
+
 /* Find monitor by name */
 monitor_instance_t* monitor_list_find_by_name(monitor_list_t *list, const char *name) {
     if (!list || !name) return NULL;

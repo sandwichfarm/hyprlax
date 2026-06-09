@@ -77,6 +77,33 @@ void resource_monitor_destroy(resource_monitor_t *monitor) {
     free(monitor);
 }
 
+void resource_monitor_reset_baseline(resource_monitor_t *monitor) {
+    if (!monitor || !monitor->enabled) return;
+
+    monitor->fd_count_start = resource_monitor_get_fd_count();
+    monitor->fd_count_current = monitor->fd_count_start;
+    monitor->fd_count_max = monitor->fd_count_start;
+
+    monitor->memory_rss_start_kb = resource_monitor_get_memory_rss_kb();
+    monitor->memory_rss_current_kb = monitor->memory_rss_start_kb;
+    monitor->memory_rss_max_kb = monitor->memory_rss_start_kb;
+
+    monitor->memory_vms_start_kb = resource_monitor_get_memory_vms_kb();
+    monitor->memory_vms_current_kb = monitor->memory_vms_start_kb;
+
+    monitor->check_count = 0;
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+        monitor->last_check_time = ts.tv_sec + ts.tv_nsec / 1000000000.0;
+    } else {
+        monitor->last_check_time = 0.0;
+    }
+    LOG_INFO("Resource monitor baseline reset - FDs: %d, RSS: %zu KB, VMS: %zu KB",
+             monitor->fd_count_start,
+             monitor->memory_rss_start_kb,
+             monitor->memory_vms_start_kb);
+}
+
 int resource_monitor_get_fd_count(void) {
     DIR *dir = opendir("/proc/self/fd");
     if (!dir) return -1;
