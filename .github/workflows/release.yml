@@ -21,19 +21,29 @@ jobs:
       
       - name: Validate tag is from master
         run: |
-          # Get the branch containing this tag
-          BRANCH=$(git branch -r --contains ${{ github.ref_name }} | grep -v HEAD | head -1 | sed 's/.*origin\///')
-          echo "Stable release tag ${{ github.ref_name }} is on branch: $BRANCH"
-          
-          # Stable releases must be from master branch
-          if [[ "$BRANCH" != "master" ]] && [[ "$BRANCH" != "main" ]]; then
+          TAG_COMMIT=$(git rev-list -n 1 "${{ github.ref_name }}")
+          echo "Stable release tag ${{ github.ref_name }} points to: $TAG_COMMIT"
+
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+
+          RELEASE_BRANCH=""
+          for branch in origin/master origin/main; do
+            if git show-ref --verify --quiet "refs/remotes/${branch}" &&
+               git merge-base --is-ancestor "$TAG_COMMIT" "$branch"; then
+              RELEASE_BRANCH="${branch#origin/}"
+              break
+            fi
+          done
+
+          if [[ -z "$RELEASE_BRANCH" ]]; then
             echo "::error::Stable release tags must be created from master/main branch!"
-            echo "Current branch is: $BRANCH"
+            echo "Branches containing this tag:"
+            git branch -r --contains "$TAG_COMMIT" | grep -v HEAD || true
             echo "For pre-releases from feature branches, use version tags like v1.0.0-beta.1"
             exit 1
           fi
           
-          echo "✅ Stable release tag is correctly on master/main branch"
+          echo "✅ Stable release tag is contained by $RELEASE_BRANCH"
 
   build:
     needs: validate-branch
