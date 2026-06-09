@@ -6,6 +6,12 @@ on:
       # Only match stable version tags (no dash)
       # v1.0.0, v2.1.3 etc. (NOT v1.0.0-beta.1)
       - 'v[0-9]+.[0-9]+.[0-9]+' 
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Stable tag to release, e.g. v2.2.3'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -17,12 +23,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
           fetch-depth: 0
       
       - name: Validate tag is from master
         run: |
-          TAG_COMMIT=$(git rev-list -n 1 "${{ github.ref_name }}")
-          echo "Stable release tag ${{ github.ref_name }} points to: $TAG_COMMIT"
+          TAG_NAME="${{ github.event.inputs.tag || github.ref_name }}"
+          TAG_COMMIT=$(git rev-list -n 1 "$TAG_NAME")
+          echo "Stable release tag $TAG_NAME points to: $TAG_COMMIT"
 
           git fetch origin '+refs/heads/*:refs/remotes/origin/*'
 
@@ -59,6 +67,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.tag || github.ref }}
 
     - name: Install dependencies
       run: |
@@ -74,7 +84,8 @@ jobs:
     - name: Write VERSION file from tag
       run: |
         # Extract version from tag (remove 'v' prefix)
-        VERSION="${GITHUB_REF_NAME#v}"
+        TAG_NAME="${{ github.event.inputs.tag || github.ref_name }}"
+        VERSION="${TAG_NAME#v}"
         echo "$VERSION" > VERSION
         echo "Building version: $VERSION"
 
@@ -108,6 +119,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.tag || github.ref }}
 
     - name: Download artifacts
       uses: actions/download-artifact@v4
@@ -133,16 +146,17 @@ jobs:
 
     - name: Extract version from tag
       id: version
-      run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      run: echo "version=${{ github.event.inputs.tag || github.ref_name }}" >> $GITHUB_OUTPUT
 
     - name: Generate release notes
       id: notes
       run: |
         # Get all tags sorted by version (--force handles re-created tags)
         git fetch --tags --force
+        CURRENT_TAG="${{ steps.version.outputs.version }}"
         
         # Get the previous release tag (excluding pre-releases and current tag)
-        PREV_TAG=$(git tag -l 'v*' | grep -v '-' | grep -v "^${GITHUB_REF_NAME}$" | sort -V | tail -1)
+        PREV_TAG=$(git tag -l 'v*' | grep -v '-' | grep -v "^${CURRENT_TAG}$" | sort -V | tail -1)
         
         if [ -z "$PREV_TAG" ]; then
           echo "First stable release - no previous stable version found"
