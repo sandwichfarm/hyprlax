@@ -959,6 +959,66 @@ class IPCControllerTests(unittest.TestCase):
         self.assertEqual(27, len(ipc.commands))
 
 
+class DocumentationTests(unittest.TestCase):
+    def setUp(self):
+        self.example = ROOT / "examples" / "pixel-city-dynamic"
+        self.readme = (self.example / "README.md").read_text(encoding="utf-8")
+
+    def test_runbook_covers_literal_copy_modes_and_diagnostics(self):
+        for required in (
+            "cp -a examples/pixel-city-dynamic/.",
+            "--dry-run --at",
+            "--status",
+            "--once",
+            "--loop --interval 60",
+            "--latitude 47.4979 --longitude 19.0402 --timezone Europe/Budapest",
+            "managed layers missing from daemon",
+            "systemctl --user import-environment",
+            "systemctl --user enable --now",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, self.readme)
+
+    def test_network_policy_privacy_fallback_and_attribution_are_explicit(self):
+        for required in (
+            "At most one",
+            "failed attempt is not retried until the next local date",
+            "process-locked, private, and",
+            "HTTP-only",
+            "non-commercial",
+            "256 KiB",
+            "10-second",
+            "neutral 06:00 sunrise, 12:00 noon, 18:00 sunset",
+            "[Sunrise-Sunset.org](https://sunrise-sunset.org/)",
+            "[ip-api](http://ip-api.com/)",
+            "[CraftPix](https://craftpix.net/freebies/)",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, self.readme)
+
+    def test_user_units_have_exact_dependency_and_personal_copy_paths(self):
+        daemon = (
+            self.example / "hyprlax-pixel-city-dynamic.service"
+        ).read_text(encoding="utf-8")
+        controller = (
+            self.example / "hyprlax-pixel-city-dynamic-controller.service"
+        ).read_text(encoding="utf-8")
+        self.assertIn("ConditionEnvironment=WAYLAND_DISPLAY", daemon)
+        self.assertIn("%h/.local/bin/hyprlax --config", daemon)
+        self.assertIn("%h/.config/hyprlax/pixel-city-dynamic/parallax.toml", daemon)
+        self.assertIn("Requires=hyprlax-pixel-city-dynamic.service", controller)
+        self.assertIn("After=hyprlax-pixel-city-dynamic.service", controller)
+        self.assertIn("dynamic_scene.py --loop --interval 60", controller)
+        self.assertIn("--hyprlax-bin %h/.local/bin/hyprlax", controller)
+
+    def test_example_is_registered_in_both_indexes(self):
+        for path in (ROOT / "examples" / "README.md", ROOT / "docs" / "guides" / "examples.md"):
+            with self.subTest(path=path):
+                contents = path.read_text(encoding="utf-8")
+                self.assertIn("pixel-city-dynamic", contents)
+                self.assertIn("dynamic_scene.py --loop", contents)
+
+
 class CopiedExampleTests(unittest.TestCase):
     def test_copied_config_preserves_six_base_layers_and_all_paths(self):
         try:

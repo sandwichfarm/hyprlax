@@ -1,0 +1,15 @@
+[Unit]
+Description=Dynamic Pixel City astronomy controller
+Documentation=https://github.com/sandwichfarm/hyprlax/tree/master/examples/pixel-city-dynamic
+Requires=hyprlax-pixel-city-dynamic.service
+After=hyprlax-pixel-city-dynamic.service
+PartOf=hyprlax-pixel-city-dynamic.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/.config/hyprlax/pixel-city-dynamic/dynamic_scene.py --loop --interval 60 --hyprlax-bin %h/.local/bin/hyprlax
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target
