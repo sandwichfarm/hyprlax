@@ -36,10 +36,10 @@
 
 ### IPC and Operation
 
-- [ ] **IPC-01**: Controller discovers only its managed layers by canonical distinctive paths from `hyprlax ctl list --json`, never hard-codes IDs, and never modifies unrelated daemon layers.
-- [ ] **IPC-02**: Controller applies sun/moon motion, lighting, and shadow deltas through `hyprlax ctl modify`/the runtime socket without restarting the daemon or using `ctl clear`.
-- [ ] **CLI-01**: User can run loop, one-shot, dry-run/status, fixed-time, and fixed-location modes with actionable errors and no network/compositor requirement for deterministic preview.
-- [ ] **OPS-01**: Controller bounds update cadence, HTTP response size/timeouts, provider retry behavior, and IPC subprocess failures without blocking Hyprlax's render loop.
+- [x] **IPC-01**: Controller discovers only its managed layers by canonical distinctive paths from `hyprlax ctl list --json`, never hard-codes IDs, and never modifies unrelated daemon layers.
+- [x] **IPC-02**: Controller applies sun/moon motion, lighting, and shadow deltas through `hyprlax ctl modify`/the runtime socket without restarting the daemon or using `ctl clear`.
+- [x] **CLI-01**: User can run loop, one-shot, dry-run/status, fixed-time, and fixed-location modes with actionable errors and no network/compositor requirement for deterministic preview.
+- [x] **OPS-01**: Controller bounds update cadence, HTTP response size/timeouts, provider retry behavior, and IPC subprocess failures without blocking Hyprlax's render loop.
 
 ### Documentation, Tests, and Delivery
 
@@ -77,10 +77,10 @@
 | ASSET-01 | Phase 3 | Complete |
 | SHADOW-01 | Phase 3 | Complete |
 | ASSET-02 | Phase 3 | Complete |
-| IPC-01 | Phase 4 | Pending |
-| IPC-02 | Phase 4 | Pending |
-| CLI-01 | Phase 4 | Pending |
-| OPS-01 | Phase 4 | Pending |
+| IPC-01 | Phase 4 | Complete |
+| IPC-02 | Phase 4 | Complete |
+| CLI-01 | Phase 4 | Complete |
+| OPS-01 | Phase 4 | Complete |
 | DOC-01 | Phase 5 | Pending |
 | TEST-01 | Phase 5 | Pending |
 | DELIV-01 | Phase 5 | Pending |

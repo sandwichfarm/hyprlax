@@ -16,7 +16,7 @@ experience before opening the PR.
 - [x] **Phase 1: Daily Data Foundation** - Valid copied scene plus bounded, cached location and astronomy inputs (completed 2026-07-12)
 - [x] **Phase 2: Astronomical Scene Model** - Deterministic continuous sun, moon, and lighting calculations (completed 2026-07-12)
 - [x] **Phase 3: Pixel Sky and Shadows** - Dependency-free phase-correct celestial and directional shadow overlays (completed 2026-07-12)
-- [ ] **Phase 4: Safe IPC Controller** - Managed-only runtime animation, loop/status/override surfaces, and error recovery
+- [x] **Phase 4: Safe IPC Controller** - Managed-only runtime animation, loop/status/override surfaces, and error recovery (completed 2026-07-12)
 - [ ] **Phase 5: Operational Proof and Delivery** - Full tests, documentation, runtime smoke evidence, and verified PR
 
 ## Phase Details
@@ -78,8 +78,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 04-01: Implement managed layer discovery, command planning, and delta-only IPC adapter
-- [ ] 04-02: Implement controller CLI/loop/status/failure handling and mock-socket integration tests
+- [x] 04-01: Implement managed layer discovery, command planning, and delta-only IPC adapter
+- [x] 04-02: Implement controller CLI/loop/status/failure handling and mock-socket integration tests
 
 ### Phase 5: Operational Proof and Delivery
 **Goal**: Users can install and operate the scene from documentation, and fresh verification proves every milestone requirement before the branch is published as a PR.
@@ -103,6 +103,6 @@ Plans:
 | 1. Daily Data Foundation | 2/2 | Complete    | 2026-07-12 |
 | 2. Astronomical Scene Model | 2/2 | Complete    | 2026-07-12 |
 | 3. Pixel Sky and Shadows | 2/2 | Complete    | 2026-07-12 |
-| 4. Safe IPC Controller | 0/2 | Not started | - |
+| 4. Safe IPC Controller | 2/2 | Complete   | 2026-07-12 |
 | 5. Operational Proof and Delivery | 0/2 | Not started | - |
 
