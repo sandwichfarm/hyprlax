@@ -24,6 +24,9 @@ and strict request/cache invariants for later phases.
   Failures count. Concurrent controller starts must share the same decision through `fcntl.flock`.
 - Persist `last_attempt_date` before opening the network connection and keep `last_success`
   independently so failures cannot destroy stale usable data.
+- The provider/date gate is absolute: changing manual coordinates or cache location identity on the
+  same date does not permit a second astronomy attempt. If last-good astronomy belongs to another
+  location, return neutral fallback until the next local date rather than reuse wrong-place data.
 - Cache JSON is schema-versioned under `${XDG_CACHE_HOME:-~/.cache}/hyprlax/pixel-city-dynamic/`,
   written with temp file + flush/fsync + atomic `os.replace`.
 - Bound requests to 10 seconds and 256 KiB, validate JSON types/finite coordinate ranges/IANA zones,

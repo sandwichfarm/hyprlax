@@ -53,8 +53,9 @@ ip-api attempt.
 
 1. Open/create `daily-cache.lock` and take `fcntl.flock(LOCK_EX)`.
 2. Load/validate cache; quarantine malformed cache by treating it as empty without executing it.
-3. Calculate provider-local date and location key.
-4. If matching `last_attempt_date` (and location key for astronomy), return last-good/fallback.
+3. Calculate provider-local date and the data identity/location key.
+4. If `last_attempt_date` matches, do not fetch regardless of location-key changes. Reuse
+   `last_success` only when its location key matches; otherwise return neutral fallback.
 5. Write `last_attempt_date`, `last_attempt_at`, and cleared error atomically while the lock is held.
 6. Keep the lock through the single request so a second process cannot observe-and-race. Daily
    requests are rare, so bounded 10-second lock contention is preferable to a stampede.
@@ -104,7 +105,7 @@ call-counting fetcher. No test contacts a provider.
 | stale success then next-day failure | stale success retained and marked stale |
 | two processes | shared counter/fixture proves exactly one fetch |
 | manual coordinates | zero ip-api calls and supplied timezone/date used |
-| moved manual location | astronomy location key changes and permits one attempt for new key |
+| moved manual location | zero second same-day astronomy calls; wrong-place cache is not reused |
 | malformed/oversized JSON | rejected, error bounded, fallback/stale used |
 | invalid coordinates/timezone | rejected before astronomy call |
 | polar/null response | normalized without manufacturing missing events |
