@@ -167,6 +167,7 @@ void arm_timerfd_ms(int fd, int initial_ms, int interval_ms);
 int epoll_add_fd(int epfd, int fd, uint32_t events);
 int epoll_del_fd(int epfd, int fd);
 void hyprlax_setup_epoll(hyprlax_context_t *ctx);
+bool hyprlax_refresh_compositor_event_fd(hyprlax_context_t *ctx);
 void hyprlax_arm_frame_timer(hyprlax_context_t *ctx, int fps);
 void hyprlax_disarm_frame_timer(hyprlax_context_t *ctx);
 void hyprlax_arm_debounce(hyprlax_context_t *ctx, int debounce_ms);

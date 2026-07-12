@@ -40,6 +40,11 @@ typedef struct {
     char socket_path[256];
     char event_socket_path[256];
     bool connected;
+    double next_reconnect_time;
+    int reconnect_from_workspace;
+    bool reconciliation_pending;
+    char event_buffer[8192];
+    size_t event_buffer_len;
     int current_workspace;
     int current_monitor;
     char current_monitor_name[64];  /* Track current monitor name */
@@ -56,6 +61,11 @@ typedef struct {
 
 /* Global instance (simplified for now) */
 static hyprland_data_t *g_hyprland_data = NULL;
+
+#ifdef UNIT_TEST
+static int g_test_reconnect_fd = -1;
+static int g_test_reconnect_workspace = 1;
+#endif
 
 /* Helper: Find which monitor owns a workspace */
 static const char* find_workspace_owner(int workspace_id) {
@@ -278,8 +288,13 @@ static int hyprland_init(void *platform_data) {
     }
 
     g_hyprland_data->ipc_fd = -1;
+    g_hyprland_data->event_fd = -1;
     g_hyprland_data->connected = false;
+    g_hyprland_data->next_reconnect_time = 0.0;
     g_hyprland_data->current_workspace = 1;
+    g_hyprland_data->reconnect_from_workspace = 1;
+    g_hyprland_data->reconciliation_pending = false;
+    g_hyprland_data->event_buffer_len = 0;
     g_hyprland_data->current_monitor = 0;
     g_hyprland_data->current_monitor_name[0] = '\0';
     g_hyprland_data->workspace_map_count = 0;
@@ -435,6 +450,23 @@ static int connect_simple_socket(const char *path) {
     return fd;
 }
 
+static int connect_event_socket_nonblocking(const char *path) {
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    if (fd < 0) return -1;
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
+
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        close(fd);
+        return -1;
+    }
+
+    return fd;
+}
+
 /* Connect to Hyprland IPC */
 static int hyprland_connect_ipc(const char *socket_path) {
     (void)socket_path; /* Optional parameter, auto-detect if not provided */
@@ -492,6 +524,69 @@ static int hyprland_connect_ipc(const char *socket_path) {
     return HYPRLAX_SUCCESS;
 }
 
+static int hyprland_try_reconnect_ipc(void) {
+    if (!g_hyprland_data) return HYPRLAX_ERROR_INVALID_ARGS;
+
+#ifdef UNIT_TEST
+    if (g_test_reconnect_fd >= 0) {
+        int event_fd = g_test_reconnect_fd;
+        int active_workspace = g_test_reconnect_workspace;
+        g_test_reconnect_fd = -1;
+
+        int flags = fcntl(event_fd, F_GETFL, 0);
+        if (flags < 0 || fcntl(event_fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+            close(event_fd);
+            return HYPRLAX_ERROR_NO_DISPLAY;
+        }
+
+        g_hyprland_data->event_fd = event_fd;
+        g_hyprland_data->connected = true;
+        g_hyprland_data->next_reconnect_time = 0.0;
+        g_hyprland_data->current_workspace = active_workspace;
+        g_hyprland_data->reconciliation_pending =
+            active_workspace != g_hyprland_data->reconnect_from_workspace;
+        return HYPRLAX_SUCCESS;
+    }
+#endif
+
+    if (!get_hyprland_socket_paths(g_hyprland_data->socket_path,
+                                   g_hyprland_data->event_socket_path,
+                                   sizeof(g_hyprland_data->socket_path))) {
+        return HYPRLAX_ERROR_NO_DISPLAY;
+    }
+
+    int event_fd = connect_event_socket_nonblocking(g_hyprland_data->event_socket_path);
+    if (event_fd < 0) return HYPRLAX_ERROR_NO_DISPLAY;
+
+    int flags = fcntl(event_fd, F_GETFL, 0);
+    if (flags < 0 || fcntl(event_fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        close(event_fd);
+        return HYPRLAX_ERROR_NO_DISPLAY;
+    }
+
+    int previous_workspace = g_hyprland_data->reconnect_from_workspace;
+    int active_workspace = -1;
+    char response[1024];
+    if (hyprland_send_command(HYPRLAND_IPC_GET_ACTIVE_WORKSPACE,
+                              response, sizeof(response)) == HYPRLAX_SUCCESS) {
+        char *id_str = strstr(response, "\"id\":");
+        if (id_str) active_workspace = atoi(id_str + 6);
+    }
+    if (active_workspace <= 0) {
+        close(event_fd);
+        return HYPRLAX_ERROR_NO_DISPLAY;
+    }
+
+    g_hyprland_data->event_fd = event_fd;
+    g_hyprland_data->connected = true;
+    g_hyprland_data->next_reconnect_time = 0.0;
+    g_hyprland_data->current_workspace = active_workspace;
+    g_hyprland_data->reconciliation_pending =
+        active_workspace != previous_workspace;
+
+    return HYPRLAX_SUCCESS;
+}
+
 /* Disconnect from IPC */
 static void hyprland_disconnect_ipc(void) {
     if (!g_hyprland_data) return;
@@ -509,144 +604,201 @@ static void hyprland_disconnect_ipc(void) {
     g_hyprland_data->connected = false;
 }
 
+static void hyprland_invalidate_event_connection(const char *reason) {
+    if (!g_hyprland_data) return;
+
+    g_hyprland_data->reconnect_from_workspace = g_hyprland_data->current_workspace;
+    g_hyprland_data->reconciliation_pending = false;
+    g_hyprland_data->next_reconnect_time = get_current_time();
+    g_hyprland_data->event_buffer_len = 0;
+    if (g_hyprland_data->event_fd >= 0) {
+        close(g_hyprland_data->event_fd);
+        g_hyprland_data->event_fd = -1;
+    }
+    g_hyprland_data->connected = false;
+    LOG_WARN("Hyprland event connection lost (%s); scheduling reconnect", reason);
+}
+
+static void hyprland_fill_workspace_event(compositor_event_t *event,
+                                          int from_workspace,
+                                          int to_workspace) {
+    event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
+    event->data.workspace.from_workspace = from_workspace;
+    event->data.workspace.to_workspace = to_workspace;
+    event->data.workspace.from_x = 0;
+    event->data.workspace.from_y = 0;
+    event->data.workspace.to_x = 0;
+    event->data.workspace.to_y = 0;
+    if (g_hyprland_data->current_monitor_name[0] != '\0') {
+        strncpy(event->data.workspace.monitor_name,
+                g_hyprland_data->current_monitor_name,
+                sizeof(event->data.workspace.monitor_name) - 1);
+        event->data.workspace.monitor_name[sizeof(event->data.workspace.monitor_name) - 1] = '\0';
+    } else {
+        event->data.workspace.monitor_name[0] = '\0';
+    }
+}
+
+static int hyprland_next_event_line(char *line, size_t line_size) {
+    for (;;) {
+        char *newline = memchr(g_hyprland_data->event_buffer, '\n',
+                               g_hyprland_data->event_buffer_len);
+        if (newline) {
+            size_t payload_len = (size_t)(newline - g_hyprland_data->event_buffer);
+            size_t consumed = payload_len + 1;
+            if (payload_len < line_size) {
+                memcpy(line, g_hyprland_data->event_buffer, payload_len);
+                line[payload_len] = '\0';
+            }
+            memmove(g_hyprland_data->event_buffer,
+                    g_hyprland_data->event_buffer + consumed,
+                    g_hyprland_data->event_buffer_len - consumed);
+            g_hyprland_data->event_buffer_len -= consumed;
+            if (payload_len < line_size) return HYPRLAX_SUCCESS;
+            LOG_WARN("Discarded overlong Hyprland event");
+            continue;
+        }
+
+        if (g_hyprland_data->event_buffer_len ==
+            sizeof(g_hyprland_data->event_buffer)) {
+            g_hyprland_data->event_buffer_len = 0;
+            LOG_WARN("Discarded overlong Hyprland event");
+        }
+
+        struct pollfd pfd = {
+            .fd = g_hyprland_data->event_fd,
+            .events = POLLIN
+        };
+        int poll_result = poll(&pfd, 1, 0);
+        if (poll_result < 0) {
+            if (errno != EINTR && errno != EAGAIN) {
+                hyprland_invalidate_event_connection(strerror(errno));
+            }
+            return HYPRLAX_ERROR_NO_DATA;
+        }
+        if (poll_result == 0) return HYPRLAX_ERROR_NO_DATA;
+
+        if ((pfd.revents & POLLNVAL) ||
+            ((pfd.revents & (POLLHUP | POLLERR)) && !(pfd.revents & POLLIN))) {
+            const char *reason = g_hyprland_data->event_buffer_len > 0
+                ? "truncated event at end of stream" : "socket closed";
+            hyprland_invalidate_event_connection(reason);
+            return HYPRLAX_ERROR_NO_DATA;
+        }
+
+        ssize_t bytes = read(g_hyprland_data->event_fd,
+                             g_hyprland_data->event_buffer +
+                                 g_hyprland_data->event_buffer_len,
+                             sizeof(g_hyprland_data->event_buffer) -
+                                 g_hyprland_data->event_buffer_len);
+        if (bytes > 0) {
+            g_hyprland_data->event_buffer_len += (size_t)bytes;
+            continue;
+        }
+        if (bytes == 0) {
+            hyprland_invalidate_event_connection("end of stream");
+        } else if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
+            hyprland_invalidate_event_connection(strerror(errno));
+        }
+        return HYPRLAX_ERROR_NO_DATA;
+    }
+}
+
 /* Poll for events */
 static int hyprland_poll_events(compositor_event_t *event) {
-    if (!event || !g_hyprland_data || !g_hyprland_data->connected) {
-        return HYPRLAX_ERROR_INVALID_ARGS;
+    if (!event || !g_hyprland_data) return HYPRLAX_ERROR_INVALID_ARGS;
+
+    if (!g_hyprland_data->connected) {
+        double now = get_current_time();
+        if (now < g_hyprland_data->next_reconnect_time) {
+            return HYPRLAX_ERROR_NO_DATA;
+        }
+        if (hyprland_try_reconnect_ipc() != HYPRLAX_SUCCESS) {
+            g_hyprland_data->next_reconnect_time = now + 1.0;
+            return HYPRLAX_ERROR_NO_DATA;
+        }
+        LOG_INFO("Reconnected Hyprland event stream");
     }
 
-    /* Poll event socket */
-    struct pollfd pfd = {
-        .fd = g_hyprland_data->event_fd,
-        .events = POLLIN
-    };
+    if (g_hyprland_data->reconciliation_pending) {
+        int from_workspace = g_hyprland_data->reconnect_from_workspace;
+        int to_workspace = g_hyprland_data->current_workspace;
+        g_hyprland_data->reconciliation_pending = false;
+        hyprland_fill_workspace_event(event, from_workspace, to_workspace);
+        return HYPRLAX_SUCCESS;
+    }
 
-    int poll_result = poll(&pfd, 1, 0);
-    if (poll_result < 0) {
+    for (;;) {
+        char line[4096];
+        if (hyprland_next_event_line(line, sizeof(line)) != HYPRLAX_SUCCESS) {
+            return HYPRLAX_ERROR_NO_DATA;
+        }
+
         if (getenv("HYPRLAX_DEBUG")) {
-            fprintf(stderr, "[DEBUG] Hyprland poll error: %s\n", strerror(errno));
-        }
-        return HYPRLAX_ERROR_NO_DATA;
-    } else if (poll_result == 0) {
-        /* No events available */
-        return HYPRLAX_ERROR_NO_DATA;
-    }
-
-    /* Read event data */
-    char buffer[4096];
-    ssize_t n = read(g_hyprland_data->event_fd, buffer, sizeof(buffer) - 1);
-    if (n <= 0) {
-        if (getenv("HYPRLAX_DEBUG") && n < 0) {
-            fprintf(stderr, "[DEBUG] Hyprland read error: %s\n", strerror(errno));
-        }
-        return HYPRLAX_ERROR_NO_DATA;
-    }
-    buffer[n] = '\0';
-
-    if (getenv("HYPRLAX_DEBUG")) {
-        fprintf(stderr, "[DEBUG] Hyprland event received: %s\n", buffer);
-    }
-
-    /* Parse Hyprland events - multiple events may be in buffer separated by newlines */
-    char *line = buffer;
-    char *next_line;
-
-    while (line && *line) {
-        next_line = strchr(line, '\n');
-        if (next_line) {
-            *next_line = '\0';
-            next_line++;
+            fprintf(stderr, "[DEBUG] Hyprland event received: %s\n", line);
         }
 
-        /* Parse Hyprland event format: "event_name>>data" */
         if (strncmp(line, "workspace>>", 11) == 0) {
             int new_workspace = atoi(line + 11);
-            if (new_workspace != g_hyprland_data->current_workspace) {
-                event->type = COMPOSITOR_EVENT_WORKSPACE_CHANGE;
-                event->data.workspace.from_workspace = g_hyprland_data->current_workspace;
-                event->data.workspace.to_workspace = new_workspace;
-                /* Hyprland uses linear workspaces, set x/y to 0 */
-                event->data.workspace.from_x = 0;
-                event->data.workspace.from_y = 0;
-                event->data.workspace.to_x = 0;
-                event->data.workspace.to_y = 0;
-                /* Use last known monitor name if we have one */
-                if (g_hyprland_data->current_monitor_name[0] != '\0') {
-                    strncpy(event->data.workspace.monitor_name,
-                           g_hyprland_data->current_monitor_name,
-                           sizeof(event->data.workspace.monitor_name) - 1);
-                    event->data.workspace.monitor_name[sizeof(event->data.workspace.monitor_name) - 1] = '\0';
-                } else {
-                    event->data.workspace.monitor_name[0] = '\0';
-                }
+            if (new_workspace > 0 && new_workspace != g_hyprland_data->current_workspace) {
+                int previous_workspace = g_hyprland_data->current_workspace;
                 g_hyprland_data->current_workspace = new_workspace;
+                hyprland_fill_workspace_event(event, previous_workspace, new_workspace);
                 LOG_DEBUG("Workspace change detected: %d -> %d",
-                          event->data.workspace.from_workspace,
-                          event->data.workspace.to_workspace);
+                          previous_workspace, new_workspace);
                 return HYPRLAX_SUCCESS;
             }
         } else if (strncmp(line, "focusedmon>>", 12) == 0) {
-            /* Parse monitor focus change: "focusedmon>>monitor_name,workspace_id" */
             char *comma = strchr(line + 12, ',');
             if (comma) {
-                /* Extract and store monitor name for future workspace events */
-                size_t monitor_name_len = comma - (line + 12);
-                if (monitor_name_len > 0 && monitor_name_len < sizeof(g_hyprland_data->current_monitor_name)) {
-                    strncpy(g_hyprland_data->current_monitor_name, line + 12, monitor_name_len);
+                size_t monitor_name_len = (size_t)(comma - (line + 12));
+                if (monitor_name_len > 0 &&
+                    monitor_name_len < sizeof(g_hyprland_data->current_monitor_name)) {
+                    strncpy(g_hyprland_data->current_monitor_name,
+                            line + 12, monitor_name_len);
                     g_hyprland_data->current_monitor_name[monitor_name_len] = '\0';
-
-                    /* Track workspace ownership mapping without emitting a workspace change */
                     int focused_workspace = atoi(comma + 1);
-                    update_workspace_owner(focused_workspace, g_hyprland_data->current_monitor_name);
-
+                    update_workspace_owner(focused_workspace,
+                                           g_hyprland_data->current_monitor_name);
                     LOG_DEBUG("Monitor focus changed to %s (ws %d)",
-                              g_hyprland_data->current_monitor_name, focused_workspace);
+                              g_hyprland_data->current_monitor_name,
+                              focused_workspace);
                 }
             }
         } else if (strncmp(line, "screenlock>>", 12) == 0) {
-            /* Parse screen lock event: "screenlock>>1" (locked) or "screenlock>>0" (unlocked) */
-            const char *state_str = line + 12;
-            int lock_state = atoi(state_str);
-
-            /* Check for debug lock logging */
+            int lock_state = atoi(line + 12);
             const char *debug_lock = getenv("HYPRLAX_DEBUG_LOCK");
-            bool debug_lock_enabled = (debug_lock && strcmp(debug_lock, "1") == 0);
+            bool debug_lock_enabled = debug_lock && strcmp(debug_lock, "1") == 0;
 
             if (lock_state == 1 && !g_hyprland_data->screen_locked) {
-                /* Screen just locked */
                 g_hyprland_data->screen_locked = true;
                 g_hyprland_data->lock_time = get_current_time();
                 g_hyprland_data->lock_cycle_count++;
-
-                LOG_INFO("Screen locked (cycle #%u), suspending rendering", g_hyprland_data->lock_cycle_count);
+                LOG_INFO("Screen locked (cycle #%u), suspending rendering",
+                         g_hyprland_data->lock_cycle_count);
                 if (debug_lock_enabled) {
-                    LOG_DEBUG("Lock event: state=%d, time=%.3f", lock_state, g_hyprland_data->lock_time);
+                    LOG_DEBUG("Lock event: state=%d, time=%.3f",
+                              lock_state, g_hyprland_data->lock_time);
                 }
-
                 event->type = COMPOSITOR_EVENT_SCREEN_LOCK;
                 event->data.lock.locked = true;
                 return HYPRLAX_SUCCESS;
-
-            } else if (lock_state == 0 && g_hyprland_data->screen_locked) {
-                /* Screen just unlocked */
+            }
+            if (lock_state == 0 && g_hyprland_data->screen_locked) {
                 double lock_duration = get_current_time() - g_hyprland_data->lock_time;
                 g_hyprland_data->screen_locked = false;
-
-                LOG_INFO("Screen unlocked after %.1f seconds, resuming rendering", lock_duration);
+                LOG_INFO("Screen unlocked after %.1f seconds, resuming rendering",
+                         lock_duration);
                 if (debug_lock_enabled) {
-                    LOG_DEBUG("Unlock event: state=%d, duration=%.3f", lock_state, lock_duration);
+                    LOG_DEBUG("Unlock event: state=%d, duration=%.3f",
+                              lock_state, lock_duration);
                 }
-
                 event->type = COMPOSITOR_EVENT_SCREEN_UNLOCK;
                 event->data.lock.locked = false;
                 return HYPRLAX_SUCCESS;
             }
         }
-
-        line = next_line;
     }
-
-    return HYPRLAX_ERROR_NO_DATA;
 }
 
 /* Send IPC command */
@@ -807,8 +959,15 @@ void hyprland_test_setup_fd(int event_fd, const char *monitor_name, int initial_
     }
 }
 
+void hyprland_test_set_reconnect_fd(int event_fd, int active_workspace) {
+    g_test_reconnect_fd = event_fd;
+    g_test_reconnect_workspace = active_workspace;
+}
+
 void hyprland_test_reset(void) {
     /* Clean up state between tests */
     hyprland_destroy();
+    g_test_reconnect_fd = -1;
+    g_test_reconnect_workspace = 1;
 }
 #endif /* UNIT_TEST */
