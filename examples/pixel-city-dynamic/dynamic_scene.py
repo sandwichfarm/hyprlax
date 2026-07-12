@@ -622,7 +622,10 @@ def encode_png_rgba(width: int, height: int, pixels: bytes) -> bytes:
     if len(pixels) != expected:
         raise ValueError(f"RGBA payload must contain exactly {expected} bytes")
     stride = width * 4
-    rows = b"".join(b"\x00" + pixels[offset : offset + stride] for offset in range(0, expected, stride))
+    rows = b"".join(
+        b"\x00" + pixels[offset : offset + stride]
+        for offset in range(0, expected, stride)
+    )
     header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
     return (
         PNG_SIGNATURE
@@ -645,7 +648,11 @@ def _paeth(left: int, up: int, upper_left: int) -> int:
 
 
 def decode_png_rgba(source: Any) -> Tuple[int, int, bytes]:
-    data = Path(source).read_bytes() if isinstance(source, (str, os.PathLike, Path)) else bytes(source)
+    data = (
+        Path(source).read_bytes()
+        if isinstance(source, (str, os.PathLike, Path))
+        else bytes(source)
+    )
     if not data.startswith(PNG_SIGNATURE):
         raise ValueError("invalid PNG signature")
     offset = len(PNG_SIGNATURE)
@@ -670,9 +677,8 @@ def decode_png_rgba(source: Any) -> Tuple[int, int, bytes]:
         if kind == b"IHDR":
             if saw_header or length != 13:
                 raise ValueError("invalid PNG IHDR")
-            width, height, bit_depth, color_type, compression, filter_method, interlace = struct.unpack(
-                ">IIBBBBB", payload
-            )
+            header = struct.unpack(">IIBBBBB", payload)
+            width, height, bit_depth, color_type, compression, filter_method, interlace = header
             if (
                 width <= 0
                 or height <= 0
@@ -761,7 +767,9 @@ class DoubleBufferedAssets:
     @staticmethod
     def _safe_name(name: str) -> str:
         if not name or any(not (character.isalnum() or character in "_-") for character in name):
-            raise ValueError("asset name may contain only letters, numbers, underscores, and hyphens")
+            raise ValueError(
+                "asset name may contain only letters, numbers, underscores, and hyphens"
+            )
         return name
 
     def next_path(self, name: str, current: Optional[Path] = None) -> Path:
@@ -954,7 +962,9 @@ SUPPORTED_SCENE_PROPERTIES = frozenset(("path", "x", "y", "opacity", "tint", "bl
 def _validate_example_directory(example_directory: Path) -> Path:
     resolved = Path(example_directory).expanduser().resolve(strict=False)
     if any(character.isspace() for character in str(resolved)):
-        raise IPCError("the example path contains whitespace, which current IPC cannot encode safely")
+        raise IPCError(
+            "the example path contains whitespace, which current IPC cannot encode safely"
+        )
     return resolved
 
 
@@ -1187,7 +1197,9 @@ class SceneController:
             ),
         }
 
-    def plan(self, scene: SceneState, dry_run: bool = False) -> Tuple[ManagedLayers, Tuple[IPCCommand, ...]]:
+    def plan(
+        self, scene: SceneState, dry_run: bool = False
+    ) -> Tuple[ManagedLayers, Tuple[IPCCommand, ...]]:
         if dry_run:
             managed = assumed_managed_layers(self.example_directory)
             assets = plan_asset_paths(managed)
@@ -1350,7 +1362,11 @@ class DailyCache:
                     source="cache" if previous_data is not None else "missing",
                     stale=previous_data is not None and previous_day != day_string,
                     attempted=False,
-                    error=entry.get("last_error") if isinstance(entry.get("last_error"), str) else None,
+                    error=(
+                        entry.get("last_error")
+                        if isinstance(entry.get("last_error"), str)
+                        else None
+                    ),
                 )
 
             now_string = self.clock().astimezone(datetime_timezone.utc).isoformat()
@@ -1546,7 +1562,11 @@ def resolve_daily_facts(
                 cached_location = Location.from_mapping(cached_mapping, source="cache")
             except ProviderError:
                 cached_location = None
-        initial_zone = _zone(cached_location.timezone) if cached_location is not None else current.tzinfo
+        initial_zone = (
+            _zone(cached_location.timezone)
+            if cached_location is not None
+            else current.tzinfo
+        )
         attempt_day = current.astimezone(initial_zone).date()
         provider = LocationProvider(client)
 

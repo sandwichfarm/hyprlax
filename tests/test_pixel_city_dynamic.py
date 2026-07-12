@@ -388,11 +388,17 @@ class DailyFactsTests(unittest.TestCase):
 
     def test_neutral_fallback_exact_constants(self):
         result = SCENE.neutral_astronomy(date(2026, 7, 12), "Europe/Budapest")
-        self.assertEqual((5, 30), (result.civil_twilight_begin.hour, result.civil_twilight_begin.minute))
+        self.assertEqual(
+            (5, 30),
+            (result.civil_twilight_begin.hour, result.civil_twilight_begin.minute),
+        )
         self.assertEqual((6, 0), (result.sunrise.hour, result.sunrise.minute))
         self.assertEqual((12, 0), (result.solar_noon.hour, result.solar_noon.minute))
         self.assertEqual((18, 0), (result.sunset.hour, result.sunset.minute))
-        self.assertEqual((18, 30), (result.civil_twilight_end.hour, result.civil_twilight_end.minute))
+        self.assertEqual(
+            (18, 30),
+            (result.civil_twilight_end.hour, result.civil_twilight_end.minute),
+        )
         self.assertEqual("New Moon", result.moon_phase)
         self.assertEqual(0.0, result.moon_illumination)
 
