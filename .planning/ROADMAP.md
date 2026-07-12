@@ -63,7 +63,7 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 03-01: Implement standard-library PNG writer and celestial sprite generation
+- [x] 03-01: Implement standard-library PNG writer and celestial sprite generation
 - [ ] 03-02: Implement projected pixel shadows, double buffering, and artifact tests
 
 ### Phase 4: Safe IPC Controller
@@ -102,7 +102,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Daily Data Foundation | 2/2 | Complete    | 2026-07-12 |
 | 2. Astronomical Scene Model | 2/2 | Complete    | 2026-07-12 |
-| 3. Pixel Sky and Shadows | 0/2 | Not started | - |
+| 3. Pixel Sky and Shadows | 1/2 | In Progress|  |
 | 4. Safe IPC Controller | 0/2 | Not started | - |
 | 5. Operational Proof and Delivery | 0/2 | Not started | - |
 

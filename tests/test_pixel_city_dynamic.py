@@ -10,10 +10,12 @@ import json
 import multiprocessing
 from pathlib import Path
 import stat
+import struct
 import sys
 import tempfile
 import time
 import unittest
+import zlib
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -572,8 +574,161 @@ class SceneModelTests(unittest.TestCase):
         self.assertTrue(state.sun_visible)
 
 
+class GeneratedAssetTests(unittest.TestCase):
+    @staticmethod
+    def alpha_metrics(pixels):
+        points = [
+            ((index // 4) % SCENE.PIXEL_WIDTH, pixels[index + 3])
+            for index in range(0, len(pixels), 4)
+            if pixels[index + 3]
+        ]
+        total = sum(alpha for _, alpha in points)
+        centroid = sum(x * alpha for x, alpha in points) / total if total else None
+        return len(points), total, centroid
+
+    @staticmethod
+    def bright_metrics(pixels):
+        xs = [
+            (index // 4) % SCENE.PIXEL_WIDTH
+            for index in range(0, len(pixels), 4)
+            if pixels[index] > 150 and pixels[index + 3] > 200
+        ]
+        return len(xs), (sum(xs) / len(xs) if xs else None)
+
+    def test_png_roundtrip_and_rejection_contract(self):
+        pixels = bytes(
+            (
+                255, 0, 0, 255,
+                0, 255, 0, 128,
+                0, 0, 255, 64,
+                0, 0, 0, 0,
+            )
+        )
+        encoded = SCENE.encode_png_rgba(2, 2, pixels)
+        self.assertEqual((2, 2, pixels), SCENE.decode_png_rgba(encoded))
+        corrupt = bytearray(encoded)
+        corrupt[29] ^= 0x01
+        with self.assertRaisesRegex(ValueError, "CRC mismatch"):
+            SCENE.decode_png_rgba(corrupt)
+        header = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+
+        def chunk(kind, payload):
+            return (
+                struct.pack(">I", len(payload))
+                + kind
+                + payload
+                + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+            )
+
+        unsupported = (
+            SCENE.PNG_SIGNATURE
+            + chunk(b"IHDR", header)
+            + chunk(b"IDAT", zlib.compress(b"\x00\x00\x00\x00"))
+            + chunk(b"IEND", b"")
+        )
+        with self.assertRaisesRegex(ValueError, "8-bit RGBA"):
+            SCENE.decode_png_rgba(unsupported)
+        with self.assertRaisesRegex(ValueError, "1..4096"):
+            SCENE.encode_png_rgba(4097, 1, b"")
+
+    def test_existing_foreground_and_initial_assets_decode(self):
+        example = ROOT / "examples" / "pixel-city-dynamic"
+        width, height, source = SCENE.decode_png_rgba(example / "6.png")
+        self.assertEqual((576, 324), (width, height))
+        self.assertGreater(sum(source[3::4]), 0)
+        for name in ("sun-a.png", "moon-a.png", "shadow-a.png"):
+            with self.subTest(name=name):
+                width, height, _ = SCENE.decode_png_rgba(example / "generated" / name)
+                self.assertEqual((576, 324), (width, height))
+
+    def test_sun_and_phase_correct_moon_pixel_geometry(self):
+        _, _, sun = SCENE.decode_png_rgba(SCENE.render_sun_png())
+        self.assertGreater(sum(1 for alpha in sun[3::4] if alpha), 0)
+        phases = {}
+        for phase, illumination in (
+            ("New Moon", 0.0),
+            ("First Quarter", 50.0),
+            ("Full Moon", 100.0),
+            ("Last Quarter", 50.0),
+        ):
+            _, _, pixels = SCENE.decode_png_rgba(
+                SCENE.render_moon_png(phase, illumination)
+            )
+            phases[phase] = self.bright_metrics(pixels)
+        self.assertEqual(0, phases["New Moon"][0])
+        self.assertLess(phases["New Moon"][0], phases["First Quarter"][0])
+        self.assertLess(phases["First Quarter"][0], phases["Full Moon"][0])
+        center = SCENE.PIXEL_WIDTH / 2
+        self.assertGreater(phases["First Quarter"][1], center)
+        self.assertLess(phases["Last Quarter"][1], center)
+
+    def test_shadow_direction_strength_and_absence(self):
+        astronomy = SCENE.neutral_astronomy(date(2026, 7, 12), "Europe/Budapest")
+        base = SCENE.compute_scene_state(
+            datetime.fromisoformat("2026-07-12T09:00:00+02:00"), astronomy
+        )
+        states = {
+            "morning": replace(
+                base, sun_visible=True, sun_x=-0.3, solar_elevation=0.2, sun_opacity=1.0
+            ),
+            "afternoon": replace(
+                base, sun_visible=True, sun_x=0.3, solar_elevation=0.2, sun_opacity=1.0
+            ),
+            "noon": replace(
+                base, sun_visible=True, sun_x=0.0, solar_elevation=1.0, sun_opacity=1.0
+            ),
+            "night": replace(base, sun_visible=False, sun_opacity=0.0),
+        }
+        metrics = {}
+        source = ROOT / "examples" / "pixel-city-dynamic" / "6.png"
+        for name, state in states.items():
+            _, _, pixels = SCENE.decode_png_rgba(SCENE.render_shadow_png(source, state))
+            metrics[name] = self.alpha_metrics(pixels)
+        self.assertGreater(metrics["morning"][2], metrics["afternoon"][2])
+        self.assertGreater(metrics["morning"][1], metrics["noon"][1])
+        self.assertEqual((0, 0, None), metrics["night"])
+
+    def test_double_buffer_alternates_and_decodes_after_replace(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            buffer = SCENE.DoubleBufferedAssets(Path(temporary))
+            payload = SCENE.render_sun_png()
+            first = buffer.write("sun", payload)
+            second = buffer.write("sun", payload, current=first)
+            third = buffer.write("sun", payload, current=second)
+            self.assertEqual("sun-a.png", first.name)
+            self.assertEqual("sun-b.png", second.name)
+            self.assertEqual("sun-a.png", third.name)
+            for path in (first, second, third):
+                self.assertEqual((576, 324), SCENE.decode_png_rgba(path)[:2])
+
+    def test_dynamic_config_has_exact_visual_order(self):
+        import tomllib
+
+        config = ROOT / "examples" / "pixel-city-dynamic" / "parallax.toml"
+        with config.open("rb") as handle:
+            layers = tomllib.load(handle)["global"]["layers"]
+        self.assertEqual(
+            [
+                "./1.png",
+                "./generated/sun-a.png",
+                "./generated/moon-a.png",
+                "./2.png",
+                "./3.png",
+                "./4.png",
+                "./5.png",
+                "./generated/shadow-a.png",
+                "./6.png",
+            ],
+            [layer["path"] for layer in layers],
+        )
+        self.assertTrue(all((config.parent / layer["path"]).is_file() for layer in layers))
+        for dynamic_index in (1, 2, 7):
+            self.assertEqual(0.0, layers[dynamic_index]["opacity"])
+            self.assertEqual("none", layers[dynamic_index]["overflow"])
+
+
 class CopiedExampleTests(unittest.TestCase):
-    def test_copied_config_parses_with_six_existing_layers(self):
+    def test_copied_config_preserves_six_base_layers_and_all_paths(self):
         try:
             import tomllib
         except ImportError as error:  # pragma: no cover - Python 3.9/3.10 operator message
@@ -582,7 +737,10 @@ class CopiedExampleTests(unittest.TestCase):
         with config_path.open("rb") as handle:
             parsed = tomllib.load(handle)
         layers = parsed["global"]["layers"]
-        self.assertEqual(6, len(layers))
+        paths = {layer["path"] for layer in layers}
+        self.assertEqual({f"./{index}.png" for index in range(1, 7)}, {
+            path for path in paths if path in {f"./{index}.png" for index in range(1, 7)}
+        })
         self.assertTrue(all((config_path.parent / layer["path"]).is_file() for layer in layers))
         self.assertNotIn("0.0VV", config_path.read_text(encoding="utf-8"))
 

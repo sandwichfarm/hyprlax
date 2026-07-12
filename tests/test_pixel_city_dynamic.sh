@@ -12,7 +12,8 @@ import tomllib
 config = Path("examples/pixel-city-dynamic/parallax.toml")
 with config.open("rb") as handle:
     layers = tomllib.load(handle)["global"]["layers"]
-assert len(layers) == 6
+paths = {layer["path"] for layer in layers}
+assert {f"./{index}.png" for index in range(1, 7)} <= paths
 assert all((config.parent / layer["path"]).is_file() for layer in layers)
-print("pixel-city-dynamic TOML: 6 layers present")
+print(f"pixel-city-dynamic TOML: six base layers preserved; {len(layers)} total layers present")
 PY
