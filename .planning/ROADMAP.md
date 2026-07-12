@@ -14,7 +14,7 @@ experience before opening the PR.
 ## Phases
 
 - [x] **Phase 1: Daily Data Foundation** - Valid copied scene plus bounded, cached location and astronomy inputs (completed 2026-07-12)
-- [ ] **Phase 2: Astronomical Scene Model** - Deterministic continuous sun, moon, and lighting calculations
+- [x] **Phase 2: Astronomical Scene Model** - Deterministic continuous sun, moon, and lighting calculations (completed 2026-07-12)
 - [ ] **Phase 3: Pixel Sky and Shadows** - Dependency-free phase-correct celestial and directional shadow overlays
 - [ ] **Phase 4: Safe IPC Controller** - Managed-only runtime animation, loop/status/override surfaces, and error recovery
 - [ ] **Phase 5: Operational Proof and Delivery** - Full tests, documentation, runtime smoke evidence, and verified PR
@@ -49,7 +49,7 @@ Plans:
 
 Plans:
 - [x] 02-01: Implement normalized timeline, keyframe interpolation, and solar/lunar trajectories
-- [ ] 02-02: Lock named states, DST/polar transitions, and moon illumination with model tests
+- [x] 02-02: Lock named states, DST/polar transitions, and moon illumination with model tests
 
 ### Phase 3: Pixel Sky and Shadows
 **Goal**: The example produces valid, phase-correct celestial sprites and solar-directional shadows that fit the source 576x324 pixel scene.
@@ -101,7 +101,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Daily Data Foundation | 2/2 | Complete    | 2026-07-12 |
-| 2. Astronomical Scene Model | 1/2 | In Progress|  |
+| 2. Astronomical Scene Model | 2/2 | Complete    | 2026-07-12 |
 | 3. Pixel Sky and Shadows | 0/2 | Not started | - |
 | 4. Safe IPC Controller | 0/2 | Not started | - |
 | 5. Operational Proof and Delivery | 0/2 | Not started | - |

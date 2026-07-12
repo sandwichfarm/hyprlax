@@ -22,11 +22,11 @@
 
 ### Scene Model
 
-- [ ] **LIGHT-01**: Scene model continuously interpolates sunrise, morning, high noon, late afternoon, sunset, night, and intermediate lighting states from current local time and astronomical anchors.
-- [ ] **LIGHT-02**: Scene model produces per-layer tint/opacity/blur values that visibly change warmth, brightness, contrast, stars/windows, and a saturation impression without claiming unsupported saturation control.
-- [ ] **LIGHT-03**: Night lighting and moon visibility scale continuously with moon phase, illumination, and lunar rise/set availability.
-- [ ] **SKY-01**: Scene model produces bounded sun visibility, opacity, and x/y trajectory across the real daylight interval.
-- [ ] **SKY-02**: Scene model produces bounded moon visibility, phase appearance, opacity, and x/y trajectory across the lunar visibility interval.
+- [x] **LIGHT-01**: Scene model continuously interpolates sunrise, morning, high noon, late afternoon, sunset, night, and intermediate lighting states from current local time and astronomical anchors.
+- [x] **LIGHT-02**: Scene model produces per-layer tint/opacity/blur values that visibly change warmth, brightness, contrast, stars/windows, and a saturation impression without claiming unsupported saturation control.
+- [x] **LIGHT-03**: Night lighting and moon visibility scale continuously with moon phase, illumination, and lunar rise/set availability.
+- [x] **SKY-01**: Scene model produces bounded sun visibility, opacity, and x/y trajectory across the real daylight interval.
+- [x] **SKY-02**: Scene model produces bounded moon visibility, phase appearance, opacity, and x/y trajectory across the lunar visibility interval.
 
 ### Generated Visuals
 
@@ -69,11 +69,11 @@
 | ASTRO-02 | Phase 1 | Complete |
 | CACHE-01 | Phase 1 | Complete |
 | CACHE-02 | Phase 1 | Complete |
-| LIGHT-01 | Phase 2 | Pending |
-| LIGHT-02 | Phase 2 | Pending |
-| LIGHT-03 | Phase 2 | Pending |
-| SKY-01 | Phase 2 | Pending |
-| SKY-02 | Phase 2 | Pending |
+| LIGHT-01 | Phase 2 | Complete |
+| LIGHT-02 | Phase 2 | Complete |
+| LIGHT-03 | Phase 2 | Complete |
+| SKY-01 | Phase 2 | Complete |
+| SKY-02 | Phase 2 | Complete |
 | ASSET-01 | Phase 3 | Pending |
 | SHADOW-01 | Phase 3 | Pending |
 | ASSET-02 | Phase 3 | Pending |

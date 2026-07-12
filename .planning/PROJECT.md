@@ -23,12 +23,13 @@ offline after the last successful daily data refresh.
 - ✓ A valid copied six-layer dynamic example and Python standard-library sidecar foundation exist — Phase 1
 - ✓ ip-api location/manual override and combined solar/lunar daily inputs obey an absolute provider/date attempt ceiling — Phase 1
 - ✓ Locked atomic schema-v1 cache preserves last-good data and supplies deterministic neutral offline fallback — Phase 1
+- ✓ Timezone-aware SceneState continuously models all named lighting states and bounded sun/moon trajectories — Phase 2
+- ✓ Six supported per-layer looks and phase-scaled lunar night lift provide the tint/opacity saturation impression — Phase 2
 
 ### Active
 
 - [ ] Use `hyprlax ctl`/the runtime socket to animate mutually appropriate sun and moon layers through the daily arc.
-- [ ] Model sunrise, morning, high noon, late afternoon, sunset, night, and lunar night lighting with continuous transitions.
-- [ ] Drive existing tint, opacity, blur, visibility, and parallax controls to change the sky, stars, city saturation impression, windows, and celestial bodies.
+- [ ] Apply SceneState through existing tint, opacity, blur, visibility, and parallax controls so the running scene visibly changes sky, stars, city colorfulness, windows, and celestial bodies.
 - [ ] Synthesize simple directional shadows from scene silhouettes and current solar azimuth/elevation, without adding dependencies.
 - [ ] Provide deterministic time/location overrides, a one-shot mode, and a dry-run/status surface so behavior is testable without a compositor or network.
 - [ ] Document setup, privacy/network behavior, systemd user operation, troubleshooting, and the exact daily request policy.
@@ -68,7 +69,7 @@ offline after the last successful daily data refresh.
 | Implement as a copied example plus standard-library Python controller | Exercises current Hyprlax abilities and avoids coupling network I/O to the 144 FPS C render loop | ✓ Good |
 | Discover dynamic layers by path from `ctl list --json` | Layer IDs are runtime-assigned and should not be hard-coded | — Pending |
 | Generate celestial and shadow PNG overlays locally | Keeps artwork deterministic, dependency-free, and adjustable to astronomical state | — Pending |
-| Use continuous interpolation around named lighting keyframes | Avoids abrupt scene jumps while retaining the requested recognizable time-of-day states | — Pending |
+| Use continuous interpolation around named lighting keyframes | Avoids abrupt scene jumps while retaining the requested recognizable time-of-day states | ✓ Good |
 | Treat PR #59 as evidence, not a code source | The request explicitly calls for a restart and the branch predates current IPC/config architecture | ✓ Good |
 
 ## Evolution
@@ -87,4 +88,4 @@ This document evolves at phase transitions and milestone boundaries.
 3. Record remaining risks without converting them into implicit completion.
 
 ---
-*Last updated: 2026-07-12 after Phase 1 daily-data verification*
+*Last updated: 2026-07-12 after Phase 2 scene-model verification*
