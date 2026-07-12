@@ -11,6 +11,7 @@ import math
 import os
 from pathlib import Path
 import struct
+import subprocess
 import tempfile
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 from urllib.error import HTTPError, URLError
@@ -760,7 +761,7 @@ class DoubleBufferedAssets:
             raise ValueError("asset name may contain only letters, numbers, underscores, and hyphens")
         return name
 
-    def write(self, name: str, payload: bytes, current: Optional[Path] = None) -> Path:
+    def next_path(self, name: str, current: Optional[Path] = None) -> Path:
         safe_name = self._safe_name(name)
         if current is None:
             side = "a"
@@ -772,7 +773,10 @@ class DoubleBufferedAssets:
                 side = "a"
             else:
                 raise ValueError(f"current asset is not a {safe_name} A/B path")
-        destination = self.directory / f"{safe_name}-{side}.png"
+        return self.directory / f"{safe_name}-{side}.png"
+
+    def write(self, name: str, payload: bytes, current: Optional[Path] = None) -> Path:
+        destination = self.next_path(name, current)
         _atomic_write_bytes(destination, payload)
         return destination
 
@@ -883,6 +887,338 @@ def prepare_initial_assets(example_directory: Path) -> Mapping[str, Path]:
         "moon": buffers.write("moon", render_moon_png("New Moon", 0.0)),
         "shadow": buffers.write("shadow", transparent),
     }
+
+
+class IPCError(RuntimeError):
+    """Hyprlax control command or managed-layer ownership failure."""
+
+
+@dataclass(frozen=True)
+class ManagedLayer:
+    name: str
+    layer_id: int
+    path: Path
+
+
+@dataclass(frozen=True)
+class ManagedLayers:
+    example_directory: Path
+    layers: Mapping[str, ManagedLayer]
+    assumed_ids: bool = False
+
+    def require(self, name: str) -> ManagedLayer:
+        try:
+            return self.layers[name]
+        except KeyError as error:
+            raise IPCError(f"managed layer is missing: {name}") from error
+
+
+@dataclass(frozen=True)
+class IPCCommand:
+    target: str
+    layer_id: int
+    property: str
+    value: str
+
+    @property
+    def signature(self) -> Tuple[str, str]:
+        return self.target, self.property
+
+    def as_json(self) -> Mapping[str, Any]:
+        return {
+            "target": self.target,
+            "layer_id": self.layer_id,
+            "property": self.property,
+            "value": self.value,
+        }
+
+
+MANAGED_NAMES = (
+    "1.png",
+    "sun",
+    "moon",
+    "2.png",
+    "3.png",
+    "4.png",
+    "5.png",
+    "shadow",
+    "6.png",
+)
+ASSUMED_IDS = {name: index for index, name in enumerate(MANAGED_NAMES, 1)}
+SUPPORTED_SCENE_PROPERTIES = frozenset(("path", "x", "y", "opacity", "tint", "blur"))
+
+
+def _validate_example_directory(example_directory: Path) -> Path:
+    resolved = Path(example_directory).expanduser().resolve(strict=False)
+    if any(character.isspace() for character in str(resolved)):
+        raise IPCError("the example path contains whitespace, which current IPC cannot encode safely")
+    return resolved
+
+
+def _managed_name_for_path(path: Path, example_directory: Path) -> Optional[str]:
+    for index in range(1, 7):
+        if path == example_directory / f"{index}.png":
+            return f"{index}.png"
+    generated = example_directory / "generated"
+    if path.parent == generated:
+        for name in ("sun", "moon", "shadow"):
+            if path.name in (f"{name}-a.png", f"{name}-b.png"):
+                return name
+    return None
+
+
+def discover_managed_layers(
+    raw_layers: Any, example_directory: Path, assumed_ids: bool = False
+) -> ManagedLayers:
+    example = _validate_example_directory(example_directory)
+    if not isinstance(raw_layers, list):
+        raise IPCError("hyprlax layer list must be a JSON array")
+    found: Dict[str, ManagedLayer] = {}
+    seen_ids = set()
+    for raw in raw_layers:
+        if not isinstance(raw, Mapping):
+            raise IPCError("hyprlax layer entry must be an object")
+        layer_id = raw.get("id")
+        path_value = raw.get("path")
+        if isinstance(layer_id, bool) or not isinstance(layer_id, int) or layer_id <= 0:
+            raise IPCError("hyprlax layer id must be a positive integer")
+        if not isinstance(path_value, str) or not path_value:
+            raise IPCError("hyprlax layer path must be a nonempty string")
+        if layer_id in seen_ids:
+            raise IPCError(f"duplicate hyprlax layer id: {layer_id}")
+        seen_ids.add(layer_id)
+        path = Path(path_value).expanduser().resolve(strict=False)
+        name = _managed_name_for_path(path, example)
+        if name is None:
+            continue
+        if name in found:
+            raise IPCError(f"duplicate managed layer path for {name}")
+        found[name] = ManagedLayer(name, layer_id, path)
+    missing = [name for name in MANAGED_NAMES if name not in found]
+    if missing:
+        raise IPCError(f"managed layers missing from daemon: {', '.join(missing)}")
+    return ManagedLayers(example, found, assumed_ids=assumed_ids)
+
+
+def assumed_managed_layers(example_directory: Path) -> ManagedLayers:
+    example = _validate_example_directory(example_directory)
+    raw = []
+    for name in MANAGED_NAMES:
+        if name.endswith(".png"):
+            path = example / name
+        else:
+            path = example / "generated" / f"{name}-a.png"
+        raw.append({"id": ASSUMED_IDS[name], "path": str(path)})
+    return discover_managed_layers(raw, example, assumed_ids=True)
+
+
+class HyprlaxIPC:
+    def __init__(
+        self,
+        binary: str = "hyprlax",
+        runner: Callable[..., Any] = subprocess.run,
+        timeout: float = 5.0,
+    ) -> None:
+        self.binary = binary
+        self.runner = runner
+        self.timeout = timeout
+
+    def _run(self, arguments: Tuple[str, ...]) -> str:
+        command = [self.binary, "ctl", *arguments]
+        try:
+            result = self.runner(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise IPCError(f"hyprlax ctl failed for {' '.join(arguments)}: {error}") from error
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "no diagnostic").strip()
+            raise IPCError(
+                f"hyprlax ctl {' '.join(arguments)} exited {result.returncode}: {detail[:512]}"
+            )
+        return result.stdout
+
+    def list_layers(self) -> Any:
+        output = self._run(("list", "--json"))
+        try:
+            value = json.loads(output)
+        except json.JSONDecodeError as error:
+            raise IPCError("hyprlax ctl list --json returned invalid JSON") from error
+        if not isinstance(value, list):
+            raise IPCError("hyprlax ctl list --json must return a JSON array")
+        return value
+
+    def modify(self, command: IPCCommand) -> None:
+        if command.property not in SUPPORTED_SCENE_PROPERTIES:
+            raise IPCError(f"unsupported scene property: {command.property}")
+        self._run(
+            (
+                "modify",
+                str(command.layer_id),
+                command.property,
+                command.value,
+            )
+        )
+
+
+def _tint_value(look: LayerLook) -> str:
+    if look.tint_strength <= 0.0005:
+        return "none"
+    red, green, blue = (round(_clamp(channel) * 255.0) for channel in look.tint_rgb)
+    return f"#{red:02x}{green:02x}{blue:02x}:{look.tint_strength:.3f}"
+
+
+def plan_asset_paths(managed: ManagedLayers) -> Mapping[str, Path]:
+    buffers = DoubleBufferedAssets(managed.example_directory / "generated")
+    return {
+        "moon": buffers.next_path("moon", managed.require("moon").path),
+        "shadow": buffers.next_path("shadow", managed.require("shadow").path),
+    }
+
+
+def update_scene_assets(
+    managed: ManagedLayers, scene: SceneState, names: Tuple[str, ...] = ("moon", "shadow")
+) -> Mapping[str, Path]:
+    buffers = DoubleBufferedAssets(managed.example_directory / "generated")
+    paths = {}
+    if "moon" in names:
+        paths["moon"] = buffers.write(
+            "moon",
+            render_moon_png(scene.moon_phase, scene.moon_illumination),
+            managed.require("moon").path,
+        )
+    if "shadow" in names:
+        paths["shadow"] = buffers.write(
+            "shadow",
+            render_shadow_png(managed.example_directory / "6.png", scene),
+            managed.require("shadow").path,
+        )
+    unknown = set(names) - {"moon", "shadow"}
+    if unknown:
+        raise ValueError(f"unknown dynamic asset names: {', '.join(sorted(unknown))}")
+    return paths
+
+
+def build_ipc_commands(
+    managed: ManagedLayers,
+    scene: SceneState,
+    asset_paths: Mapping[str, Path],
+) -> Tuple[IPCCommand, ...]:
+    commands = []
+    for index in range(1, 7):
+        name = f"{index}.png"
+        layer = managed.require(name)
+        look = scene.layer_looks[name]
+        commands.extend(
+            (
+                IPCCommand(name, layer.layer_id, "tint", _tint_value(look)),
+                IPCCommand(name, layer.layer_id, "opacity", f"{look.opacity:.3f}"),
+                IPCCommand(name, layer.layer_id, "blur", f"{look.blur:.3f}"),
+            )
+        )
+    sun = managed.require("sun")
+    moon = managed.require("moon")
+    shadow = managed.require("shadow")
+    moon_path = Path(asset_paths["moon"]).resolve(strict=False)
+    shadow_path = Path(asset_paths["shadow"]).resolve(strict=False)
+    commands.extend(
+        (
+            IPCCommand("moon", moon.layer_id, "path", str(moon_path)),
+            IPCCommand("sun", sun.layer_id, "x", f"{scene.sun_x:.5f}"),
+            IPCCommand("sun", sun.layer_id, "y", f"{scene.sun_y:.5f}"),
+            IPCCommand("sun", sun.layer_id, "opacity", f"{scene.sun_opacity:.3f}"),
+            IPCCommand("moon", moon.layer_id, "x", f"{scene.moon_x:.5f}"),
+            IPCCommand("moon", moon.layer_id, "y", f"{scene.moon_y:.5f}"),
+            IPCCommand("moon", moon.layer_id, "opacity", f"{scene.moon_opacity:.3f}"),
+            IPCCommand("shadow", shadow.layer_id, "path", str(shadow_path)),
+            IPCCommand(
+                "shadow",
+                shadow.layer_id,
+                "opacity",
+                "1.000" if scene.sun_visible and scene.sun_opacity > 0.0 else "0.000",
+            ),
+        )
+    )
+    if any(command.property not in SUPPORTED_SCENE_PROPERTIES for command in commands):
+        raise IPCError("command plan contains an unsupported property")
+    return tuple(commands)
+
+
+class CommandDelta:
+    def __init__(self) -> None:
+        self.applied: Dict[Tuple[str, str], str] = {}
+
+    def pending(self, commands: Tuple[IPCCommand, ...]) -> Tuple[IPCCommand, ...]:
+        return tuple(
+            command
+            for command in commands
+            if self.applied.get(command.signature) != command.value
+        )
+
+    def mark(self, command: IPCCommand) -> None:
+        self.applied[command.signature] = command.value
+
+
+class SceneController:
+    def __init__(self, ipc: HyprlaxIPC, example_directory: Path) -> None:
+        self.ipc = ipc
+        self.example_directory = _validate_example_directory(example_directory)
+        self.delta = CommandDelta()
+        self.asset_signatures: Dict[str, Tuple[Any, ...]] = {}
+        self.pending_asset_signatures: Dict[str, Tuple[Any, ...]] = {}
+
+    @staticmethod
+    def _asset_signature(scene: SceneState) -> Mapping[str, Tuple[Any, ...]]:
+        return {
+            "moon": (scene.moon_phase, round(scene.moon_illumination, 3)),
+            "shadow": (
+                scene.sun_visible,
+                round(scene.sun_x, 5),
+                round(scene.sun_y, 5),
+                round(scene.sun_opacity, 3),
+                round(scene.solar_elevation, 5),
+            ),
+        }
+
+    def plan(self, scene: SceneState, dry_run: bool = False) -> Tuple[ManagedLayers, Tuple[IPCCommand, ...]]:
+        if dry_run:
+            managed = assumed_managed_layers(self.example_directory)
+            assets = plan_asset_paths(managed)
+            self.pending_asset_signatures = {}
+        else:
+            managed = discover_managed_layers(self.ipc.list_layers(), self.example_directory)
+            signatures = self._asset_signature(scene)
+            assets = {
+                "moon": managed.require("moon").path,
+                "shadow": managed.require("shadow").path,
+            }
+            pending = {}
+            changed = {
+                name for name, signature in signatures.items()
+                if self.asset_signatures.get(name) != signature
+            }
+            if changed:
+                generated = update_scene_assets(managed, scene, tuple(sorted(changed)))
+                for name in changed:
+                    assets[name] = generated[name]
+                    pending[name] = signatures[name]
+            self.pending_asset_signatures = pending
+        return managed, self.delta.pending(build_ipc_commands(managed, scene, assets))
+
+    def apply_once(self, scene: SceneState) -> Tuple[IPCCommand, ...]:
+        _, commands = self.plan(scene, dry_run=False)
+        executed = []
+        for command in commands:
+            self.ipc.modify(command)
+            self.delta.mark(command)
+            executed.append(command)
+        self.asset_signatures.update(self.pending_asset_signatures)
+        self.pending_asset_signatures = {}
+        return tuple(executed)
 
 
 class DailyCache:
