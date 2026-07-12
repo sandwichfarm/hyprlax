@@ -33,7 +33,7 @@ experience before opening the PR.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 01-01: Copy/correct the example and implement versioned locked daily cache/provider clients
+- [x] 01-01: Copy/correct the example and implement versioned locked daily cache/provider clients
 - [ ] 01-02: Add deterministic provider fixtures and request-ceiling/offline validation
 
 ### Phase 2: Astronomical Scene Model
@@ -100,7 +100,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Daily Data Foundation | 0/2 | Not started | - |
+| 1. Daily Data Foundation | 1/2 | In Progress|  |
 | 2. Astronomical Scene Model | 0/2 | Not started | - |
 | 3. Pixel Sky and Shadows | 0/2 | Not started | - |
 | 4. Safe IPC Controller | 0/2 | Not started | - |
