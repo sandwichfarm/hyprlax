@@ -492,8 +492,100 @@ class SceneModelTests(unittest.TestCase):
         sunset = SCENE.compute_scene_state(
             self.local("2026-07-12T20:40:00+02:00"), astronomy
         )
-        self.assertAlmostEqual(-0.34, sunrise.sun_x)
-        self.assertAlmostEqual(0.34, sunset.sun_x)
+        self.assertLess(sunrise.sun_x, 0.0)
+        self.assertGreater(sunset.sun_x, 0.0)
+
+    def test_solar_noon_is_centered_by_default(self):
+        astronomy = self.astronomy()
+        state = SCENE.compute_scene_state(astronomy.solar_noon, astronomy)
+        self.assertAlmostEqual(0.0, state.sun_x, places=12)
+        self.assertAlmostEqual(
+            0.18 - 0.42 * SCENE.math.sin(SCENE.math.radians(63.2)),
+            state.sun_y,
+            places=12,
+        )
+
+    def test_noon_altitude_controls_seasonal_arc_height(self):
+        astronomy = self.astronomy()
+        winter = replace(
+            astronomy,
+            solar_position={**astronomy.solar_position, "solar_noon_altitude": 15.0},
+        )
+        summer = replace(
+            astronomy,
+            solar_position={**astronomy.solar_position, "solar_noon_altitude": 75.0},
+        )
+        winter_state = SCENE.compute_scene_state(astronomy.solar_noon, winter)
+        summer_state = SCENE.compute_scene_state(astronomy.solar_noon, summer)
+        self.assertGreater(winter_state.sun_y, summer_state.sun_y)
+        self.assertGreater(winter_state.sun_y - summer_state.sun_y, 0.20)
+
+    def test_horizon_azimuths_control_sunrise_and_sunset_positions(self):
+        astronomy = self.astronomy()
+        west_facing = replace(
+            astronomy,
+            solar_position={
+                **astronomy.solar_position,
+                "sunrise_azimuth": 180.0,
+                "sunset_azimuth": 180.0,
+            },
+        )
+        base_sunrise = SCENE.compute_scene_state(astronomy.sunrise, astronomy)
+        base_sunset = SCENE.compute_scene_state(astronomy.sunset, astronomy)
+        changed_sunrise = SCENE.compute_scene_state(west_facing.sunrise, west_facing)
+        changed_sunset = SCENE.compute_scene_state(west_facing.sunset, west_facing)
+        self.assertLess(base_sunrise.sun_x, -0.20)
+        self.assertGreater(base_sunset.sun_x, 0.20)
+        self.assertAlmostEqual(0.0, changed_sunrise.sun_x, places=12)
+        self.assertAlmostEqual(0.0, changed_sunset.sun_x, places=12)
+
+    def test_shortest_angle_interpolation_crosses_zero(self):
+        self.assertAlmostEqual(355.0, SCENE._shortest_angle_lerp(350.0, 10.0, 0.25))
+        self.assertAlmostEqual(0.0, SCENE._shortest_angle_lerp(350.0, 10.0, 0.5))
+        self.assertAlmostEqual(5.0, SCENE._shortest_angle_lerp(350.0, 10.0, 0.75))
+
+    def test_geographic_trajectory_is_continuous_at_solar_noon(self):
+        astronomy = self.astronomy()
+        before = SCENE.compute_scene_state(
+            astronomy.solar_noon - timedelta(microseconds=1), astronomy
+        )
+        at_noon = SCENE.compute_scene_state(astronomy.solar_noon, astronomy)
+        after = SCENE.compute_scene_state(
+            astronomy.solar_noon + timedelta(microseconds=1), astronomy
+        )
+        self.assertLess(abs(before.sun_x - at_noon.sun_x), 1e-8)
+        self.assertLess(abs(after.sun_x - at_noon.sun_x), 1e-8)
+        self.assertLess(abs(before.sun_y - after.sun_y), 1e-10)
+
+    def test_missing_or_invalid_position_data_uses_legacy_trajectory(self):
+        astronomy = self.astronomy()
+        now = astronomy.sunrise + timedelta(hours=2)
+        span = (astronomy.sunset - astronomy.sunrise).total_seconds()
+        progress = (now - astronomy.sunrise).total_seconds() / span
+        expected_x = -0.34 + 0.68 * progress
+        expected_y = 0.18 - 0.42 * SCENE.math.sin(SCENE.math.pi * progress)
+        cases = (
+            {},
+            {**astronomy.solar_position, "solar_noon_altitude": None},
+            {**astronomy.solar_position, "solar_noon_altitude": float("nan")},
+            {**astronomy.solar_position, "sunrise_azimuth": -1.0},
+        )
+        for solar_position in cases:
+            with self.subTest(solar_position=solar_position):
+                state = SCENE.compute_scene_state(
+                    now, replace(astronomy, solar_position=solar_position)
+                )
+                self.assertAlmostEqual(expected_x, state.sun_x)
+                self.assertAlmostEqual(expected_y, state.sun_y)
+
+    def test_explicit_view_azimuth_changes_projection_but_not_bounds(self):
+        astronomy = self.astronomy()
+        state = SCENE.compute_scene_state(
+            astronomy.solar_noon, astronomy, view_azimuth=90.0
+        )
+        self.assertGreater(state.sun_x, 0.10)
+        self.assertTrue(-0.34 <= state.sun_x <= 0.34)
+        self.assertTrue(-0.24 <= state.sun_y <= 0.18)
 
     def test_cross_midnight_moon_visibility_and_bounds(self):
         astronomy = self.astronomy()
@@ -563,10 +655,18 @@ class SceneModelTests(unittest.TestCase):
         )
         night_state = SCENE.compute_scene_state(FIXED_NOW, polar_night)
         day_state = SCENE.compute_scene_state(FIXED_NOW, midnight_sun)
+        shifted_night = SCENE.compute_scene_state(
+            FIXED_NOW, polar_night, view_azimuth=270.0
+        )
+        shifted_day = SCENE.compute_scene_state(
+            FIXED_NOW, midnight_sun, view_azimuth=270.0
+        )
         self.assertEqual("night", night_state.phase)
         self.assertFalse(night_state.sun_visible)
         self.assertEqual("high_noon", day_state.phase)
         self.assertTrue(day_state.sun_visible)
+        self.assertEqual(night_state, shifted_night)
+        self.assertEqual(day_state, shifted_day)
 
     def test_normal_missing_solar_fields_use_neutral_anchors(self):
         missing = replace(
@@ -939,6 +1039,9 @@ class IPCControllerTests(unittest.TestCase):
             ("--demo-seconds", "0"),
             ("--demo-step", "0.1"),
             ("--demo-day", "--demo-seconds", "1", "--demo-step", "2"),
+            ("--view-azimuth", "-0.1"),
+            ("--view-azimuth", "360.1"),
+            ("--view-azimuth", "nan"),
             ("--latitude", "47.5"),
             ("--at", "2026-07-12T12:00:00"),
         ):
@@ -984,7 +1087,7 @@ class IPCControllerTests(unittest.TestCase):
                 (
                     "--loop", "--at", "2026-07-12T12:00:00+02:00",
                     "--latitude", "47.4979", "--longitude", "19.0402",
-                    "--timezone", "Europe/Budapest",
+                    "--timezone", "Europe/Budapest", "--view-azimuth", "90",
                     "--cache", str(Path(self.temporary.name) / "loop.json"),
                     "--example-dir", str(self.example), "--interval", "15",
                 ),
@@ -1009,7 +1112,7 @@ class IPCControllerTests(unittest.TestCase):
                     "--demo-day", "--demo-seconds", "4", "--demo-step", "1",
                     "--at", "2026-07-12T12:00:00+02:00",
                     "--latitude", "47.4979", "--longitude", "19.0402",
-                    "--timezone", "Europe/Budapest",
+                    "--timezone", "Europe/Budapest", "--view-azimuth", "90",
                     "--cache", str(Path(self.temporary.name) / "demo.json"),
                     "--example-dir", str(self.example),
                 ),
@@ -1027,6 +1130,9 @@ class IPCControllerTests(unittest.TestCase):
         self.assertTrue(all(payload["mode"] == "demo-day" for payload in payloads))
         self.assertIn("night", {payload["phase"] for payload in payloads})
         self.assertIn("late_afternoon", {payload["phase"] for payload in payloads})
+        noon_frame = payloads[2]
+        self.assertGreater(noon_frame["sun_x"], 0.10)
+        self.assertTrue(-0.24 <= noon_frame["sun_y"] <= 0.18)
         self.assertEqual([1.0, 1.0, 1.0, 1.0], clock.sleeps)
         self.assertEqual(1, len(client.calls))
         self.assertIn("sunrise-sunset.org", client.calls[0])
@@ -1045,10 +1151,13 @@ class DocumentationTests(unittest.TestCase):
             "--once",
             "--loop --interval 60",
             "--demo-day --demo-seconds 60 --demo-step 1",
+            "--view-azimuth",
             "--latitude 47.4979 --longitude 19.0402 --timezone Europe/Budapest",
             "managed layers missing from daemon",
             "systemctl --user import-environment",
             "systemctl --user enable --now",
+            "2D side projection",
+            "legacy static trajectory",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, self.readme)

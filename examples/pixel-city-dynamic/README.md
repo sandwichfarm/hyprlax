@@ -94,18 +94,51 @@ python3 "$SCENE" --once --hyprlax-bin "$HYPRLAX" \
 # Reproduce a live astronomical state at an explicit offset-aware instant.
 python3 "$SCENE" --once --hyprlax-bin "$HYPRLAX" \
   --at 2026-07-12T05:15:00+02:00
+
+# Face east instead of centering the view on the solar-noon bearing.
+python3 "$SCENE" --once --hyprlax-bin "$HYPRLAX" --view-azimuth 90
 ```
 
 `--dry-run` intentionally uses neutral 06:00/12:00/18:00 anchors and assumed preview IDs. It is
 for deterministic lighting/command inspection, not a provider forecast. `--status` uses the real
 daily cache/providers but does not open the Hyprlax socket.
 
+### Geographic sun projection
+
+During a normal solar day, the controller uses the provider's sunrise, solar-noon, and sunset
+timestamps plus their azimuths and the solar-noon altitude. It interpolates altitude with a sine
+rise before noon and a cosine descent after noon. Azimuth follows the shortest angular path, so
+an interval such as 350 degrees to 10 degrees crosses north at 0 degrees instead of sweeping
+through south.
+
+Those solar coordinates feed a 2D side projection in scene space. Horizontal position combines
+relative azimuth with the altitude-adjusted 0.34 scene radius; vertical position maps the sine of
+altitude from the 0.18 horizon toward the -0.24 zenith limit. All output remains within the
+existing `SceneState` bounds.
+
+`--view-azimuth DEGREES` sets the compass direction faced by the scene: 0 is north, 90 east, 180
+south, and 270 west. Values from 0 through 360 are accepted. When omitted, the controller uses
+the day's solar-noon azimuth, which horizontally centers the sun at solar noon.
+
+If any required timestamp, azimuth, or solar-noon altitude is missing, non-finite, out of range,
+or out of chronological order, the controller uses the legacy static trajectory. Visibility,
+opacity, inverse UV offsets, caching, IPC ownership, polar night, and midnight sun retain their
+existing behavior.
+
 ### Full-day tuning mode
 
 `--demo-day` resolves today's location and astronomy once, anchors its mock clock at local
 midnight, and advances through 24 wall-clock hours before exiting. The defaults produce one visual
 update per real second for 60 seconds. Each JSON line includes `simulated_at`, `progress`, `phase`,
-and the number of IPC commands applied.
+projected `sun_x`/`sun_y`, and the number of IPC commands applied.
+
+Example full-day geographic tuning pass for Budapest while facing southeast:
+
+```bash
+python3 "$SCENE" --demo-day --demo-seconds 60 --demo-step 1 \
+  --latitude 47.4979 --longitude 19.0402 --timezone Europe/Budapest \
+  --locality Budapest --view-azimuth 135 --hyprlax-bin "$HYPRLAX"
+```
 
 Only one controller should own the layers. When using the installed user services, pause the
 normal real-time controller around the demo:
