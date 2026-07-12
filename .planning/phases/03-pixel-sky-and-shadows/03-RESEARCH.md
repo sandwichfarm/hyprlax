@@ -18,5 +18,5 @@ quarter. This avoids PR #59's broken half/full masks.
 For each sufficiently opaque foreground pixel, compute height above bottom `h`. Project to
 `x + direction*h*(0.15+0.75*(1-elevation))` and
 `bottom - h*(0.06+0.14*elevation)`. Direction is opposite sun x. Alpha is bounded by
-`110*sun_opacity*(1-0.45*elevation)`. This is stylized ground projection, not ray tracing.
-
+`110*sun_opacity*(1-0.75*elevation)` so the denser short noon projection remains visibly fainter
+than the longer low-sun projection. This is stylized ground projection, not ray tracing.

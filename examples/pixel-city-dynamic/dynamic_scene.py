@@ -10,12 +10,14 @@ import json
 import math
 import os
 from pathlib import Path
+import struct
 import tempfile
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+import zlib
 
 
 CACHE_SCHEMA_VERSION = 1
@@ -594,6 +596,293 @@ def compute_scene_state(now: datetime, astronomy: Astronomy) -> SceneState:
         moon_illumination=astronomy.moon_illumination,
         lunar_fill=_clamp(lunar_fill),
     )
+
+
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+PIXEL_WIDTH = 576
+PIXEL_HEIGHT = 324
+MAX_PNG_DIMENSION = 4096
+
+
+def _png_chunk(kind: bytes, payload: bytes) -> bytes:
+    checksum = zlib.crc32(kind + payload) & 0xFFFFFFFF
+    return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", checksum)
+
+
+def encode_png_rgba(width: int, height: int, pixels: bytes) -> bytes:
+    if not isinstance(width, int) or not isinstance(height, int):
+        raise ValueError("PNG dimensions must be integers")
+    if width <= 0 or height <= 0 or width > MAX_PNG_DIMENSION or height > MAX_PNG_DIMENSION:
+        raise ValueError(f"PNG dimensions must be 1..{MAX_PNG_DIMENSION}")
+    expected = width * height * 4
+    if len(pixels) != expected:
+        raise ValueError(f"RGBA payload must contain exactly {expected} bytes")
+    stride = width * 4
+    rows = b"".join(b"\x00" + pixels[offset : offset + stride] for offset in range(0, expected, stride))
+    header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return (
+        PNG_SIGNATURE
+        + _png_chunk(b"IHDR", header)
+        + _png_chunk(b"IDAT", zlib.compress(rows, 9))
+        + _png_chunk(b"IEND", b"")
+    )
+
+
+def _paeth(left: int, up: int, upper_left: int) -> int:
+    estimate = left + up - upper_left
+    left_distance = abs(estimate - left)
+    up_distance = abs(estimate - up)
+    diagonal_distance = abs(estimate - upper_left)
+    if left_distance <= up_distance and left_distance <= diagonal_distance:
+        return left
+    if up_distance <= diagonal_distance:
+        return up
+    return upper_left
+
+
+def decode_png_rgba(source: Any) -> Tuple[int, int, bytes]:
+    data = Path(source).read_bytes() if isinstance(source, (str, os.PathLike, Path)) else bytes(source)
+    if not data.startswith(PNG_SIGNATURE):
+        raise ValueError("invalid PNG signature")
+    offset = len(PNG_SIGNATURE)
+    width = height = 0
+    compressed = bytearray()
+    saw_header = saw_end = False
+    while offset < len(data):
+        if offset + 12 > len(data):
+            raise ValueError("truncated PNG chunk")
+        length = struct.unpack(">I", data[offset : offset + 4])[0]
+        kind = data[offset + 4 : offset + 8]
+        payload_start = offset + 8
+        payload_end = payload_start + length
+        crc_end = payload_end + 4
+        if crc_end > len(data):
+            raise ValueError("truncated PNG payload")
+        payload = data[payload_start:payload_end]
+        expected_crc = struct.unpack(">I", data[payload_end:crc_end])[0]
+        if (zlib.crc32(kind + payload) & 0xFFFFFFFF) != expected_crc:
+            raise ValueError(f"PNG {kind.decode('ascii', 'replace')} CRC mismatch")
+        offset = crc_end
+        if kind == b"IHDR":
+            if saw_header or length != 13:
+                raise ValueError("invalid PNG IHDR")
+            width, height, bit_depth, color_type, compression, filter_method, interlace = struct.unpack(
+                ">IIBBBBB", payload
+            )
+            if (
+                width <= 0
+                or height <= 0
+                or width > MAX_PNG_DIMENSION
+                or height > MAX_PNG_DIMENSION
+            ):
+                raise ValueError("PNG dimensions exceed supported bounds")
+            if (bit_depth, color_type, compression, filter_method, interlace) != (8, 6, 0, 0, 0):
+                raise ValueError("only non-interlaced 8-bit RGBA PNG is supported")
+            saw_header = True
+        elif kind == b"IDAT":
+            if not saw_header:
+                raise ValueError("PNG IDAT precedes IHDR")
+            compressed.extend(payload)
+        elif kind == b"IEND":
+            saw_end = True
+            break
+    if not saw_header or not saw_end or not compressed:
+        raise ValueError("PNG is missing IHDR, IDAT, or IEND")
+    try:
+        raw = zlib.decompress(bytes(compressed))
+    except zlib.error as error:
+        raise ValueError("invalid PNG zlib stream") from error
+    stride = width * 4
+    if len(raw) != height * (stride + 1):
+        raise ValueError("PNG scanline length mismatch")
+    output = bytearray()
+    previous = bytearray(stride)
+    cursor = 0
+    for _ in range(height):
+        filter_type = raw[cursor]
+        cursor += 1
+        scanline = bytearray(raw[cursor : cursor + stride])
+        cursor += stride
+        if filter_type not in (0, 1, 2, 3, 4):
+            raise ValueError(f"unsupported PNG filter {filter_type}")
+        for index in range(stride):
+            left = scanline[index - 4] if index >= 4 else 0
+            up = previous[index]
+            upper_left = previous[index - 4] if index >= 4 else 0
+            if filter_type == 1:
+                scanline[index] = (scanline[index] + left) & 0xFF
+            elif filter_type == 2:
+                scanline[index] = (scanline[index] + up) & 0xFF
+            elif filter_type == 3:
+                scanline[index] = (scanline[index] + ((left + up) // 2)) & 0xFF
+            elif filter_type == 4:
+                scanline[index] = (scanline[index] + _paeth(left, up, upper_left)) & 0xFF
+        output.extend(scanline)
+        previous = scanline
+    return width, height, bytes(output)
+
+
+def _atomic_write_bytes(path: Path, payload: bytes) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        try:
+            directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except OSError:
+            pass
+    except OSError:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+        raise
+
+
+class DoubleBufferedAssets:
+    def __init__(self, directory: Path) -> None:
+        self.directory = Path(directory)
+
+    @staticmethod
+    def _safe_name(name: str) -> str:
+        if not name or any(not (character.isalnum() or character in "_-") for character in name):
+            raise ValueError("asset name may contain only letters, numbers, underscores, and hyphens")
+        return name
+
+    def write(self, name: str, payload: bytes, current: Optional[Path] = None) -> Path:
+        safe_name = self._safe_name(name)
+        if current is None:
+            side = "a"
+        else:
+            stem = Path(current).stem
+            if stem == f"{safe_name}-a":
+                side = "b"
+            elif stem == f"{safe_name}-b":
+                side = "a"
+            else:
+                raise ValueError(f"current asset is not a {safe_name} A/B path")
+        destination = self.directory / f"{safe_name}-{side}.png"
+        _atomic_write_bytes(destination, payload)
+        return destination
+
+
+def _transparent_pixels() -> bytearray:
+    return bytearray(PIXEL_WIDTH * PIXEL_HEIGHT * 4)
+
+
+def _put_pixel(
+    pixels: bytearray, x: int, y: int, red: int, green: int, blue: int, alpha: int
+) -> None:
+    if x < 0 or y < 0 or x >= PIXEL_WIDTH or y >= PIXEL_HEIGHT:
+        return
+    index = (y * PIXEL_WIDTH + x) * 4
+    if alpha >= pixels[index + 3]:
+        pixels[index : index + 4] = bytes((red, green, blue, alpha))
+
+
+def render_sun_png() -> bytes:
+    pixels = _transparent_pixels()
+    center_x, center_y = PIXEL_WIDTH // 2, PIXEL_HEIGHT // 2
+    for y in range(center_y - 20, center_y + 21):
+        for x in range(center_x - 20, center_x + 21):
+            distance = math.hypot(x - center_x, y - center_y)
+            if distance <= 19.0:
+                alpha = int(_clamp((19.0 - distance) / 7.0) * 86)
+                _put_pixel(pixels, x, y, 255, 154, 58, alpha)
+            if distance <= 12.0:
+                color = (255, 226, 112) if distance <= 8.0 else (255, 190, 64)
+                _put_pixel(pixels, x, y, *color, 255)
+    return encode_png_rgba(PIXEL_WIDTH, PIXEL_HEIGHT, bytes(pixels))
+
+
+def render_moon_png(phase: str, illumination_percent: float) -> bytes:
+    if phase not in MOON_PHASES:
+        raise ValueError(f"unsupported moon phase: {phase}")
+    illumination = _clamp(float(illumination_percent) / 100.0)
+    phase_angle = math.acos(_clamp(2.0 * illumination - 1.0, -1.0, 1.0))
+    side = -1.0 if phase.startswith("Waning") or phase == "Last Quarter" else 1.0
+    light_x = side * math.sin(phase_angle)
+    light_z = math.cos(phase_angle)
+    pixels = _transparent_pixels()
+    center_x, center_y, radius = PIXEL_WIDTH // 2, PIXEL_HEIGHT // 2, 14
+    for y in range(center_y - radius, center_y + radius + 1):
+        for x in range(center_x - radius, center_x + radius + 1):
+            normal_x = (x - center_x) / radius
+            normal_y = (y - center_y) / radius
+            radial = normal_x * normal_x + normal_y * normal_y
+            if radial > 1.0:
+                continue
+            normal_z = math.sqrt(max(0.0, 1.0 - radial))
+            if illumination <= 0.0:
+                light = -1.0
+            elif illumination >= 1.0:
+                light = 1.0
+            else:
+                light = normal_x * light_x + normal_z * light_z
+            if light > 0.0:
+                brightness = 0.78 + 0.22 * light
+                _put_pixel(
+                    pixels,
+                    x,
+                    y,
+                    int(236 * brightness),
+                    int(242 * brightness),
+                    int(255 * brightness),
+                    255,
+                )
+            else:
+                _put_pixel(pixels, x, y, 24, 32, 52, 92)
+    return encode_png_rgba(PIXEL_WIDTH, PIXEL_HEIGHT, bytes(pixels))
+
+
+def render_shadow_png(source_path: Path, scene: SceneState) -> bytes:
+    width, height, source = decode_png_rgba(source_path)
+    if (width, height) != (PIXEL_WIDTH, PIXEL_HEIGHT):
+        raise ValueError(f"shadow source must be {PIXEL_WIDTH}x{PIXEL_HEIGHT} RGBA")
+    output = _transparent_pixels()
+    if not scene.sun_visible or scene.sun_opacity <= 0.0:
+        return encode_png_rgba(width, height, bytes(output))
+    direction = 1.0 if scene.sun_x < 0.0 else -1.0 if scene.sun_x > 0.0 else 0.0
+    length_scale = 0.15 + 0.75 * (1.0 - scene.solar_elevation)
+    vertical_scale = 0.06 + 0.14 * scene.solar_elevation
+    maximum_alpha = int(110.0 * scene.sun_opacity * (1.0 - 0.75 * scene.solar_elevation))
+    bottom = height - 1
+    for y in range(height):
+        height_above_ground = bottom - y
+        for x in range(width):
+            source_alpha = source[(y * width + x) * 4 + 3]
+            if source_alpha <= 32:
+                continue
+            target_x = round(x + direction * height_above_ground * length_scale)
+            target_y = round(bottom - height_above_ground * vertical_scale)
+            alpha = int(maximum_alpha * source_alpha / 255.0)
+            _put_pixel(output, target_x, target_y, 12, 18, 30, alpha)
+            _put_pixel(output, target_x + int(direction), target_y, 12, 18, 30, alpha)
+    return encode_png_rgba(width, height, bytes(output))
+
+
+def prepare_initial_assets(example_directory: Path) -> Mapping[str, Path]:
+    example_directory = Path(example_directory)
+    buffers = DoubleBufferedAssets(example_directory / "generated")
+    transparent = encode_png_rgba(
+        PIXEL_WIDTH, PIXEL_HEIGHT, bytes(PIXEL_WIDTH * PIXEL_HEIGHT * 4)
+    )
+    return {
+        "sun": buffers.write("sun", render_sun_png()),
+        "moon": buffers.write("moon", render_moon_png("New Moon", 0.0)),
+        "shadow": buffers.write("shadow", transparent),
+    }
 
 
 class DailyCache:
