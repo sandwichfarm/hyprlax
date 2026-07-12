@@ -1,0 +1,20 @@
+{
+  "score": 93,
+  "threshold": 90,
+  "passed": true,
+  "verdict": "pass",
+  "category_match": true,
+  "reasoning": "After a full daemon/controller restart, the sun is clearly visible across wallpaper-only workspace thumbnails and the persisted renderer/config readback matches the corrected design.",
+  "differences": [
+    "The high-noon directional shadow is intentionally subtle against the darkest foreground.",
+    "The moon has low daytime contrast at its provider-derived 0.307 opacity."
+  ],
+  "suggestions": [
+    "Retain the max-offset and inverse-UV regression assertions.",
+    "Recheck moon contrast during a nighttime provider state before changing its art direction."
+  ],
+  "next_actions": [
+    "Keep both user services active with the corrected copied files.",
+    "Publish the regression fix to PR 94."
+  ]
+}

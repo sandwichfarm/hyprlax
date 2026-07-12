@@ -42,6 +42,21 @@ Colorful geometric shapes with dreamy motion.
 hyprlax --config examples/abstract/hyprlax.toml
 ```
 
+### 🌅 Dynamic Pixel City
+A copied pixel-art city whose generated sun, moon phase, lighting, and shadows follow local daily
+astronomy through safe runtime IPC.
+- Python standard library only; no API key
+- Once-daily cached location and combined solar/lunar data
+- Deterministic preview, manual location, live loop, and user-systemd examples
+
+```bash
+./hyprlax --config examples/pixel-city-dynamic/parallax.toml
+python3 examples/pixel-city-dynamic/dynamic_scene.py --loop --hyprlax-bin "$PWD/hyprlax"
+```
+
+See [the Dynamic Pixel City guide](pixel-city-dynamic/README.md) before enabling network-backed
+location or the user services.
+
 ## Structure
 
 Each example directory contains:

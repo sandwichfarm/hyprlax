@@ -40,6 +40,14 @@ A curated list of ready-to-run wallpaper examples bundled with hyprlax. Each exa
 - Run: `./hyprlax --config examples/pixel-city/parallax.toml`
 - Docs: [README.md](https://github.com/sandwichfarm/hyprlax/blob/main/examples/pixel-city/README.md)
 
+## Dynamic Pixel City (Astronomical)
+- Path: `examples/pixel-city-dynamic/`
+- Config: `parallax.toml`
+- Run: `./hyprlax --config examples/pixel-city-dynamic/parallax.toml`
+- Controller: `python3 examples/pixel-city-dynamic/dynamic_scene.py --loop --hyprlax-bin "$PWD/hyprlax"`
+- Features: daily cached geolocation/astronomy, phase-correct moon, smooth lighting, generated shadows
+- Docs: [README.md](https://github.com/sandwichfarm/hyprlax/blob/main/examples/pixel-city-dynamic/README.md)
+
 ## Pixel City (Advanced)
 - Path: `examples/pixel-city-advanced/`
 - Purpose: systemd/user-service packaging scaffold (use with Pixel City assets)

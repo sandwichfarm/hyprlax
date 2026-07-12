@@ -1,0 +1,15 @@
+[Unit]
+Description=Hyprlax Dynamic Pixel City wallpaper
+Documentation=https://github.com/sandwichfarm/hyprlax/tree/master/examples/pixel-city-dynamic
+After=graphical-session.target
+PartOf=graphical-session.target
+ConditionEnvironment=WAYLAND_DISPLAY
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/hyprlax --config %h/.config/hyprlax/pixel-city-dynamic/parallax.toml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target
