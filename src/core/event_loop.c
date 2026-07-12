@@ -96,6 +96,33 @@ void hyprlax_setup_epoll(hyprlax_context_t *ctx) {
     epoll_add_fd(ctx->epoll_fd, ctx->debounce_timer_fd, EPOLLIN);
 }
 
+bool hyprlax_refresh_compositor_event_fd(hyprlax_context_t *ctx) {
+    if (!ctx || ctx->epoll_fd < 0 || !ctx->compositor ||
+        !ctx->compositor->ops || !ctx->compositor->ops->get_event_fd) {
+        return false;
+    }
+
+    int current_fd = ctx->compositor->ops->get_event_fd();
+    if (current_fd == ctx->compositor_event_fd) return false;
+
+    int previous_fd = ctx->compositor_event_fd;
+    if (previous_fd >= 0) {
+        (void)epoll_del_fd(ctx->epoll_fd, previous_fd);
+    }
+
+    ctx->compositor_event_fd = -1;
+    if (current_fd >= 0) {
+        if (epoll_add_fd(ctx->epoll_fd, current_fd, EPOLLIN) < 0) {
+            LOG_WARN("Failed to watch reconnected compositor event fd: %s", strerror(errno));
+            return false;
+        }
+        ctx->compositor_event_fd = current_fd;
+        LOG_INFO("Watching reconnected compositor event stream");
+    }
+
+    return true;
+}
+
 void hyprlax_arm_frame_timer(hyprlax_context_t *ctx, int fps) {
     if (!ctx) return;
     if (fps <= 0) fps = HYPRLAX_DEFAULT_FPS;
@@ -217,8 +244,12 @@ int hyprlax_run(hyprlax_context_t *ctx) {
         }
 
         if (ctx->compositor && ctx->compositor->ops->poll_events) {
-            compositor_event_t comp_event;
-            if (ctx->compositor->ops->poll_events(&comp_event) == HYPRLAX_SUCCESS) {
+            for (;;) {
+                compositor_event_t comp_event;
+                int compositor_result = ctx->compositor->ops->poll_events(&comp_event);
+                hyprlax_refresh_compositor_event_fd(ctx);
+                if (compositor_result != HYPRLAX_SUCCESS) break;
+
                 if (comp_event.type == COMPOSITOR_EVENT_WORKSPACE_CHANGE) {
                     extern void process_workspace_event(hyprlax_context_t *ctx, const compositor_event_t *comp_event);
                     process_workspace_event(ctx, &comp_event);
@@ -347,9 +378,11 @@ int hyprlax_run(hyprlax_context_t *ctx) {
 
             if (ctx->epoll_fd >= 0) {
                 struct epoll_event evlist[6];
-                /* Use 5-second timeout instead of infinite wait to prevent
-                 * tight loops on errors and allow periodic watchdog checks */
-                int n = epoll_wait(ctx->epoll_fd, evlist, 6, 5000);
+                /* Wake more frequently while a compositor event stream is
+                 * disconnected so its bounded reconnect can run promptly. */
+                int epoll_timeout_ms = ctx->compositor &&
+                                       ctx->compositor_event_fd < 0 ? 1000 : 5000;
+                int n = epoll_wait(ctx->epoll_fd, evlist, 6, epoll_timeout_ms);
                 if (n < 0) {
                     /* Handle EINTR (interrupted by signal) - check shutdown and continue */
                     if (errno == EINTR) {

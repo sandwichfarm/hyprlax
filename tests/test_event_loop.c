@@ -14,9 +14,12 @@
 #include <unistd.h>
 #include <sys/timerfd.h>
 #include <sys/epoll.h>
+#include <sys/socket.h>
 #include <poll.h>
 #include <time.h>
 #include <errno.h>
+
+#include "include/hyprlax.h"
 
 /* Forward declarations of functions under test */
 int create_timerfd_monotonic(void);
@@ -25,6 +28,12 @@ void arm_timerfd_ms(int fd, int initial_ms, int interval_ms);
 int epoll_add_fd(int epfd, int fd, uint32_t events);
 int epoll_del_fd(int epfd, int fd);
 void hyprlax_clear_timerfd(int fd);
+
+static int mock_compositor_event_fd = -1;
+
+static int mock_get_compositor_event_fd(void) {
+    return mock_compositor_event_fd;
+}
 
 /* Helper to check if a timerfd is armed */
 static bool is_timerfd_armed(int fd) {
@@ -431,6 +440,53 @@ START_TEST(test_epoll_multiple_timer_expiration)
 }
 END_TEST
 
+START_TEST(test_refresh_compositor_event_fd_replaces_epoll_watch)
+{
+    int old_pair[2];
+    ck_assert_int_eq(socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK,
+                                0, old_pair), 0);
+
+    const compositor_ops_t ops = {
+        .get_event_fd = mock_get_compositor_event_fd,
+    };
+    compositor_adapter_t compositor = {
+        .ops = &ops,
+    };
+    hyprlax_context_t ctx = {
+        .compositor = &compositor,
+        .epoll_fd = epoll_create1(EPOLL_CLOEXEC),
+        .compositor_event_fd = old_pair[0],
+    };
+    ck_assert_int_ge(ctx.epoll_fd, 0);
+    ck_assert_int_eq(epoll_add_fd(ctx.epoll_fd, old_pair[0], EPOLLIN), 0);
+
+    close(old_pair[0]);
+    mock_compositor_event_fd = -1;
+    ck_assert(hyprlax_refresh_compositor_event_fd(&ctx));
+    ck_assert_int_eq(ctx.compositor_event_fd, -1);
+
+    int new_pair[2];
+    ck_assert_int_eq(socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK,
+                                0, new_pair), 0);
+    mock_compositor_event_fd = new_pair[0];
+    ck_assert(hyprlax_refresh_compositor_event_fd(&ctx));
+    ck_assert_int_eq(ctx.compositor_event_fd, new_pair[0]);
+
+    ck_assert_int_eq(write(new_pair[1], "n", 1), 1);
+
+    struct epoll_event event;
+    int n = epoll_wait(ctx.epoll_fd, &event, 1, 50);
+    ck_assert_int_eq(n, 1);
+    ck_assert_int_eq(event.data.fd, new_pair[0]);
+
+    mock_compositor_event_fd = -1;
+    close(old_pair[1]);
+    close(new_pair[0]);
+    close(new_pair[1]);
+    close(ctx.epoll_fd);
+}
+END_TEST
+
 /*****************************************************************************
  * FPS Calculation Tests
  *****************************************************************************/
@@ -560,6 +616,7 @@ Suite *event_loop_suite(void)
     tc_integration = tcase_create("Integration");
     tcase_add_test(tc_integration, test_epoll_wait_for_timer);
     tcase_add_test(tc_integration, test_epoll_multiple_timer_expiration);
+    tcase_add_test(tc_integration, test_refresh_compositor_event_fd_replaces_epoll_watch);
     tcase_add_test(tc_integration, test_fps_to_interval_conversion);
     suite_add_tcase(s, tc_integration);
 

@@ -5,19 +5,21 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdio.h>
+#include <sys/socket.h>
 
 #include "include/compositor.h"
 #include "include/hyprlax_internal.h"
 
 /* Test hooks provided by hyprland.c when compiled with -DUNIT_TEST */
 void hyprland_test_setup_fd(int event_fd, const char *monitor_name, int initial_workspace);
+void hyprland_test_set_reconnect_fd(int event_fd, int active_workspace);
 void hyprland_test_reset(void);
 
 static int pipe_fds[2] = { -1, -1 };
 
 static void setup(void) {
-    if (pipe(pipe_fds) != 0) {
-        ck_abort_msg("failed to create pipe for event injection");
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, pipe_fds) != 0) {
+        ck_abort_msg("failed to create socket pair for event injection");
     }
     /* Inject fake FD and initial state (workspace 1) */
     hyprland_test_setup_fd(pipe_fds[0], NULL, 1);
@@ -67,7 +69,7 @@ START_TEST(test_workspace_same_id_no_event)
 {
     hyprland_test_reset();
     /* Recreate pipe and setup to workspace 3 */
-    ck_assert(pipe(pipe_fds) == 0);
+    ck_assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, pipe_fds) == 0);
     hyprland_test_setup_fd(pipe_fds[0], NULL, 3);
     const char *line = "workspace>>3\n";
     ck_assert_int_eq((ssize_t)strlen(line), write(pipe_fds[1], line, strlen(line)));
@@ -156,6 +158,108 @@ START_TEST(test_monitor_name_copied_when_within_limit)
 }
 END_TEST
 
+START_TEST(test_closed_event_stream_is_invalidated)
+{
+    close(pipe_fds[1]);
+    pipe_fds[1] = -1;
+
+    compositor_event_t ev;
+    extern const compositor_ops_t compositor_hyprland_ops;
+    int rc = compositor_hyprland_ops.poll_events(&ev);
+
+    ck_assert_int_eq(rc, HYPRLAX_ERROR_NO_DATA);
+    ck_assert_int_eq(compositor_hyprland_ops.get_event_fd(), -1);
+    pipe_fds[0] = -1; /* The adapter owns and closes an invalidated event fd. */
+}
+END_TEST
+
+START_TEST(test_final_workspace_event_is_read_before_hangup)
+{
+    const char *ws = "workspace>>6\n";
+    ck_assert_int_eq(write(pipe_fds[1], ws, strlen(ws)), (ssize_t)strlen(ws));
+    close(pipe_fds[1]);
+    pipe_fds[1] = -1;
+
+    compositor_event_t ev;
+    extern const compositor_ops_t compositor_hyprland_ops;
+    ck_assert_int_eq(compositor_hyprland_ops.poll_events(&ev), HYPRLAX_SUCCESS);
+    ck_assert_int_eq(ev.data.workspace.from_workspace, 1);
+    ck_assert_int_eq(ev.data.workspace.to_workspace, 6);
+
+    ck_assert_int_eq(compositor_hyprland_ops.poll_events(&ev), HYPRLAX_ERROR_NO_DATA);
+    ck_assert_int_eq(compositor_hyprland_ops.get_event_fd(), -1);
+    pipe_fds[0] = -1;
+}
+END_TEST
+
+START_TEST(test_burst_workspace_events_are_delivered_in_order)
+{
+    const char *events = "workspace>>2\nworkspace>>3\n";
+    ck_assert_int_eq(write(pipe_fds[1], events, strlen(events)),
+                     (ssize_t)strlen(events));
+
+    compositor_event_t ev;
+    extern const compositor_ops_t compositor_hyprland_ops;
+    ck_assert_int_eq(compositor_hyprland_ops.poll_events(&ev), HYPRLAX_SUCCESS);
+    ck_assert_int_eq(ev.data.workspace.from_workspace, 1);
+    ck_assert_int_eq(ev.data.workspace.to_workspace, 2);
+
+    ck_assert_int_eq(compositor_hyprland_ops.poll_events(&ev), HYPRLAX_SUCCESS);
+    ck_assert_int_eq(ev.data.workspace.from_workspace, 2);
+    ck_assert_int_eq(ev.data.workspace.to_workspace, 3);
+}
+END_TEST
+
+START_TEST(test_partial_workspace_event_waits_for_newline)
+{
+    const char *partial = "workspace>>";
+    ck_assert_int_eq(write(pipe_fds[1], partial, strlen(partial)),
+                     (ssize_t)strlen(partial));
+
+    compositor_event_t ev;
+    extern const compositor_ops_t compositor_hyprland_ops;
+    ck_assert_int_eq(compositor_hyprland_ops.poll_events(&ev), HYPRLAX_ERROR_NO_DATA);
+    ck_assert_int_ne(compositor_hyprland_ops.get_event_fd(), -1);
+
+    ck_assert_int_eq(write(pipe_fds[1], "4\n", 2), 2);
+    ck_assert_int_eq(compositor_hyprland_ops.poll_events(&ev), HYPRLAX_SUCCESS);
+    ck_assert_int_eq(ev.data.workspace.from_workspace, 1);
+    ck_assert_int_eq(ev.data.workspace.to_workspace, 4);
+}
+END_TEST
+
+START_TEST(test_disconnect_reconnects_and_reconciles_workspace)
+{
+    int replacement[2];
+    ck_assert_int_eq(socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK,
+                                0, replacement), 0);
+
+    close(pipe_fds[1]);
+    pipe_fds[1] = -1;
+
+    compositor_event_t ev;
+    extern const compositor_ops_t compositor_hyprland_ops;
+    ck_assert_int_eq(compositor_hyprland_ops.poll_events(&ev), HYPRLAX_ERROR_NO_DATA);
+    pipe_fds[0] = -1;
+
+    hyprland_test_set_reconnect_fd(replacement[0], 3);
+    ck_assert_int_eq(compositor_hyprland_ops.poll_events(&ev), HYPRLAX_SUCCESS);
+    ck_assert_int_eq(ev.data.workspace.from_workspace, 1);
+    ck_assert_int_eq(ev.data.workspace.to_workspace, 3);
+    ck_assert_int_eq(compositor_hyprland_ops.get_event_fd(), replacement[0]);
+
+    const char *next = "workspace>>4\n";
+    ck_assert_int_eq(write(replacement[1], next, strlen(next)),
+                     (ssize_t)strlen(next));
+    ck_assert_int_eq(compositor_hyprland_ops.poll_events(&ev), HYPRLAX_SUCCESS);
+    ck_assert_int_eq(ev.data.workspace.from_workspace, 3);
+    ck_assert_int_eq(ev.data.workspace.to_workspace, 4);
+
+    pipe_fds[0] = replacement[0];
+    close(replacement[1]);
+}
+END_TEST
+
 Suite *hyprland_suite(void)
 {
     Suite *s = suite_create("HyprlandEvents");
@@ -172,6 +276,11 @@ Suite *hyprland_suite(void)
     tcase_add_test(tc, test_workspace_with_no_monitor_name);
     tcase_add_test(tc, test_chained_workspace_events_update_from);
     tcase_add_test(tc, test_monitor_name_copied_when_within_limit);
+    tcase_add_test(tc, test_closed_event_stream_is_invalidated);
+    tcase_add_test(tc, test_final_workspace_event_is_read_before_hangup);
+    tcase_add_test(tc, test_burst_workspace_events_are_delivered_in_order);
+    tcase_add_test(tc, test_partial_workspace_event_waits_for_newline);
+    tcase_add_test(tc, test_disconnect_reconnects_and_reconciles_workspace);
     suite_add_tcase(s, tc);
     return s;
 }
