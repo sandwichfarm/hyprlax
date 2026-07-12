@@ -43,9 +43,9 @@
 
 ### Documentation, Tests, and Delivery
 
-- [ ] **DOC-01**: Example README documents copy/setup/run/systemd operation, privacy, ip-api HTTP/non-commercial limits, exact daily request behavior, offline fallback, and visible linked Sunrise-Sunset attribution.
-- [ ] **TEST-01**: Automated tests cover same-day success/failure/concurrency request ceilings, schema/range validation, stale fallback, DST/polar/null events, every named lighting state, new/quarter/full moon, shadow/PNG generation, managed-only IPC commands, and error propagation.
-- [ ] **DELIV-01**: Branch passes build, C tests, script tests, TOML/Python/static checks, dry-run fixture validation, and a real IPC smoke test where the environment permits; commits are pushed and a verified PR is opened on origin.
+- [x] **DOC-01**: Example README documents copy/setup/run/systemd operation, privacy, ip-api HTTP/non-commercial limits, exact daily request behavior, offline fallback, and visible linked Sunrise-Sunset attribution.
+- [x] **TEST-01**: Automated tests cover same-day success/failure/concurrency request ceilings, schema/range validation, stale fallback, DST/polar/null events, every named lighting state, new/quarter/full moon, shadow/PNG generation, managed-only IPC commands, and error propagation.
+- [x] **DELIV-01**: Branch passes build, C tests, script tests, TOML/Python/static checks, dry-run fixture validation, and a real IPC smoke test where the environment permits; commits are pushed and a verified PR is opened on origin.
 
 ## Out of Scope
 
@@ -81,9 +81,9 @@
 | IPC-02 | Phase 4 | Complete |
 | CLI-01 | Phase 4 | Complete |
 | OPS-01 | Phase 4 | Complete |
-| DOC-01 | Phase 5 | Pending |
-| TEST-01 | Phase 5 | Pending |
-| DELIV-01 | Phase 5 | Pending |
+| DOC-01 | Phase 5 | Complete |
+| TEST-01 | Phase 5 | Complete |
+| DELIV-01 | Phase 5 | Complete |
 
 **Coverage:**
 - v2.3 requirements: 23 total

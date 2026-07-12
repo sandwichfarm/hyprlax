@@ -29,11 +29,13 @@ offline after the last successful daily data refresh.
 - ✓ Directional shadows are synthesized from actual foreground alpha and verified across solar positions — Phase 3
 - ✓ Canonical live discovery and delta-only IPC update exactly the copied example's nine layers — Phase 4
 - ✓ Executable once/loop/status/manual/preview modes have bounded failures and side-effect tests — Phase 4
+- ✓ Copy/run/systemd operations, privacy/request policy, troubleshooting, and attribution are published — Phase 5
+- ✓ Full build/test/lint/memory checks and isolated real IPC preserve the active user daemon — Phase 5
+- ✓ A clean feature branch is published in open mergeable PR #94 against `origin/master` — Phase 5
 
 ### Active
 
-- [ ] Document setup, privacy/network behavior, systemd user operation, troubleshooting, and the exact daily request policy.
-- [ ] Run repository-wide and available live IPC proof, then publish and verify the new PR.
+None. The v2.3 milestone is verified and delivered for review in PR #94.
 
 ### Out of Scope
 
@@ -88,4 +90,4 @@ This document evolves at phase transitions and milestone boundaries.
 3. Record remaining risks without converting them into implicit completion.
 
 ---
-*Last updated: 2026-07-12 after Phase 4 safe-controller verification*
+*Last updated: 2026-07-12 after Phase 5 operational delivery verification*

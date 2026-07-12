@@ -9,7 +9,7 @@ experience before opening the PR.
 
 ## Milestone
 
-- [ ] **v2.3 Dynamic Pixel City** — Phases 1-5
+- [x] **v2.3 Dynamic Pixel City** — Phases 1-5 (completed 2026-07-12)
 
 ## Phases
 
@@ -17,7 +17,7 @@ experience before opening the PR.
 - [x] **Phase 2: Astronomical Scene Model** - Deterministic continuous sun, moon, and lighting calculations (completed 2026-07-12)
 - [x] **Phase 3: Pixel Sky and Shadows** - Dependency-free phase-correct celestial and directional shadow overlays (completed 2026-07-12)
 - [x] **Phase 4: Safe IPC Controller** - Managed-only runtime animation, loop/status/override surfaces, and error recovery (completed 2026-07-12)
-- [ ] **Phase 5: Operational Proof and Delivery** - Full tests, documentation, runtime smoke evidence, and verified PR
+- [x] **Phase 5: Operational Proof and Delivery** - Full tests, documentation, runtime smoke evidence, and verified PR (completed 2026-07-12)
 
 ## Phase Details
 
@@ -93,8 +93,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 05-01: Complete docs, service example, integration fixtures, and requirement-level verification
-- [ ] 05-02: Run final audits, create Lore delivery commit(s), push, open PR, and verify remote state
+- [x] 05-01: Complete docs, service example, integration fixtures, and requirement-level verification
+- [x] 05-02: Run final audits, create Lore delivery commit(s), push, open PR, and verify remote state
 
 ## Progress
 
@@ -104,4 +104,4 @@ Plans:
 | 2. Astronomical Scene Model | 2/2 | Complete    | 2026-07-12 |
 | 3. Pixel Sky and Shadows | 2/2 | Complete    | 2026-07-12 |
 | 4. Safe IPC Controller | 2/2 | Complete   | 2026-07-12 |
-| 5. Operational Proof and Delivery | 0/2 | Planned    |  |
+| 5. Operational Proof and Delivery | 2/2 | Complete   | 2026-07-12 |
