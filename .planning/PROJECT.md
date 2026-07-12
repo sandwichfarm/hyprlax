@@ -20,14 +20,12 @@ offline after the last successful daily data refresh.
 - ✓ The runtime Unix socket can list layers and modify path, x/y, opacity, tint, blur, visibility, and z order — existing
 - ✓ The renderer supports per-layer opacity, RGB tint strength, blur, transparent PNGs, and parallax depth — existing
 - ✓ The repository already ships a ten-layer `examples/pixel-city` scene suitable as the visual base — existing
+- ✓ A valid copied six-layer dynamic example and Python standard-library sidecar foundation exist — Phase 1
+- ✓ ip-api location/manual override and combined solar/lunar daily inputs obey an absolute provider/date attempt ceiling — Phase 1
+- ✓ Locked atomic schema-v1 cache preserves last-good data and supplies deterministic neutral offline fallback — Phase 1
 
 ### Active
 
-- [ ] Copy Pixel City into a new, reviewable example without modifying the original scene.
-- [ ] Resolve approximate latitude, longitude, timezone, and locality from `ip-api.com` no more than once per local day.
-- [ ] Resolve accurate sunrise and sunset data from a free service no more than once per local day.
-- [ ] Resolve accurate moon phase/illumination data from a free service no more than once per local day.
-- [ ] Cache successful daily API data atomically and continue from cache or deterministic astronomical fallbacks when offline.
 - [ ] Use `hyprlax ctl`/the runtime socket to animate mutually appropriate sun and moon layers through the daily arc.
 - [ ] Model sunrise, morning, high noon, late afternoon, sunset, night, and lunar night lighting with continuous transitions.
 - [ ] Drive existing tint, opacity, blur, visibility, and parallax controls to change the sky, stars, city saturation impression, windows, and celestial bodies.
@@ -67,7 +65,7 @@ offline after the last successful daily data refresh.
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Implement as a copied example plus standard-library Python controller | Exercises current Hyprlax abilities and avoids coupling network I/O to the 144 FPS C render loop | — Pending |
+| Implement as a copied example plus standard-library Python controller | Exercises current Hyprlax abilities and avoids coupling network I/O to the 144 FPS C render loop | ✓ Good |
 | Discover dynamic layers by path from `ctl list --json` | Layer IDs are runtime-assigned and should not be hard-coded | — Pending |
 | Generate celestial and shadow PNG overlays locally | Keeps artwork deterministic, dependency-free, and adjustable to astronomical state | — Pending |
 | Use continuous interpolation around named lighting keyframes | Avoids abrupt scene jumps while retaining the requested recognizable time-of-day states | — Pending |
@@ -89,4 +87,4 @@ This document evolves at phase transitions and milestone boundaries.
 3. Record remaining risks without converting them into implicit completion.
 
 ---
-*Last updated: 2026-07-12 after GSD project initialization*
+*Last updated: 2026-07-12 after Phase 1 daily-data verification*

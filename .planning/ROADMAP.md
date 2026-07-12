@@ -13,7 +13,7 @@ experience before opening the PR.
 
 ## Phases
 
-- [ ] **Phase 1: Daily Data Foundation** - Valid copied scene plus bounded, cached location and astronomy inputs
+- [x] **Phase 1: Daily Data Foundation** - Valid copied scene plus bounded, cached location and astronomy inputs (completed 2026-07-12)
 - [ ] **Phase 2: Astronomical Scene Model** - Deterministic continuous sun, moon, and lighting calculations
 - [ ] **Phase 3: Pixel Sky and Shadows** - Dependency-free phase-correct celestial and directional shadow overlays
 - [ ] **Phase 4: Safe IPC Controller** - Managed-only runtime animation, loop/status/override surfaces, and error recovery
@@ -34,7 +34,7 @@ experience before opening the PR.
 
 Plans:
 - [x] 01-01: Copy/correct the example and implement versioned locked daily cache/provider clients
-- [ ] 01-02: Add deterministic provider fixtures and request-ceiling/offline validation
+- [x] 01-02: Add deterministic provider fixtures and request-ceiling/offline validation
 
 ### Phase 2: Astronomical Scene Model
 **Goal**: Pure calculations transform a zoned time plus astronomy into smooth, bounded scene values for all requested lighting states and lunar conditions.
@@ -100,7 +100,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Daily Data Foundation | 1/2 | In Progress|  |
+| 1. Daily Data Foundation | 2/2 | Complete    | 2026-07-12 |
 | 2. Astronomical Scene Model | 0/2 | Not started | - |
 | 3. Pixel Sky and Shadows | 0/2 | Not started | - |
 | 4. Safe IPC Controller | 0/2 | Not started | - |

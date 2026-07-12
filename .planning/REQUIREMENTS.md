@@ -8,17 +8,17 @@
 
 ### Example Foundation
 
-- [ ] **BASE-01**: User can launch a new copied Pixel City example from a valid TOML config without changing `examples/pixel-city`.
-- [ ] **BASE-02**: The new example remains dependency-free beyond Hyprlax and Python 3.9+ standard library.
+- [x] **BASE-01**: User can launch a new copied Pixel City example from a valid TOML config without changing `examples/pixel-city`.
+- [x] **BASE-02**: The new example remains dependency-free beyond Hyprlax and Python 3.9+ standard library.
 
 ### Daily Location and Astronomy
 
-- [ ] **GEO-01**: Controller resolves approximate latitude, longitude, IANA timezone, and locality from ip-api.com at most once per resolved local calendar date, including failed attempts and concurrent starts.
-- [ ] **GEO-02**: User can override latitude, longitude, and IANA timezone so IP geolocation is optional and deterministic.
-- [ ] **ASTRO-01**: Controller resolves sunrise, sunset, twilight, solar-noon, and solar-position anchors from a free API at most once per resolved local calendar date.
-- [ ] **ASTRO-02**: Controller resolves moonrise, moonset, named phase, and illumination from a free API at most once per resolved local calendar date.
-- [ ] **CACHE-01**: Provider attempts and last-good responses are schema-versioned, locked across processes, and atomically persisted under the XDG cache directory.
-- [ ] **CACHE-02**: Controller continues with stale last-good data or deterministic neutral fallback when providers, schemas, DNS, or the network fail.
+- [x] **GEO-01**: Controller resolves approximate latitude, longitude, IANA timezone, and locality from ip-api.com at most once per resolved local calendar date, including failed attempts and concurrent starts.
+- [x] **GEO-02**: User can override latitude, longitude, and IANA timezone so IP geolocation is optional and deterministic.
+- [x] **ASTRO-01**: Controller resolves sunrise, sunset, twilight, solar-noon, and solar-position anchors from a free API at most once per resolved local calendar date.
+- [x] **ASTRO-02**: Controller resolves moonrise, moonset, named phase, and illumination from a free API at most once per resolved local calendar date.
+- [x] **CACHE-01**: Provider attempts and last-good responses are schema-versioned, locked across processes, and atomically persisted under the XDG cache directory.
+- [x] **CACHE-02**: Controller continues with stale last-good data or deterministic neutral fallback when providers, schemas, DNS, or the network fail.
 
 ### Scene Model
 
@@ -61,14 +61,14 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BASE-01 | Phase 1 | Pending |
-| BASE-02 | Phase 1 | Pending |
-| GEO-01 | Phase 1 | Pending |
-| GEO-02 | Phase 1 | Pending |
-| ASTRO-01 | Phase 1 | Pending |
-| ASTRO-02 | Phase 1 | Pending |
-| CACHE-01 | Phase 1 | Pending |
-| CACHE-02 | Phase 1 | Pending |
+| BASE-01 | Phase 1 | Complete |
+| BASE-02 | Phase 1 | Complete |
+| GEO-01 | Phase 1 | Complete |
+| GEO-02 | Phase 1 | Complete |
+| ASTRO-01 | Phase 1 | Complete |
+| ASTRO-02 | Phase 1 | Complete |
+| CACHE-01 | Phase 1 | Complete |
+| CACHE-02 | Phase 1 | Complete |
 | LIGHT-01 | Phase 2 | Pending |
 | LIGHT-02 | Phase 2 | Pending |
 | LIGHT-03 | Phase 2 | Pending |
