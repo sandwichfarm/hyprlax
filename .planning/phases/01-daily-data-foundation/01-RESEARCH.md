@@ -56,7 +56,10 @@ ip-api attempt.
 3. Calculate provider-local date and the data identity/location key.
 4. If `last_attempt_date` matches, do not fetch regardless of location-key changes. Reuse
    `last_success` only when its location key matches; otherwise return neutral fallback.
-5. Write `last_attempt_date`, `last_attempt_at`, and cleared error atomically while the lock is held.
+5. Write `last_attempt_date`, `last_attempt_input_date`, `last_attempt_at`, and cleared error
+   atomically while the lock is held. Keep the input-date alias if successful geolocation
+   normalizes `last_attempt_date` into a different remote timezone date; this closes the race where
+   a second process calculated the pre-location system date before waiting on the lock.
 6. Keep the lock through the single request so a second process cannot observe-and-race. Daily
    requests are rare, so bounded 10-second lock contention is preferable to a stampede.
 7. On success, validate then update `last_success`; on failure, record a bounded error string.
