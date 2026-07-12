@@ -778,6 +778,21 @@ class FakeIPC:
                     break
 
 
+class FakeMonotonicClock:
+    def __init__(self):
+        self.value = 0.0
+        self.sleeps = []
+
+    def monotonic(self):
+        return self.value
+
+    def sleep(self, seconds):
+        if seconds < 0.0:
+            raise AssertionError(f"negative sleep: {seconds}")
+        self.sleeps.append(seconds)
+        self.value += seconds
+
+
 class IPCControllerTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -920,6 +935,10 @@ class IPCControllerTests(unittest.TestCase):
         for arguments in (
             ("--interval", "14"),
             ("--loop", "--status"),
+            ("--demo-day", "--status"),
+            ("--demo-seconds", "0"),
+            ("--demo-step", "0.1"),
+            ("--demo-day", "--demo-seconds", "1", "--demo-step", "2"),
             ("--latitude", "47.5"),
             ("--at", "2026-07-12T12:00:00"),
         ):
@@ -979,6 +998,39 @@ class IPCControllerTests(unittest.TestCase):
         self.assertGreaterEqual(ipc.list_calls, 2)
         self.assertEqual(27, len(ipc.commands))
 
+    def test_demo_day_maps_one_local_day_to_bounded_monotonic_cycle(self):
+        ipc = FakeIPC(self.example)
+        client = StubClient(astronomy_payload())
+        clock = FakeMonotonicClock()
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            result = SCENE.main(
+                (
+                    "--demo-day", "--demo-seconds", "4", "--demo-step", "1",
+                    "--at", "2026-07-12T12:00:00+02:00",
+                    "--latitude", "47.4979", "--longitude", "19.0402",
+                    "--timezone", "Europe/Budapest",
+                    "--cache", str(Path(self.temporary.name) / "demo.json"),
+                    "--example-dir", str(self.example),
+                ),
+                ipc_factory=lambda **kwargs: ipc,
+                client_factory=lambda: client,
+                sleep=clock.sleep,
+                monotonic=clock.monotonic,
+            )
+        payloads = [json.loads(line) for line in stdout.getvalue().splitlines()]
+        self.assertEqual(0, result)
+        self.assertEqual(5, len(payloads))
+        self.assertEqual([0.0, 0.25, 0.5, 0.75, 1.0], [p["progress"] for p in payloads])
+        self.assertEqual("2026-07-12T00:00:00+02:00", payloads[0]["simulated_at"])
+        self.assertEqual("2026-07-12T23:59:59.999999+02:00", payloads[-1]["simulated_at"])
+        self.assertTrue(all(payload["mode"] == "demo-day" for payload in payloads))
+        self.assertIn("night", {payload["phase"] for payload in payloads})
+        self.assertIn("late_afternoon", {payload["phase"] for payload in payloads})
+        self.assertEqual([1.0, 1.0, 1.0, 1.0], clock.sleeps)
+        self.assertEqual(1, len(client.calls))
+        self.assertIn("sunrise-sunset.org", client.calls[0])
+
 
 class DocumentationTests(unittest.TestCase):
     def setUp(self):
@@ -992,6 +1044,7 @@ class DocumentationTests(unittest.TestCase):
             "--status",
             "--once",
             "--loop --interval 60",
+            "--demo-day --demo-seconds 60 --demo-step 1",
             "--latitude 47.4979 --longitude 19.0402 --timezone Europe/Budapest",
             "managed layers missing from daemon",
             "systemctl --user import-environment",

@@ -28,6 +28,9 @@ CACHE_SCHEMA_VERSION = 1
 MAX_RESPONSE_BYTES = 262144
 HTTP_TIMEOUT_SECONDS = 10
 MAX_ERROR_LENGTH = 512
+DEFAULT_DEMO_SECONDS = 60.0
+DEFAULT_DEMO_STEP_SECONDS = 1.0
+SECONDS_PER_DAY = 86400.0
 USER_AGENT = "hyprlax-pixel-city-dynamic/1 (+https://github.com/sandwichfarm/hyprlax)"
 IP_API_URL = (
     "http://ip-api.com/json/"
@@ -1727,6 +1730,11 @@ def _parser() -> argparse.ArgumentParser:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--once", action="store_true", help="apply one update (default)")
     mode.add_argument("--loop", action="store_true", help="keep applying timed updates")
+    mode.add_argument(
+        "--demo-day",
+        action="store_true",
+        help="play one local 24-hour cycle using today's astronomy",
+    )
     parser.add_argument("--status", action="store_true", help="print resolved state without IPC")
     parser.add_argument(
         "--dry-run",
@@ -1739,6 +1747,18 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--timezone", dest="timezone_name")
     parser.add_argument("--locality", default="Manual location")
     parser.add_argument("--interval", type=int, default=60, help="loop interval, 15..3600 seconds")
+    parser.add_argument(
+        "--demo-seconds",
+        type=float,
+        default=DEFAULT_DEMO_SECONDS,
+        help="real duration of --demo-day, 1..3600 seconds (default: 60)",
+    )
+    parser.add_argument(
+        "--demo-step",
+        type=float,
+        default=DEFAULT_DEMO_STEP_SECONDS,
+        help="real delay between demo frames, 0.25..5 seconds (default: 1)",
+    )
     parser.add_argument("--cache", type=Path)
     parser.add_argument(
         "--example-dir",
@@ -1799,12 +1819,59 @@ def _resolve(
     )
 
 
+def _run_demo_day(
+    arguments: argparse.Namespace,
+    controller: SceneController,
+    facts: DailyFacts,
+    anchor: datetime,
+    sleep: Callable[[float], None],
+    monotonic: Callable[[], float],
+) -> int:
+    zone = _zone(facts.location.timezone)
+    local_day = anchor.astimezone(zone).date()
+    day_start = datetime.combine(local_day, time.min, zone)
+    real_start = monotonic()
+
+    while True:
+        elapsed = _clamp(monotonic() - real_start, 0.0, arguments.demo_seconds)
+        progress = elapsed / arguments.demo_seconds
+        if progress >= 1.0:
+            simulated = day_start + timedelta(days=1) - timedelta(microseconds=1)
+        else:
+            simulated = day_start + timedelta(seconds=SECONDS_PER_DAY * progress)
+        state = compute_scene_state(simulated, facts.astronomy)
+        commands = controller.apply_once(state)
+        payload = {
+            "mode": "demo-day",
+            "simulated_at": simulated.isoformat(),
+            "progress": round(progress, 6),
+            "phase": state.phase,
+            "commands_applied": len(commands),
+            "location_source": facts.location_source,
+            "astronomy_source": facts.astronomy_source,
+            "stale": facts.stale,
+            "errors": list(facts.errors),
+        }
+        print(json.dumps(payload, sort_keys=True), flush=True)
+        if progress >= 1.0:
+            return 0
+
+        elapsed_after_apply = max(0.0, monotonic() - real_start)
+        next_step = (
+            math.floor(elapsed_after_apply / arguments.demo_step) + 1
+        ) * arguments.demo_step
+        next_step = min(arguments.demo_seconds, next_step)
+        delay = max(0.0, real_start + next_step - monotonic())
+        sleep(delay)
+
+
 def main(
     argv: Optional[Tuple[str, ...]] = None,
     *,
     ipc_factory: Callable[..., HyprlaxIPC] = HyprlaxIPC,
     client_factory: Callable[[], HttpJsonClient] = HttpJsonClient,
     sleep: Callable[[float], None] = time_module.sleep,
+    monotonic: Callable[[], float] = time_module.monotonic,
     now_provider: Callable[[], datetime] = lambda: datetime.now().astimezone(),
 ) -> int:
     parser = _parser()
@@ -1816,8 +1883,16 @@ def main(
         parser.error("--latitude, --longitude, and --timezone must be supplied together")
     if not 15 <= arguments.interval <= 3600:
         parser.error("--interval must be between 15 and 3600 seconds")
+    if not 1.0 <= arguments.demo_seconds <= 3600.0:
+        parser.error("--demo-seconds must be between 1 and 3600 seconds")
+    if not 0.25 <= arguments.demo_step <= 5.0:
+        parser.error("--demo-step must be between 0.25 and 5 seconds")
+    if arguments.demo_step > arguments.demo_seconds:
+        parser.error("--demo-step cannot exceed --demo-seconds")
     if arguments.loop and (arguments.status or arguments.dry_run):
         parser.error("--loop cannot be combined with --status or --dry-run")
+    if arguments.demo_day and (arguments.status or arguments.dry_run):
+        parser.error("--demo-day cannot be combined with --status or --dry-run")
 
     def current_time() -> datetime:
         value = arguments.at or now_provider()
@@ -1846,6 +1921,12 @@ def main(
         controller = SceneController(
             ipc_factory(binary=arguments.hyprlax_bin), arguments.example_dir
         )
+        if arguments.demo_day:
+            anchor = current_time()
+            facts = _resolve(arguments, cache, client, anchor)
+            return _run_demo_day(
+                arguments, controller, facts, anchor, sleep, monotonic
+            )
         while True:
             now = current_time()
             try:

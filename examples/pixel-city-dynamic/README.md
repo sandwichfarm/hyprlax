@@ -82,6 +82,10 @@ python3 "$SCENE" --once --hyprlax-bin "$HYPRLAX"
 # Run continuously; accepted intervals are 15..3600 seconds.
 python3 "$SCENE" --loop --interval 60 --hyprlax-bin "$HYPRLAX"
 
+# Play today's complete local astronomical day once in 60 real seconds.
+python3 "$SCENE" --demo-day --demo-seconds 60 --demo-step 1 \
+  --hyprlax-bin "$HYPRLAX"
+
 # Bypass IP geolocation. All three location arguments are required together.
 python3 "$SCENE" --once --hyprlax-bin "$HYPRLAX" \
   --latitude 47.4979 --longitude 19.0402 --timezone Europe/Budapest \
@@ -95,6 +99,26 @@ python3 "$SCENE" --once --hyprlax-bin "$HYPRLAX" \
 `--dry-run` intentionally uses neutral 06:00/12:00/18:00 anchors and assumed preview IDs. It is
 for deterministic lighting/command inspection, not a provider forecast. `--status` uses the real
 daily cache/providers but does not open the Hyprlax socket.
+
+### Full-day tuning mode
+
+`--demo-day` resolves today's location and astronomy once, anchors its mock clock at local
+midnight, and advances through 24 wall-clock hours before exiting. The defaults produce one visual
+update per real second for 60 seconds. Each JSON line includes `simulated_at`, `progress`, `phase`,
+and the number of IPC commands applied.
+
+Only one controller should own the layers. When using the installed user services, pause the
+normal real-time controller around the demo:
+
+```bash
+systemctl --user stop hyprlax-pixel-city-dynamic-controller.service
+python3 "$SCENE" --demo-day --hyprlax-bin "$HYPRLAX"
+systemctl --user start hyprlax-pixel-city-dynamic-controller.service
+```
+
+Use `--demo-seconds` to choose a 1..3600-second cycle and `--demo-step` to choose a 0.25..5-second
+visual cadence. `--at` selects the astronomical date; manual location arguments work unchanged.
+The mode does not repeat provider requests on each frame.
 
 ## Daily Requests, Privacy, and Offline Behavior
 
