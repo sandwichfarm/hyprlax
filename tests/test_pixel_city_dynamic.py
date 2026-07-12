@@ -716,7 +716,11 @@ class GeneratedAssetTests(unittest.TestCase):
 
         config = ROOT / "examples" / "pixel-city-dynamic" / "parallax.toml"
         with config.open("rb") as handle:
-            layers = tomllib.load(handle)["global"]["layers"]
+            global_config = tomllib.load(handle)["global"]
+        layers = global_config["layers"]
+        self.assertEqual(
+            {"x": 0, "y": 0}, global_config["parallax"]["max_offset_px"]
+        )
         self.assertEqual(
             [
                 "./1.png",
@@ -850,6 +854,17 @@ class IPCControllerTests(unittest.TestCase):
             all(command.property in SCENE.SUPPORTED_SCENE_PROPERTIES for command in commands)
         )
         self.assertNotIn(99, {command.layer_id for command in commands})
+        for target, x, y in (
+            ("sun", self.state.sun_x, self.state.sun_y),
+            ("moon", self.state.moon_x, self.state.moon_y),
+        ):
+            values = {
+                command.property: float(command.value)
+                for command in commands
+                if command.target == target and command.property in ("x", "y")
+            }
+            self.assertAlmostEqual(-x, values["x"], places=5)
+            self.assertAlmostEqual(-y, values["y"], places=5)
         for name in ("moon", "shadow"):
             path_index = next(
                 index for index, command in enumerate(commands)

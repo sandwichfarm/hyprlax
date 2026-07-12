@@ -1085,6 +1085,11 @@ def _tint_value(look: LayerLook) -> str:
     return f"#{red:02x}{green:02x}{blue:02x}:{look.tint_strength:.3f}"
 
 
+def _screen_position_as_uv_offset(value: float) -> str:
+    """Convert a signed screen displacement to the renderer's inverse UV direction."""
+    return f"{-value:.5f}"
+
+
 def plan_asset_paths(managed: ManagedLayers) -> Mapping[str, Path]:
     buffers = DoubleBufferedAssets(managed.example_directory / "generated")
     return {
@@ -1141,11 +1146,19 @@ def build_ipc_commands(
     commands.extend(
         (
             IPCCommand("moon", moon.layer_id, "path", str(moon_path)),
-            IPCCommand("sun", sun.layer_id, "x", f"{scene.sun_x:.5f}"),
-            IPCCommand("sun", sun.layer_id, "y", f"{scene.sun_y:.5f}"),
+            IPCCommand(
+                "sun", sun.layer_id, "x", _screen_position_as_uv_offset(scene.sun_x)
+            ),
+            IPCCommand(
+                "sun", sun.layer_id, "y", _screen_position_as_uv_offset(scene.sun_y)
+            ),
             IPCCommand("sun", sun.layer_id, "opacity", f"{scene.sun_opacity:.3f}"),
-            IPCCommand("moon", moon.layer_id, "x", f"{scene.moon_x:.5f}"),
-            IPCCommand("moon", moon.layer_id, "y", f"{scene.moon_y:.5f}"),
+            IPCCommand(
+                "moon", moon.layer_id, "x", _screen_position_as_uv_offset(scene.moon_x)
+            ),
+            IPCCommand(
+                "moon", moon.layer_id, "y", _screen_position_as_uv_offset(scene.moon_y)
+            ),
             IPCCommand("moon", moon.layer_id, "opacity", f"{scene.moon_opacity:.3f}"),
             IPCCommand("shadow", shadow.layer_id, "path", str(shadow_path)),
             IPCCommand(

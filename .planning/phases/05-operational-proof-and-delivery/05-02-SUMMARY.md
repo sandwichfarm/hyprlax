@@ -60,3 +60,13 @@ its exact six-layer list were unchanged.
 All 23 milestone requirements have direct evidence. The remaining local MkDocs-package gap is
 environmental and covered by repository documentation tests, direct local-target validation, and
 the GitHub Docs Link Check.
+
+## Post-delivery visual correction
+
+A user screenshot after local installation showed only the tinted base scene: nonzero IPC state
+had been mistaken for visual proof. Renderer tracing found two interacting causes. The default
+100000-pixel parallax cap became an enormous automatic safe margin for non-tiled `overflow=none`
+overlays and collapsed their UV rectangles; screen positions were also being sent without
+converting to the renderer's inverse UV direction. The copied config now disables that cap and the
+controller negates celestial X/Y values. Focused regressions failed before the fix and pass after;
+a full service restart and live visual capture show the sun in the sky.

@@ -11,6 +11,7 @@ content_scale = 1.0
 [global.parallax]
 input = "workspace"
 shift_percent = 5
+max_offset_px = { x = 0, y = 0 }
 
 [[global.layers]]
 path = "./1.png"

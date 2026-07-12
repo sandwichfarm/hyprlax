@@ -57,4 +57,21 @@ Local `make docs-linkcheck` could not start because `mkdocs` and `mkdocs-materia
 installed. No project or machine dependency was added for this task. Four documentation contract
 tests and direct local Markdown target checks pass; GitHub runs the repository's actual link check.
 
+## Corrective visual verification
+
+The first user-visible local screenshot invalidated the earlier inference that nonzero UV/opacity
+readback proved visible overlays. It showed the lighting tint but no sun, moon, or shadow.
+
+- Renderer evidence: `overflow=none` derives automatic safe UV margins from
+  `parallax.max_offset_px`; its 100000-pixel default collapsed the dynamic layers' sample range.
+- Renderer evidence: `base_uv_x/base_uv_y` translate sampling coordinates, so requested screen
+  displacement requires the opposite UV sign.
+- Red regression evidence: the copied TOML lacked zero max offsets and command X/Y equaled rather
+  than negated SceneState values.
+- Green evidence: both focused tests and the full 48-case wrapper pass after correction.
+- Restart evidence: live config reports max offsets `0.0/0.0`; controller reports cached fresh-day
+  facts, 27 applied commands, and no errors; sun/moon UV signs are corrected.
+- Visual evidence: post-restart wallpaper-only workspace thumbnails show a clear high-noon sun.
+  Structured visual verdict improved from 35 to 82 to 93 (pass).
+
 ## VERIFICATION PASSED
