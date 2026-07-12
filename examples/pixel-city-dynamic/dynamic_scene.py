@@ -393,6 +393,16 @@ def _lerp(start: float, end: float, amount: float) -> float:
     return start + (end - start) * amount
 
 
+def _wrap_degrees(value: float) -> float:
+    """Wrap an angle to the signed interval [-180, 180)."""
+    return (value + 180.0) % 360.0 - 180.0
+
+
+def _shortest_angle_lerp(start: float, end: float, amount: float) -> float:
+    """Interpolate azimuth through the shortest turn and return 0..360 degrees."""
+    return (start + _wrap_degrees(end - start) * amount) % 360.0
+
+
 def _smoothstep(amount: float) -> float:
     bounded = _clamp(amount)
     return bounded * bounded * (3.0 - 2.0 * bounded)
@@ -490,22 +500,13 @@ def _lighting_at(
     return preset.name, 0.0, ambient, colorfulness, stars, city, looks
 
 
-def _sun_state(
-    now: datetime, astronomy: Astronomy
+def _legacy_sun_state(
+    local: datetime, astronomy: Astronomy
 ) -> Tuple[bool, float, float, float, float, float]:
-    zone = _zone(astronomy.timezone)
-    local = now.astimezone(zone)
-    if astronomy.sun_status == "polar_night":
-        return False, 0.0, -0.34, 0.18, 0.0, 0.0
-    if astronomy.sun_status == "midnight_sun":
-        midnight = datetime.combine(local.date(), time.min, zone)
-        progress = _clamp((local - midnight).total_seconds() / 86400.0)
-        elevation = 0.55 + 0.45 * math.sin(math.pi * progress) ** 2
-        x = 0.34 * math.sin(2.0 * math.pi * (progress - 0.25))
-        y = 0.05 - 0.25 * elevation
-        return True, progress, x, y, 1.0, elevation
+    """Return the original time-only arc used when geographic inputs are unusable."""
     sunrise = astronomy.sunrise or neutral_astronomy(astronomy.day, astronomy.timezone).sunrise
     sunset = astronomy.sunset or neutral_astronomy(astronomy.day, astronomy.timezone).sunset
+    zone = _zone(astronomy.timezone)
     assert sunrise is not None and sunset is not None
     sunrise = sunrise.astimezone(zone)
     sunset = sunset.astimezone(zone)
@@ -520,6 +521,102 @@ def _sun_state(
     horizon = _clamp(min(progress / 0.08, (1.0 - progress) / 0.08))
     visible = 0.0 <= raw <= 1.0
     return visible, progress, x, y, horizon if visible else 0.0, elevation
+
+
+def _solar_position_number(
+    value: Any, minimum: float, maximum: float
+) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if not math.isfinite(number) or not minimum <= number <= maximum:
+        return None
+    return number
+
+
+def _geographic_sun_position(
+    local: datetime,
+    astronomy: Astronomy,
+    view_azimuth: Optional[float],
+) -> Optional[Tuple[float, float, float]]:
+    position = astronomy.solar_position
+    if not isinstance(position, Mapping):
+        return None
+    sunrise_azimuth = _solar_position_number(
+        position.get("sunrise_azimuth"), 0.0, 360.0
+    )
+    noon_azimuth = _solar_position_number(
+        position.get("solar_noon_azimuth"), 0.0, 360.0
+    )
+    sunset_azimuth = _solar_position_number(
+        position.get("sunset_azimuth"), 0.0, 360.0
+    )
+    noon_altitude = _solar_position_number(
+        position.get("solar_noon_altitude"), 0.0, 90.0
+    )
+    values = (sunrise_azimuth, noon_azimuth, sunset_azimuth, noon_altitude)
+    if any(value is None for value in values):
+        return None
+    if view_azimuth is not None:
+        view_azimuth = _solar_position_number(view_azimuth, 0.0, 360.0)
+        if view_azimuth is None:
+            return None
+    else:
+        view_azimuth = noon_azimuth
+
+    sunrise = astronomy.sunrise
+    solar_noon = astronomy.solar_noon
+    sunset = astronomy.sunset
+    if sunrise is None or solar_noon is None or sunset is None:
+        return None
+    zone = _zone(astronomy.timezone)
+    sunrise = sunrise.astimezone(zone)
+    solar_noon = solar_noon.astimezone(zone)
+    sunset = sunset.astimezone(zone)
+    if not sunrise < solar_noon < sunset:
+        return None
+
+    if local <= solar_noon:
+        span = (solar_noon - sunrise).total_seconds()
+        amount = _clamp((local - sunrise).total_seconds() / span)
+        altitude = noon_altitude * math.sin(math.pi * amount / 2.0)
+        azimuth = _shortest_angle_lerp(sunrise_azimuth, noon_azimuth, amount)
+    else:
+        span = (sunset - solar_noon).total_seconds()
+        amount = _clamp((local - solar_noon).total_seconds() / span)
+        altitude = noon_altitude * math.cos(math.pi * amount / 2.0)
+        azimuth = _shortest_angle_lerp(noon_azimuth, sunset_azimuth, amount)
+
+    altitude_radians = math.radians(altitude)
+    relative_azimuth = math.radians(_wrap_degrees(azimuth - view_azimuth))
+    elevation = math.sin(altitude_radians)
+    x = 0.34 * math.cos(altitude_radians) * math.sin(relative_azimuth)
+    y = 0.18 - 0.42 * elevation
+    return x, y, elevation
+
+
+def _sun_state(
+    now: datetime, astronomy: Astronomy, view_azimuth: Optional[float] = None
+) -> Tuple[bool, float, float, float, float, float]:
+    zone = _zone(astronomy.timezone)
+    local = now.astimezone(zone)
+    if astronomy.sun_status == "polar_night":
+        return False, 0.0, -0.34, 0.18, 0.0, 0.0
+    if astronomy.sun_status == "midnight_sun":
+        midnight = datetime.combine(local.date(), time.min, zone)
+        progress = _clamp((local - midnight).total_seconds() / 86400.0)
+        elevation = 0.55 + 0.45 * math.sin(math.pi * progress) ** 2
+        x = 0.34 * math.sin(2.0 * math.pi * (progress - 0.25))
+        y = 0.05 - 0.25 * elevation
+        return True, progress, x, y, 1.0, elevation
+
+    legacy = _legacy_sun_state(local, astronomy)
+    geographic = _geographic_sun_position(local, astronomy, view_azimuth)
+    if geographic is None:
+        return legacy
+    visible, progress, _, _, opacity, _ = legacy
+    x, y, elevation = geographic
+    return visible, progress, x, y, opacity, elevation
 
 
 def _moon_interval_progress(
@@ -543,12 +640,14 @@ def _moon_interval_progress(
     return False, 0.0
 
 
-def compute_scene_state(now: datetime, astronomy: Astronomy) -> SceneState:
+def compute_scene_state(
+    now: datetime, astronomy: Astronomy, view_azimuth: Optional[float] = None
+) -> SceneState:
     if now.tzinfo is None:
         raise ValueError("now must be timezone-aware")
     phase, phase_blend, ambient, colorfulness, stars, city, looks = _lighting_at(now, astronomy)
     sun_visible, sun_progress, sun_x, sun_y, sun_opacity, solar_elevation = _sun_state(
-        now, astronomy
+        now, astronomy, view_azimuth
     )
     moon_visible, moon_progress = _moon_interval_progress(now, astronomy)
     moon_elevation = math.sin(math.pi * moon_progress) if moon_visible else 0.0
@@ -1537,12 +1636,7 @@ def neutral_astronomy(requested_day: date, timezone_name: str) -> Astronomy:
         moonset=None,
         moon_phase="New Moon",
         moon_illumination=0.0,
-        solar_position={
-            "sunrise_azimuth": 90.0,
-            "sunset_azimuth": 270.0,
-            "solar_noon_azimuth": 180.0,
-            "solar_noon_altitude": 45.0,
-        },
+        solar_position={},
         source="fallback",
     )
 
@@ -1677,6 +1771,16 @@ def _aware_datetime(value: str) -> datetime:
     return parsed
 
 
+def _azimuth_argument(value: str) -> float:
+    try:
+        result = float(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be a number from 0 through 360") from error
+    if not math.isfinite(result) or not 0.0 <= result <= 360.0:
+        raise argparse.ArgumentTypeError("must be a number from 0 through 360")
+    return result
+
+
 def _location_json(location: Location) -> Mapping[str, Any]:
     result = location.to_mapping()
     result["source"] = location.source
@@ -1746,6 +1850,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--longitude", type=float)
     parser.add_argument("--timezone", dest="timezone_name")
     parser.add_argument("--locality", default="Manual location")
+    parser.add_argument(
+        "--view-azimuth",
+        type=_azimuth_argument,
+        help=(
+            "viewer-facing compass azimuth in degrees, 0..360; "
+            "defaults to solar-noon azimuth"
+        ),
+    )
     parser.add_argument("--interval", type=int, default=60, help="loop interval, 15..3600 seconds")
     parser.add_argument(
         "--demo-seconds",
@@ -1788,7 +1900,7 @@ def _preview(arguments: argparse.Namespace, now: datetime) -> Mapping[str, Any]:
         location = manual_location(latitude, longitude, timezone_name, arguments.locality)
     local_day = now.astimezone(_zone(location.timezone)).date()
     astronomy = neutral_astronomy(local_day, location.timezone)
-    state = compute_scene_state(now, astronomy)
+    state = compute_scene_state(now, astronomy, arguments.view_azimuth)
     managed = assumed_managed_layers(arguments.example_dir)
     commands = build_ipc_commands(managed, state, plan_asset_paths(managed))
     return {
@@ -1839,13 +1951,17 @@ def _run_demo_day(
             simulated = day_start + timedelta(days=1) - timedelta(microseconds=1)
         else:
             simulated = day_start + timedelta(seconds=SECONDS_PER_DAY * progress)
-        state = compute_scene_state(simulated, facts.astronomy)
+        state = compute_scene_state(
+            simulated, facts.astronomy, arguments.view_azimuth
+        )
         commands = controller.apply_once(state)
         payload = {
             "mode": "demo-day",
             "simulated_at": simulated.isoformat(),
             "progress": round(progress, 6),
             "phase": state.phase,
+            "sun_x": round(state.sun_x, 6),
+            "sun_y": round(state.sun_y, 6),
             "commands_applied": len(commands),
             "location_source": facts.location_source,
             "astronomy_source": facts.astronomy_source,
@@ -1913,7 +2029,9 @@ def main(
             payload = {
                 "mode": "status",
                 "facts": _facts_json(facts),
-                "state": _state_json(compute_scene_state(now, facts.astronomy)),
+                "state": _state_json(
+                    compute_scene_state(now, facts.astronomy, arguments.view_azimuth)
+                ),
             }
             print(json.dumps(payload, sort_keys=True))
             return 0
@@ -1931,7 +2049,9 @@ def main(
             now = current_time()
             try:
                 facts = _resolve(arguments, cache, client, now)
-                state = compute_scene_state(now, facts.astronomy)
+                state = compute_scene_state(
+                    now, facts.astronomy, arguments.view_azimuth
+                )
                 commands = controller.apply_once(state)
                 payload = {
                     "mode": "loop" if arguments.loop else "once",
