@@ -46,4 +46,3 @@ The controller should compute continuous values around these anchors:
 | high noon | centered on solar noon | least tint, crisp skyline, shortest/faintest shadows |
 | late afternoon | solar noon toward evening golden hour | warmer tint, longer shadows |
 | sunset | evening golden hour through civil dusk | strongest warm tint, long cool shadows, rising city lights |
-

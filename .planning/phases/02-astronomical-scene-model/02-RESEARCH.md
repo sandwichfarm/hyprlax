@@ -38,4 +38,3 @@ strength by at most 0.16 and shift cool channels upward without exceeding 1.0.
 - Test a DST date with an input instant in UTC and astronomy in `Europe/Budapest`.
 - Assert model output property names contain no `saturation` command; only the descriptive
   `saturation_impression` scalar is allowed.
-

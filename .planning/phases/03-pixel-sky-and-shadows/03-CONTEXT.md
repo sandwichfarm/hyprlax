@@ -27,4 +27,3 @@
 - Morning and afternoon shadow alpha centroids lie on opposite sides; noon alpha sum is lower than low sun; night is zero.
 - Buffer writes alternate identities and every output decodes after replacement.
 - Updated TOML parses with exactly 9 layers in the locked order.
-

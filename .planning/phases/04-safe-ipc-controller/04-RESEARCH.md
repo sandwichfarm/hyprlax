@@ -17,4 +17,3 @@
 
 Asset writes happen before command construction. If an IPC command fails, the active path remains
 discoverable on the next tick and the inactive buffer can be safely overwritten/retried.
-

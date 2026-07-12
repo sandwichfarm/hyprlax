@@ -21,4 +21,3 @@
   no assets, contacts no provider/socket, and prints JSON commands plus state/source disclosure.
 - Live mode writes inactive moon/shadow assets atomically before sending path changes. Every IPC
   failure is actionable and nonzero; loop logs it and retries only on the next bounded tick.
-

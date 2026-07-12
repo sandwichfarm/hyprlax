@@ -66,4 +66,3 @@ This is the primary unit-test boundary.
 2. Add pure lighting/celestial calculations and PNG synthesis with deterministic fixture checks.
 3. Add layer discovery, IPC delta application, loop/status CLI, and failure recovery.
 4. Add operating documentation, service examples, static/build/test validation, and live PR proof.
-

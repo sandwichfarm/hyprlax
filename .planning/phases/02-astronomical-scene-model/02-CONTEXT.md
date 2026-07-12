@@ -38,4 +38,3 @@ No PNG generation, subprocess, socket, loop, or CLI work belongs in this phase.
 - New/quarter/full moon nights have strictly increasing lunar fill and ambient lift.
 - DST-aware input is converted into the astronomy timezone and never compared as naive time.
 - Polar day/night and missing normal fields remain deterministic and exception-free.
-

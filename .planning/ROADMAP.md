@@ -105,4 +105,3 @@ Plans:
 | 3. Pixel Sky and Shadows | 2/2 | Complete    | 2026-07-12 |
 | 4. Safe IPC Controller | 2/2 | Complete   | 2026-07-12 |
 | 5. Operational Proof and Delivery | 0/2 | Planned    |  |
-

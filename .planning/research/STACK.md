@@ -52,4 +52,3 @@ surface and generate small transparent PNG overlays with `struct` and `zlib`.
 - Python 3.9+ (required for standard-library `zoneinfo`).
 - Current `origin/master` `hyprlax ctl list --json` and `ctl modify` contracts.
 - All existing Wayland compositor adapters, because the controller only targets Hyprlax IPC.
-
