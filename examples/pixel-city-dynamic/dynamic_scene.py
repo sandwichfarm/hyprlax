@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Daily location and astronomy foundation for the dynamic Pixel City example."""
+"""Daily astronomy, lighting, generated assets, and IPC for dynamic Pixel City."""
 
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone as datetime_timezone
 import fcntl
@@ -12,7 +13,9 @@ import os
 from pathlib import Path
 import struct
 import subprocess
+import sys
 import tempfile
+import time as time_module
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -1628,7 +1631,220 @@ def resolve_daily_facts(
     )
 
 
-if __name__ == "__main__":
-    raise SystemExit(
-        "dynamic_scene.py is the importable scene foundation; the controller CLI arrives in Phase 4"
+def _aware_datetime(value: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be an ISO-8601 timestamp") from error
+    if parsed.tzinfo is None:
+        raise argparse.ArgumentTypeError("must include a UTC offset")
+    return parsed
+
+
+def _location_json(location: Location) -> Mapping[str, Any]:
+    result = location.to_mapping()
+    result["source"] = location.source
+    return result
+
+
+def _state_json(state: SceneState) -> Mapping[str, Any]:
+    return {
+        "phase": state.phase,
+        "phase_blend": state.phase_blend,
+        "ambient_brightness": state.ambient_brightness,
+        "saturation_impression": state.saturation_impression,
+        "stars_opacity": state.stars_opacity,
+        "city_light_intensity": state.city_light_intensity,
+        "sun": {
+            "visible": state.sun_visible,
+            "progress": state.sun_progress,
+            "x": state.sun_x,
+            "y": state.sun_y,
+            "opacity": state.sun_opacity,
+            "elevation": state.solar_elevation,
+        },
+        "moon": {
+            "visible": state.moon_visible,
+            "progress": state.moon_progress,
+            "x": state.moon_x,
+            "y": state.moon_y,
+            "opacity": state.moon_opacity,
+            "phase": state.moon_phase,
+            "illumination": state.moon_illumination,
+            "lunar_fill": state.lunar_fill,
+        },
+    }
+
+
+def _facts_json(facts: DailyFacts) -> Mapping[str, Any]:
+    return {
+        "location": _location_json(facts.location),
+        "astronomy": facts.astronomy.to_mapping(),
+        "location_source": facts.location_source,
+        "astronomy_source": facts.astronomy_source,
+        "stale": facts.stale,
+        "errors": list(facts.errors),
+    }
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Drive the dynamic Pixel City example from daily sun and moon data."
     )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--once", action="store_true", help="apply one update (default)")
+    mode.add_argument("--loop", action="store_true", help="keep applying timed updates")
+    parser.add_argument("--status", action="store_true", help="print resolved state without IPC")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print a deterministic neutral preview without network, cache, files, or IPC",
+    )
+    parser.add_argument("--at", type=_aware_datetime, help="evaluate an aware ISO-8601 time")
+    parser.add_argument("--latitude", type=float)
+    parser.add_argument("--longitude", type=float)
+    parser.add_argument("--timezone", dest="timezone_name")
+    parser.add_argument("--locality", default="Manual location")
+    parser.add_argument("--interval", type=int, default=60, help="loop interval, 15..3600 seconds")
+    parser.add_argument("--cache", type=Path)
+    parser.add_argument(
+        "--example-dir",
+        type=Path,
+        default=Path(__file__).resolve().parent,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--hyprlax-bin", default=os.environ.get("HYPRLAX_BIN", "hyprlax")
+    )
+    return parser
+
+
+def _manual_values(
+    arguments: argparse.Namespace,
+) -> Tuple[Optional[float], Optional[float], Optional[str]]:
+    return arguments.latitude, arguments.longitude, arguments.timezone_name
+
+
+def _preview(arguments: argparse.Namespace, now: datetime) -> Mapping[str, Any]:
+    latitude, longitude, timezone_name = _manual_values(arguments)
+    if timezone_name is None:
+        timezone_name = getattr(now.tzinfo, "key", None) or "UTC"
+    if latitude is None:
+        location = Location(0.0, 0.0, timezone_name, city="Preview", source="preview")
+    else:
+        location = manual_location(latitude, longitude, timezone_name, arguments.locality)
+    local_day = now.astimezone(_zone(location.timezone)).date()
+    astronomy = neutral_astronomy(local_day, location.timezone)
+    state = compute_scene_state(now, astronomy)
+    managed = assumed_managed_layers(arguments.example_dir)
+    commands = build_ipc_commands(managed, state, plan_asset_paths(managed))
+    return {
+        "mode": "dry-run",
+        "source": "preview",
+        "assumed_ids": True,
+        "location": _location_json(location),
+        "astronomy": astronomy.to_mapping(),
+        "state": _state_json(state),
+        "commands": [command.as_json() for command in commands],
+    }
+
+
+def _resolve(
+    arguments: argparse.Namespace,
+    cache: DailyCache,
+    client: HttpJsonClient,
+    now: datetime,
+) -> DailyFacts:
+    return resolve_daily_facts(
+        cache,
+        client,
+        now=now,
+        latitude=arguments.latitude,
+        longitude=arguments.longitude,
+        timezone_name=arguments.timezone_name,
+        locality=arguments.locality,
+    )
+
+
+def main(
+    argv: Optional[Tuple[str, ...]] = None,
+    *,
+    ipc_factory: Callable[..., HyprlaxIPC] = HyprlaxIPC,
+    client_factory: Callable[[], HttpJsonClient] = HttpJsonClient,
+    sleep: Callable[[float], None] = time_module.sleep,
+    now_provider: Callable[[], datetime] = lambda: datetime.now().astimezone(),
+) -> int:
+    parser = _parser()
+    arguments = parser.parse_args(argv)
+    manual = _manual_values(arguments)
+    if any(value is not None for value in manual) and not all(
+        value is not None for value in manual
+    ):
+        parser.error("--latitude, --longitude, and --timezone must be supplied together")
+    if not 15 <= arguments.interval <= 3600:
+        parser.error("--interval must be between 15 and 3600 seconds")
+    if arguments.loop and (arguments.status or arguments.dry_run):
+        parser.error("--loop cannot be combined with --status or --dry-run")
+
+    def current_time() -> datetime:
+        value = arguments.at or now_provider()
+        if value.tzinfo is None:
+            raise ValueError("current time must be timezone-aware")
+        return value
+
+    try:
+        if arguments.dry_run:
+            print(json.dumps(_preview(arguments, current_time()), sort_keys=True))
+            return 0
+
+        cache = DailyCache(arguments.cache)
+        client = client_factory()
+        if arguments.status:
+            now = current_time()
+            facts = _resolve(arguments, cache, client, now)
+            payload = {
+                "mode": "status",
+                "facts": _facts_json(facts),
+                "state": _state_json(compute_scene_state(now, facts.astronomy)),
+            }
+            print(json.dumps(payload, sort_keys=True))
+            return 0
+
+        controller = SceneController(
+            ipc_factory(binary=arguments.hyprlax_bin), arguments.example_dir
+        )
+        while True:
+            now = current_time()
+            try:
+                facts = _resolve(arguments, cache, client, now)
+                state = compute_scene_state(now, facts.astronomy)
+                commands = controller.apply_once(state)
+                payload = {
+                    "mode": "loop" if arguments.loop else "once",
+                    "phase": state.phase,
+                    "commands_applied": len(commands),
+                    "location_source": facts.location_source,
+                    "astronomy_source": facts.astronomy_source,
+                    "stale": facts.stale,
+                    "errors": list(facts.errors),
+                }
+                print(json.dumps(payload, sort_keys=True), flush=True)
+            except (CacheError, IPCError, ProviderError, OSError, ValueError) as error:
+                if not arguments.loop:
+                    raise
+                print(
+                    f"dynamic pixel city update failed: {_bounded_error(error)}",
+                    file=sys.stderr,
+                )
+            if not arguments.loop:
+                return 0
+            sleep(arguments.interval)
+    except KeyboardInterrupt:
+        return 0
+    except (CacheError, IPCError, ProviderError, OSError, ValueError) as error:
+        print(f"dynamic pixel city failed: {_bounded_error(error)}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

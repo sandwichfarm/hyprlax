@@ -3,17 +3,21 @@
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 import importlib.util
+import io
 import json
 import multiprocessing
 from pathlib import Path
+import shutil
 import stat
 import struct
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
 import unittest
 import zlib
 
@@ -725,6 +729,234 @@ class GeneratedAssetTests(unittest.TestCase):
         for dynamic_index in (1, 2, 7):
             self.assertEqual(0.0, layers[dynamic_index]["opacity"])
             self.assertEqual("none", layers[dynamic_index]["overflow"])
+
+
+def managed_layer_rows(example_directory, unrelated=True):
+    rows = []
+    for name in SCENE.MANAGED_NAMES:
+        if name.endswith(".png"):
+            path = example_directory / name
+        else:
+            path = example_directory / "generated" / f"{name}-a.png"
+        rows.append({"id": SCENE.ASSUMED_IDS[name], "path": str(path)})
+    if unrelated:
+        rows.append({"id": 99, "path": "/tmp/unrelated-wallpaper.png"})
+    return rows
+
+
+class FakeIPC:
+    def __init__(self, example_directory, fail_modifies=0, binary="hyprlax"):
+        self.binary = binary
+        self.rows = managed_layer_rows(example_directory)
+        self.commands = []
+        self.list_calls = 0
+        self.fail_modifies = fail_modifies
+
+    def list_layers(self):
+        self.list_calls += 1
+        return [dict(row) for row in self.rows]
+
+    def modify(self, command):
+        if self.fail_modifies:
+            self.fail_modifies -= 1
+            raise SCENE.IPCError("injected modify failure")
+        self.commands.append(command)
+        if command.property == "path":
+            for row in self.rows:
+                if row["id"] == command.layer_id:
+                    row["path"] = command.value
+                    break
+
+
+class IPCControllerTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.example = Path(self.temporary.name) / "pixel-city-dynamic"
+        shutil.copytree(ROOT / "examples" / "pixel-city-dynamic", self.example)
+        astronomy = SCENE.Astronomy.from_mapping(
+            SCENE.AstronomyProvider(StubClient(astronomy_payload())).fetch(
+                SCENE.manual_location(47.4979, 19.0402, "Europe/Budapest"),
+                date(2026, 7, 12),
+            ).to_mapping(),
+            expected_day=date(2026, 7, 12),
+            expected_timezone="Europe/Budapest",
+        )
+        self.state = SCENE.compute_scene_state(FIXED_NOW, astronomy)
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def test_discovery_owns_only_canonical_layers_and_ignores_unrelated(self):
+        managed = SCENE.discover_managed_layers(
+            managed_layer_rows(self.example), self.example
+        )
+        self.assertEqual(set(SCENE.MANAGED_NAMES), set(managed.layers))
+        self.assertNotIn(99, {layer.layer_id for layer in managed.layers.values()})
+
+    def test_discovery_rejects_missing_duplicate_malformed_and_whitespace(self):
+        rows = managed_layer_rows(self.example, unrelated=False)
+        with self.assertRaisesRegex(SCENE.IPCError, "missing"):
+            SCENE.discover_managed_layers(rows[:-1], self.example)
+        with self.assertRaisesRegex(SCENE.IPCError, "duplicate managed"):
+            SCENE.discover_managed_layers(rows + [dict(rows[0], id=77)], self.example)
+        with self.assertRaisesRegex(SCENE.IPCError, "positive integer"):
+            SCENE.discover_managed_layers([dict(rows[0], id="1"), *rows[1:]], self.example)
+        with self.assertRaisesRegex(SCENE.IPCError, "whitespace"):
+            SCENE.assumed_managed_layers(Path(self.temporary.name) / "space here")
+
+    def test_ipc_adapter_uses_bounded_exact_argv_and_propagates_failures(self):
+        calls = []
+
+        def runner(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return SimpleNamespace(returncode=0, stdout="[]", stderr="")
+
+        ipc = SCENE.HyprlaxIPC(binary="/tmp/hyprlax", runner=runner, timeout=2.5)
+        self.assertEqual([], ipc.list_layers())
+        self.assertEqual(
+            ["/tmp/hyprlax", "ctl", "list", "--json"], calls[0][0]
+        )
+        self.assertEqual(2.5, calls[0][1]["timeout"])
+        with self.assertRaisesRegex(SCENE.IPCError, "unsupported"):
+            ipc.modify(SCENE.IPCCommand("1.png", 1, "clear", "x"))
+
+        def failed_runner(argv, **kwargs):
+            return SimpleNamespace(returncode=7, stdout="", stderr="socket unavailable")
+
+        with self.assertRaisesRegex(SCENE.IPCError, "socket unavailable"):
+            SCENE.HyprlaxIPC(runner=failed_runner).list_layers()
+
+        def timed_out(argv, **kwargs):
+            raise SCENE.subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+        with self.assertRaisesRegex(SCENE.IPCError, "timed out"):
+            SCENE.HyprlaxIPC(runner=timed_out).list_layers()
+
+    def test_command_plan_is_allowlisted_ordered_and_never_targets_unrelated(self):
+        managed = SCENE.discover_managed_layers(
+            managed_layer_rows(self.example), self.example
+        )
+        commands = SCENE.build_ipc_commands(
+            managed, self.state, SCENE.plan_asset_paths(managed)
+        )
+        self.assertEqual(27, len(commands))
+        self.assertTrue(
+            all(command.property in SCENE.SUPPORTED_SCENE_PROPERTIES for command in commands)
+        )
+        self.assertNotIn(99, {command.layer_id for command in commands})
+        for name in ("moon", "shadow"):
+            path_index = next(
+                index for index, command in enumerate(commands)
+                if command.target == name and command.property == "path"
+            )
+            opacity_index = next(
+                index for index, command in enumerate(commands)
+                if command.target == name and command.property == "opacity"
+            )
+            self.assertLess(path_index, opacity_index)
+
+    def test_controller_deltas_commands_and_marks_only_success(self):
+        ipc = FakeIPC(self.example)
+        controller = SCENE.SceneController(ipc, self.example)
+        first = controller.apply_once(self.state)
+        second = controller.apply_once(self.state)
+        self.assertEqual(27, len(first))
+        self.assertEqual(0, len(second))
+        self.assertEqual(2, ipc.list_calls)
+        failing = FakeIPC(self.example, fail_modifies=1)
+        retrying = SCENE.SceneController(failing, self.example)
+        with self.assertRaisesRegex(SCENE.IPCError, "injected"):
+            retrying.apply_once(self.state)
+        self.assertEqual(27, len(retrying.apply_once(self.state)))
+
+    def test_dry_run_is_deterministic_and_has_no_external_side_effects(self):
+        cache = Path(self.temporary.name) / "must-not-exist.json"
+        generated = sorted((self.example / "generated").glob("*.png"))
+        before = {path.name: (path.stat().st_mtime_ns, path.read_bytes()) for path in generated}
+
+        def forbidden(*args, **kwargs):
+            raise AssertionError("dry-run attempted an external dependency")
+
+        stdout = io.StringIO()
+        arguments = (
+            "--dry-run", "--at", "2026-07-12T12:00:00+02:00",
+            "--cache", str(cache), "--example-dir", str(self.example),
+        )
+        with contextlib.redirect_stdout(stdout):
+            result = SCENE.main(
+                arguments, ipc_factory=forbidden, client_factory=forbidden
+            )
+        payload = json.loads(stdout.getvalue())
+        after = {path.name: (path.stat().st_mtime_ns, path.read_bytes()) for path in generated}
+        self.assertEqual(0, result)
+        self.assertEqual("preview", payload["source"])
+        self.assertTrue(payload["assumed_ids"])
+        self.assertEqual(27, len(payload["commands"]))
+        self.assertEqual(before, after)
+        self.assertFalse(cache.exists())
+
+    def test_cli_rejects_ambiguous_or_unsafe_arguments(self):
+        for arguments in (
+            ("--interval", "14"),
+            ("--loop", "--status"),
+            ("--latitude", "47.5"),
+            ("--at", "2026-07-12T12:00:00"),
+        ):
+            with self.subTest(arguments=arguments):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as raised:
+                        SCENE.main(arguments)
+                self.assertEqual(2, raised.exception.code)
+
+    def test_once_applies_live_commands_without_touching_unrelated_layer(self):
+        ipc = FakeIPC(self.example)
+        stdout = io.StringIO()
+        cache = Path(self.temporary.name) / "daily.json"
+        with contextlib.redirect_stdout(stdout):
+            result = SCENE.main(
+                (
+                    "--once", "--at", "2026-07-12T12:00:00+02:00",
+                    "--latitude", "47.4979", "--longitude", "19.0402",
+                    "--timezone", "Europe/Budapest", "--cache", str(cache),
+                    "--example-dir", str(self.example),
+                ),
+                ipc_factory=lambda **kwargs: ipc,
+                client_factory=lambda: StubClient(astronomy_payload()),
+            )
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(0, result)
+        self.assertEqual(27, payload["commands_applied"])
+        self.assertEqual("manual", payload["location_source"])
+        self.assertNotIn(99, {command.layer_id for command in ipc.commands})
+
+    def test_loop_retries_ipc_failure_and_daily_fetch_remains_single(self):
+        ipc = FakeIPC(self.example, fail_modifies=1)
+        client = StubClient(astronomy_payload())
+        sleep_calls = []
+
+        def stop_after_success(seconds):
+            sleep_calls.append(seconds)
+            if len(sleep_calls) == 2:
+                raise KeyboardInterrupt
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            result = SCENE.main(
+                (
+                    "--loop", "--at", "2026-07-12T12:00:00+02:00",
+                    "--latitude", "47.4979", "--longitude", "19.0402",
+                    "--timezone", "Europe/Budapest",
+                    "--cache", str(Path(self.temporary.name) / "loop.json"),
+                    "--example-dir", str(self.example), "--interval", "15",
+                ),
+                ipc_factory=lambda **kwargs: ipc,
+                client_factory=lambda: client,
+                sleep=stop_after_success,
+            )
+        self.assertEqual(0, result)
+        self.assertEqual([15, 15], sleep_calls)
+        self.assertEqual(1, len(client.calls))
+        self.assertGreaterEqual(ipc.list_calls, 2)
+        self.assertEqual(27, len(ipc.commands))
 
 
 class CopiedExampleTests(unittest.TestCase):
