@@ -155,14 +155,41 @@ static int send_command(int sock, const char *command, int want_json) {
         return -1;
     }
 
-    char response[IPC_MAX_MESSAGE_SIZE];
-    ssize_t n = recv(sock, response, sizeof(response) - 1, 0);
-    if (n < 0) {
+    char response[IPC_MAX_RESPONSE_SIZE];
+    size_t received = 0;
+    while (received < sizeof(response) - 1) {
+        ssize_t n = recv(sock, response + received,
+                         sizeof(response) - 1 - received, 0);
+        if (n > 0) {
+            received += (size_t)n;
+            continue;
+        }
+        if (n == 0) {
+            break;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
         fprintf(stderr, "Failed to receive response: %s\n", strerror(errno));
         return -1;
     }
+    if (received == sizeof(response) - 1) {
+        char extra;
+        ssize_t n;
+        do {
+            n = recv(sock, &extra, 1, 0);
+        } while (n < 0 && errno == EINTR);
+        if (n > 0) {
+            fprintf(stderr, "Daemon response exceeds IPC response limit\n");
+            return -1;
+        }
+        if (n < 0) {
+            fprintf(stderr, "Failed to finish receiving response: %s\n", strerror(errno));
+            return -1;
+        }
+    }
 
-    response[n] = '\0';
+    response[received] = '\0';
     if (!want_json) {
         /* If daemon returned nothing, emit a helpful error */
         const char *p = response; while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t') p++;
@@ -178,7 +205,7 @@ static int send_command(int sock, const char *command, int want_json) {
             printf("%s", response);
         } else {
             int is_error = (strstr(response, "Error:") || strstr(response, "error:") || strstr(response, "Error(") ) ? 1 : 0;
-            char esc[IPC_MAX_MESSAGE_SIZE * 2];
+            char esc[IPC_MAX_RESPONSE_SIZE * 2];
             json_escape(response, esc, sizeof(esc));
             if (is_error) {
                 /* Try to extract numeric code from Error(#): */

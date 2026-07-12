@@ -314,6 +314,9 @@ tests/test_config_validation: tests/test_config_validation.c
 tests/test_gif: tests/test_gif.c src/vendor/gifdec.c
 	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) -o $@
 
+tests/gif_probe: tests/gif_probe.c src/vendor/gifdec.c
+	$(CC) $(TEST_CFLAGS) -Wno-maybe-uninitialized -Isrc -Isrc/include $^ -o $@
+
 # Hyprland event parsing tests (link hyprland adapter and core compositor utils)
 tests/test_hyprland_events: tests/test_hyprland_events.c src/compositor/hyprland.c src/compositor/compositor.c src/core/log.c
 	$(CC) $(TEST_CFLAGS) -DUNIT_TEST -Isrc -Isrc/include $^ $(TEST_LIBS) -o $@
@@ -398,7 +401,7 @@ test: $(ALL_TEST_TARGETS)
 	fi
 
 # Run shell-based tests (scripts under tests/)
-test-scripts: $(TARGET)
+test-scripts: $(TARGET) tests/gif_probe
 	@echo "=== Running Shell Test Scripts ==="
 	@failed=0; total=0; \
 	for script in $(SHELL_TESTS); do \
@@ -481,7 +484,8 @@ lint-fix:
 	fi
 
 clean-tests:
-	rm -f $(ALL_TEST_TARGETS) tests/*.valgrind.log tests/*.valgrind.log.* tests/*.valgrind.log.core.*
+	rm -f $(ALL_TEST_TARGETS) tests/gif_probe tests/*.valgrind.log \
+		tests/*.valgrind.log.* tests/*.valgrind.log.core.*
 
 .PHONY: all clean install install-user uninstall uninstall-user test test-scripts memcheck clean-tests lint lint-fix bench bench-perf bench-30fps bench-clean
 # Benchmark helpers

@@ -51,20 +51,31 @@ static int parse_int_range(const char *s, int minv, int maxv, int *out);
 
 /* Helper function for safe send with timeout error handling */
 static bool ipc_send_safe(int fd, const char* data, size_t len) {
-    ssize_t sent = send(fd, data, len, 0);
-    if (sent < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            LOG_WARN("IPC client write timeout (slow client)");
-            return false;
-        } else if (errno == EPIPE) {
-            LOG_DEBUG("IPC client disconnected (EPIPE)");
-            return false;
-        } else if (errno != EINTR) {
-            LOG_ERROR("IPC write error: %s", strerror(errno));
+    size_t total = 0;
+
+    while (total < len) {
+        ssize_t sent = send(fd, data + total, len - total, 0);
+        if (sent > 0) {
+            total += (size_t)sent;
+            continue;
+        }
+        if (sent == 0) {
+            LOG_WARN("IPC client write returned zero bytes");
             return false;
         }
+        if (errno == EINTR) {
+            continue;
+        }
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            LOG_WARN("IPC client write timeout (slow client)");
+        } else if (errno == EPIPE) {
+            LOG_DEBUG("IPC client disconnected (EPIPE)");
+        } else {
+            LOG_ERROR("IPC write error: %s", strerror(errno));
+        }
+        return false;
     }
-    return (sent >= 0);
+    return true;
 }
 
 static int str_to_bool(const char *v) {
@@ -564,7 +575,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
             fprintf(stderr, "[DEBUG]   head.id=%u head.next=%p\n", app_dbg->layers->id, (void*)app_dbg->layers->next);
         }
     }
-    char response[IPC_MAX_MESSAGE_SIZE];
+    char response[IPC_MAX_RESPONSE_SIZE];
     bool success = false;
 
     /* Helper to renormalize z_index after reordering */
@@ -756,6 +767,7 @@ bool ipc_process_commands(ipc_context_t* ctx) {
             }
 
             size_t off = 0; response[0] = '\0';
+            bool response_overflow = false;
             pthread_mutex_lock(&app->layer_mutex);
             if (json) {
                 off += snprintf(response + off, sizeof(response) - off, "[");
@@ -791,11 +803,18 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                         it->base_uv_x, it->base_uv_y, fit_s, it->align_x, it->align_y, it->content_scale, it->blur_amount,
                         over_s, eff_tile_x?"true":"false", eff_tile_y?"true":"false", eff_mx, eff_my, it->hidden?"true":"false",
                         it->tint_r, it->tint_g, it->tint_b, it->tint_strength);
-                    if (w < 0 || off + (size_t)w >= sizeof(response)) { break; }
+                    if (w < 0 || off + (size_t)w >= sizeof(response)) {
+                        response_overflow = true;
+                        break;
+                    }
                     off += (size_t)w;
                 }
-                if (off + 2 < sizeof(response)) { response[off++] = ']'; response[off++]='\n'; response[off]='\0'; }
-                success = true;
+                if (!response_overflow && off + 2 < sizeof(response)) {
+                    response[off++] = ']'; response[off++]='\n'; response[off]='\0';
+                } else {
+                    response_overflow = true;
+                }
+                success = !response_overflow;
             } else if (longf) {
                 for (parallax_layer_t *it = app->layers; it; it = it->next) {
                     if (filter_id >= 0 && (int)it->id != filter_id) continue;
@@ -829,10 +848,13 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                                      it->hidden?"yes":"no",
                                      (unsigned int)it->texture_id, it->width, it->height,
                                      (int)(it->tint_r*255.0f+0.5f), (int)(it->tint_g*255.0f+0.5f), (int)(it->tint_b*255.0f+0.5f), it->tint_strength);
-                    if (w < 0 || off + (size_t)w >= sizeof(response)) { break; }
+                    if (w < 0 || off + (size_t)w >= sizeof(response)) {
+                        response_overflow = true;
+                        break;
+                    }
                     off += (size_t)w;
                 }
-                success = true;
+                success = !response_overflow;
             } else {
                 /* Compact */
                 for (parallax_layer_t *it = app->layers; it; it = it->next) {
@@ -843,12 +865,19 @@ bool ipc_process_commands(ipc_context_t* ctx) {
                                      "%u z=%d op=%.2f shift_multiplier=%.2f blur=%.2f vis=%s path=%s\n",
                                      it->id, it->z_index, it->opacity, it->shift_multiplier, it->blur_amount,
                                      it->hidden?"y":"n", it->image_path ? it->image_path : "<memory>");
-                    if (w < 0 || off + (size_t)w >= sizeof(response)) { break; }
+                    if (w < 0 || off + (size_t)w >= sizeof(response)) {
+                        response_overflow = true;
+                        break;
+                    }
                     off += (size_t)w;
                 }
-                success = true;
+                success = !response_overflow;
             }
             pthread_mutex_unlock(&app->layer_mutex);
+            if (response_overflow) {
+                ipc_errorf(response, sizeof(response), 1301,
+                           "Layer list exceeds IPC response limit\n");
+            }
             break;
         }
 
@@ -1389,28 +1418,28 @@ char* ipc_list_layers(ipc_context_t* ctx) {
     if (!ctx) return NULL;
     if (!ctx->app_context) {
         if (ctx->layer_count == 0) return NULL;
-        char *result = malloc(IPC_MAX_MESSAGE_SIZE); if (!result) return NULL;
+        char *result = malloc(IPC_MAX_RESPONSE_SIZE); if (!result) return NULL;
         size_t off = 0; result[0]='\0';
         for (int i = 0; i < ctx->layer_count; i++) {
             layer_t *layer = ctx->layers[i]; if (!layer) continue;
-            int w = snprintf(result + off, IPC_MAX_MESSAGE_SIZE - off,
+            int w = snprintf(result + off, IPC_MAX_RESPONSE_SIZE - off,
                 "ID: %u | Path: %s | Shift Multiplier: %.2f | Opacity: %.2f | Position: (%.2f, %.2f) | Z: %d | Visible: %s\n",
                 layer->id, layer->image_path, layer->scale, layer->opacity,
                 layer->x_offset, layer->y_offset, layer->z_index,
                 layer->visible ? "yes" : "no");
-            if (w < 0 || off + (size_t)w >= IPC_MAX_MESSAGE_SIZE) { break; }
+            if (w < 0 || off + (size_t)w >= IPC_MAX_RESPONSE_SIZE) { break; }
             off += (size_t)w;
         }
         return result;
     }
     hyprlax_context_t *app = (hyprlax_context_t*)ctx->app_context;
     if (!app->layers) return NULL;
-    char *out = malloc(IPC_MAX_MESSAGE_SIZE); if (!out) return NULL; out[0] = '\0'; size_t off = 0;
+    char *out = malloc(IPC_MAX_RESPONSE_SIZE); if (!out) return NULL; out[0] = '\0'; size_t off = 0;
                 int guard2 = 0; for (parallax_layer_t *it = app->layers; it && guard2 < (app->layer_count + 4); it = it->next, guard2++) {
-                    int w = snprintf(out + off, IPC_MAX_MESSAGE_SIZE - off,
+                    int w = snprintf(out + off, IPC_MAX_RESPONSE_SIZE - off,
                          "ID: %u | Path: %s | Shift: %.2f | Opacity: %.2f | Z: %d\n",
                          it->id, it->image_path ? it->image_path : "<memory>", it->shift_multiplier, it->opacity, it->z_index);
-        if (w < 0 || off + (size_t)w >= IPC_MAX_MESSAGE_SIZE)
+        if (w < 0 || off + (size_t)w >= IPC_MAX_RESPONSE_SIZE)
             break;
         off += (size_t)w;
     }

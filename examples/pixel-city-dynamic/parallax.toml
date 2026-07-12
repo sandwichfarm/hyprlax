@@ -38,6 +38,15 @@ overflow = "none"
 tile = { x = false, y = false }
 
 [[global.layers]]
+path = "./generated/weather-cloud-a.gif"
+shift_multiplier = 0.16
+opacity = 0.0
+blur = 0.3
+fit = "cover"
+overflow = "none"
+tile = { x = false, y = false }
+
+[[global.layers]]
 path = "./2.png"
 shift_multiplier = 0.2
 opacity = 1.0
@@ -50,10 +59,28 @@ opacity = 1.0
 blur = 1.1
 
 [[global.layers]]
+path = "./generated/weather-fog-back-a.gif"
+shift_multiplier = 0.35
+opacity = 0.0
+blur = 0.8
+fit = "cover"
+overflow = "none"
+tile = { x = false, y = false }
+
+[[global.layers]]
 path = "./4.png"
 shift_multiplier = 0.4
 opacity = 1.0
 blur = 0.3
+
+[[global.layers]]
+path = "./generated/weather-precip-back-a.gif"
+shift_multiplier = 0.45
+opacity = 0.0
+blur = 0.0
+fit = "cover"
+overflow = "none"
+tile = { x = false, y = false }
 
 [[global.layers]]
 path = "./5.png"
@@ -75,3 +102,21 @@ path = "./6.png"
 shift_multiplier = 1.0
 opacity = 1.0
 blur = 0.0
+
+[[global.layers]]
+path = "./generated/weather-fog-front-a.gif"
+shift_multiplier = 1.05
+opacity = 0.0
+blur = 0.4
+fit = "cover"
+overflow = "none"
+tile = { x = false, y = false }
+
+[[global.layers]]
+path = "./generated/weather-precip-front-a.gif"
+shift_multiplier = 1.15
+opacity = 0.0
+blur = 0.0
+fit = "cover"
+overflow = "none"
+tile = { x = false, y = false }
