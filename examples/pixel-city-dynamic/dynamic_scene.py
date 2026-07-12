@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timezone as datetime_timezone
+from datetime import date, datetime, time, timedelta, timezone as datetime_timezone
 import fcntl
 import json
 import math
@@ -264,6 +264,336 @@ class DailyFacts:
     astronomy_source: str
     stale: bool
     errors: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class LayerLook:
+    tint_rgb: Tuple[float, float, float]
+    tint_strength: float
+    opacity: float
+    blur: float
+
+
+@dataclass(frozen=True)
+class SceneState:
+    phase: str
+    phase_blend: float
+    ambient_brightness: float
+    saturation_impression: float
+    stars_opacity: float
+    city_light_intensity: float
+    layer_looks: Mapping[str, LayerLook]
+    sun_visible: bool
+    sun_progress: float
+    sun_x: float
+    sun_y: float
+    sun_opacity: float
+    solar_elevation: float
+    moon_visible: bool
+    moon_progress: float
+    moon_x: float
+    moon_y: float
+    moon_opacity: float
+    moon_phase: str
+    moon_illumination: float
+    lunar_fill: float
+
+
+@dataclass(frozen=True)
+class _LightingPreset:
+    name: str
+    ambient: float
+    saturation_impression: float
+    stars: float
+    city_lights: float
+    tint_rgb: Tuple[float, float, float]
+    strengths: Tuple[float, float, float, float, float, float]
+    opacities: Tuple[float, float, float, float, float, float]
+
+
+_BASE_BLURS = (0.0, 2.0, 1.1, 0.3, 0.0, 0.0)
+LIGHTING_PRESETS: Mapping[str, _LightingPreset] = {
+    "night": _LightingPreset(
+        "night",
+        0.18,
+        0.55,
+        1.0,
+        1.0,
+        (0.28, 0.38, 0.62),
+        (0.72, 0.68, 0.62, 0.56, 0.50, 0.44),
+        (1.00, 1.00, 0.96, 0.94, 0.92, 0.90),
+    ),
+    "sunrise": _LightingPreset(
+        "sunrise",
+        0.48,
+        0.82,
+        0.25,
+        0.72,
+        (1.00, 0.52, 0.30),
+        (0.62, 0.55, 0.50, 0.42, 0.35, 0.28),
+        (1.00, 0.94, 0.96, 0.98, 1.00, 1.00),
+    ),
+    "morning": _LightingPreset(
+        "morning",
+        0.78,
+        0.95,
+        0.02,
+        0.20,
+        (1.00, 0.82, 0.64),
+        (0.32, 0.28, 0.24, 0.20, 0.15, 0.10),
+        (1.00, 0.82, 0.96, 1.00, 1.00, 1.00),
+    ),
+    "high_noon": _LightingPreset(
+        "high_noon",
+        1.00,
+        1.00,
+        0.0,
+        0.0,
+        (1.00, 1.00, 1.00),
+        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        (1.00, 0.72, 0.95, 1.00, 1.00, 1.00),
+    ),
+    "late_afternoon": _LightingPreset(
+        "late_afternoon",
+        0.74,
+        0.92,
+        0.02,
+        0.22,
+        (1.00, 0.68, 0.40),
+        (0.38, 0.34, 0.29, 0.23, 0.18, 0.12),
+        (1.00, 0.82, 0.96, 1.00, 1.00, 1.00),
+    ),
+    "sunset": _LightingPreset(
+        "sunset",
+        0.42,
+        0.78,
+        0.30,
+        0.78,
+        (1.00, 0.35, 0.22),
+        (0.70, 0.64, 0.57, 0.49, 0.40, 0.32),
+        (1.00, 0.96, 0.96, 0.96, 0.98, 1.00),
+    ),
+}
+
+
+def _clamp(value: float, minimum: float = 0.0, maximum: float = 1.0) -> float:
+    return max(minimum, min(maximum, value))
+
+
+def _lerp(start: float, end: float, amount: float) -> float:
+    return start + (end - start) * amount
+
+
+def _smoothstep(amount: float) -> float:
+    bounded = _clamp(amount)
+    return bounded * bounded * (3.0 - 2.0 * bounded)
+
+
+def _seconds_on_day(value: datetime, requested_day: date, zone: ZoneInfo) -> float:
+    local = value.astimezone(zone)
+    midnight = datetime.combine(requested_day, time.min, zone)
+    return (local - midnight).total_seconds()
+
+
+def _solar_timeline(astronomy: Astronomy) -> Tuple[Tuple[float, _LightingPreset], ...]:
+    zone = _zone(astronomy.timezone)
+    fallback = neutral_astronomy(astronomy.day, astronomy.timezone)
+    dawn = astronomy.civil_twilight_begin or fallback.civil_twilight_begin
+    sunrise = astronomy.sunrise or fallback.sunrise
+    noon = astronomy.solar_noon or fallback.solar_noon
+    sunset = astronomy.sunset or fallback.sunset
+    dusk = astronomy.civil_twilight_end or fallback.civil_twilight_end
+    assert dawn is not None and sunrise is not None and noon is not None
+    assert sunset is not None and dusk is not None
+    values = [
+        _seconds_on_day(item, astronomy.day, zone)
+        for item in (dawn, sunrise, noon, sunset, dusk)
+    ]
+    if not all(0.0 <= item <= 86400.0 for item in values) or not all(
+        left < right for left, right in zip(values, values[1:])
+    ):
+        values = [5.5 * 3600.0, 6.0 * 3600.0, 12.0 * 3600.0, 18.0 * 3600.0, 18.5 * 3600.0]
+    dawn_s, sunrise_s, noon_s, sunset_s, dusk_s = values
+    morning_s = (sunrise_s + noon_s) * 0.5
+    afternoon_s = (noon_s + sunset_s) * 0.5
+    return (
+        (0.0, LIGHTING_PRESETS["night"]),
+        (dawn_s, LIGHTING_PRESETS["sunrise"]),
+        (morning_s, LIGHTING_PRESETS["morning"]),
+        (noon_s, LIGHTING_PRESETS["high_noon"]),
+        (afternoon_s, LIGHTING_PRESETS["late_afternoon"]),
+        (sunset_s, LIGHTING_PRESETS["sunset"]),
+        (dusk_s, LIGHTING_PRESETS["night"]),
+        (86400.0, LIGHTING_PRESETS["night"]),
+    )
+
+
+def _interpolate_lighting(
+    start: _LightingPreset, end: _LightingPreset, amount: float
+) -> Tuple[float, float, float, float, Dict[str, LayerLook]]:
+    blend = _smoothstep(amount)
+    looks: Dict[str, LayerLook] = {}
+    tint = tuple(_lerp(start.tint_rgb[i], end.tint_rgb[i], blend) for i in range(3))
+    for index in range(6):
+        looks[f"{index + 1}.png"] = LayerLook(
+            tint_rgb=tint,
+            tint_strength=_lerp(start.strengths[index], end.strengths[index], blend),
+            opacity=_lerp(start.opacities[index], end.opacities[index], blend),
+            blur=_BASE_BLURS[index],
+        )
+    return (
+        _lerp(start.ambient, end.ambient, blend),
+        _lerp(start.saturation_impression, end.saturation_impression, blend),
+        _lerp(start.stars, end.stars, blend),
+        _lerp(start.city_lights, end.city_lights, blend),
+        looks,
+    )
+
+
+def _lighting_at(
+    now: datetime, astronomy: Astronomy
+) -> Tuple[str, float, float, float, float, float, Dict[str, LayerLook]]:
+    if astronomy.sun_status == "polar_night":
+        preset = LIGHTING_PRESETS["night"]
+        ambient, colorfulness, stars, city, looks = _interpolate_lighting(preset, preset, 0.0)
+        return preset.name, 0.0, ambient, colorfulness, stars, city, looks
+    if astronomy.sun_status == "midnight_sun":
+        preset = LIGHTING_PRESETS["high_noon"]
+        ambient, colorfulness, stars, city, looks = _interpolate_lighting(preset, preset, 0.0)
+        return preset.name, 0.0, ambient, colorfulness, stars, city, looks
+    zone = _zone(astronomy.timezone)
+    local = now.astimezone(zone)
+    current_seconds = _seconds_on_day(local, astronomy.day, zone)
+    if local.date() < astronomy.day:
+        current_seconds = 0.0
+    elif local.date() > astronomy.day:
+        current_seconds = 86400.0
+    timeline = _solar_timeline(astronomy)
+    for (start_second, start), (end_second, end) in zip(timeline, timeline[1:]):
+        if start_second <= current_seconds <= end_second:
+            span = max(1.0, end_second - start_second)
+            raw = _clamp((current_seconds - start_second) / span)
+            phase = end.name if raw >= 1.0 else start.name
+            ambient, colorfulness, stars, city, looks = _interpolate_lighting(start, end, raw)
+            return phase, raw, ambient, colorfulness, stars, city, looks
+    preset = LIGHTING_PRESETS["night"]
+    ambient, colorfulness, stars, city, looks = _interpolate_lighting(preset, preset, 0.0)
+    return preset.name, 0.0, ambient, colorfulness, stars, city, looks
+
+
+def _sun_state(
+    now: datetime, astronomy: Astronomy
+) -> Tuple[bool, float, float, float, float, float]:
+    zone = _zone(astronomy.timezone)
+    local = now.astimezone(zone)
+    if astronomy.sun_status == "polar_night":
+        return False, 0.0, -0.34, 0.18, 0.0, 0.0
+    if astronomy.sun_status == "midnight_sun":
+        midnight = datetime.combine(local.date(), time.min, zone)
+        progress = _clamp((local - midnight).total_seconds() / 86400.0)
+        elevation = 0.55 + 0.45 * math.sin(math.pi * progress) ** 2
+        x = 0.34 * math.sin(2.0 * math.pi * (progress - 0.25))
+        y = 0.05 - 0.25 * elevation
+        return True, progress, x, y, 1.0, elevation
+    sunrise = astronomy.sunrise or neutral_astronomy(astronomy.day, astronomy.timezone).sunrise
+    sunset = astronomy.sunset or neutral_astronomy(astronomy.day, astronomy.timezone).sunset
+    assert sunrise is not None and sunset is not None
+    sunrise = sunrise.astimezone(zone)
+    sunset = sunset.astimezone(zone)
+    span = (sunset - sunrise).total_seconds()
+    if span <= 0.0:
+        return False, 0.0, -0.34, 0.18, 0.0, 0.0
+    raw = (local - sunrise).total_seconds() / span
+    progress = _clamp(raw)
+    elevation = math.sin(math.pi * progress) if 0.0 <= raw <= 1.0 else 0.0
+    x = -0.34 + 0.68 * progress
+    y = 0.18 - 0.42 * elevation
+    horizon = _clamp(min(progress / 0.08, (1.0 - progress) / 0.08))
+    visible = 0.0 <= raw <= 1.0
+    return visible, progress, x, y, horizon if visible else 0.0, elevation
+
+
+def _moon_interval_progress(
+    now: datetime, astronomy: Astronomy
+) -> Tuple[bool, float]:
+    if astronomy.moonrise is None or astronomy.moonset is None:
+        return False, 0.0
+    zone = _zone(astronomy.timezone)
+    local = now.astimezone(zone)
+    rise = astronomy.moonrise.astimezone(zone)
+    moonset = astronomy.moonset.astimezone(zone)
+    if moonset <= rise:
+        moonset += timedelta(days=1)
+    for offset in (-1, 0, 1):
+        shift = timedelta(days=offset)
+        candidate_rise = rise + shift
+        candidate_set = moonset + shift
+        if candidate_rise <= local <= candidate_set:
+            span = max(1.0, (candidate_set - candidate_rise).total_seconds())
+            return True, _clamp((local - candidate_rise).total_seconds() / span)
+    return False, 0.0
+
+
+def compute_scene_state(now: datetime, astronomy: Astronomy) -> SceneState:
+    if now.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+    phase, phase_blend, ambient, colorfulness, stars, city, looks = _lighting_at(now, astronomy)
+    sun_visible, sun_progress, sun_x, sun_y, sun_opacity, solar_elevation = _sun_state(
+        now, astronomy
+    )
+    moon_visible, moon_progress = _moon_interval_progress(now, astronomy)
+    moon_elevation = math.sin(math.pi * moon_progress) if moon_visible else 0.0
+    moon_x = -0.35 + 0.70 * moon_progress
+    moon_y = 0.20 - 0.36 * moon_elevation
+    moon_horizon = (
+        _clamp(min(moon_progress / 0.08, (1.0 - moon_progress) / 0.08))
+        if moon_visible
+        else 0.0
+    )
+    illumination = _clamp(astronomy.moon_illumination / 100.0)
+    moon_opacity = moon_horizon * (0.08 + 0.92 * math.sqrt(illumination))
+    night_factor = _clamp((0.65 - ambient) / 0.47)
+    lunar_fill = moon_horizon * night_factor * illumination ** 0.7
+    if lunar_fill > 0.0:
+        ambient = _clamp(ambient + 0.16 * lunar_fill)
+        stars = _clamp(stars * (1.0 - 0.60 * lunar_fill))
+        city = _clamp(city * (1.0 - 0.25 * lunar_fill))
+        lifted: Dict[str, LayerLook] = {}
+        moon_tint = (0.68, 0.76, 1.00)
+        for name, look in looks.items():
+            lifted[name] = LayerLook(
+                tint_rgb=tuple(
+                    _clamp(_lerp(look.tint_rgb[i], moon_tint[i], 0.18 * lunar_fill))
+                    for i in range(3)
+                ),
+                tint_strength=_clamp(look.tint_strength - 0.16 * lunar_fill),
+                opacity=_clamp(look.opacity + 0.04 * lunar_fill),
+                blur=look.blur,
+            )
+        looks = lifted
+    return SceneState(
+        phase=phase,
+        phase_blend=phase_blend,
+        ambient_brightness=_clamp(ambient),
+        saturation_impression=_clamp(colorfulness),
+        stars_opacity=_clamp(stars),
+        city_light_intensity=_clamp(city),
+        layer_looks=looks,
+        sun_visible=sun_visible,
+        sun_progress=_clamp(sun_progress),
+        sun_x=_clamp(sun_x, -0.34, 0.34),
+        sun_y=_clamp(sun_y, -0.24, 0.18),
+        sun_opacity=_clamp(sun_opacity),
+        solar_elevation=_clamp(solar_elevation),
+        moon_visible=moon_visible,
+        moon_progress=_clamp(moon_progress),
+        moon_x=_clamp(moon_x, -0.35, 0.35),
+        moon_y=_clamp(moon_y, -0.16, 0.20),
+        moon_opacity=_clamp(moon_opacity),
+        moon_phase=astronomy.moon_phase,
+        moon_illumination=astronomy.moon_illumination,
+        lunar_fill=_clamp(lunar_fill),
+    )
 
 
 class DailyCache:
