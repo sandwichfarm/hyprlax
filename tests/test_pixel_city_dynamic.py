@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from dataclasses import replace
+from datetime import date, datetime, timedelta, timezone
 import importlib.util
 import json
 import multiprocessing
@@ -390,6 +391,187 @@ class DailyFactsTests(unittest.TestCase):
         self.assertEqual(0.0, result.moon_illumination)
 
 
+class SceneModelTests(unittest.TestCase):
+    def astronomy(self):
+        location = SCENE.manual_location(47.4979, 19.0402, "Europe/Budapest")
+        return SCENE.AstronomyProvider(StubClient(astronomy_payload())).fetch(
+            location, date(2026, 7, 12)
+        )
+
+    @staticmethod
+    def local(value: str):
+        return datetime.fromisoformat(value)
+
+    def test_every_named_lighting_anchor(self):
+        astronomy = self.astronomy()
+        anchors = {
+            "night": ("2026-07-12T00:00:00+02:00", "2026-07-12T21:15:00+02:00"),
+            "sunrise": ("2026-07-12T04:25:00+02:00",),
+            "morning": ("2026-07-12T08:55:00+02:00",),
+            "high_noon": ("2026-07-12T12:50:00+02:00",),
+            "late_afternoon": ("2026-07-12T16:45:00+02:00",),
+            "sunset": ("2026-07-12T20:40:00+02:00",),
+        }
+        for expected, values in anchors.items():
+            for value in values:
+                with self.subTest(expected=expected, value=value):
+                    state = SCENE.compute_scene_state(self.local(value), astronomy)
+                    self.assertEqual(expected, state.phase)
+
+    def test_keyframe_interpolation_is_continuous(self):
+        astronomy = self.astronomy()
+        anchors = (
+            "2026-07-12T04:25:00+02:00",
+            "2026-07-12T08:55:00+02:00",
+            "2026-07-12T12:50:00+02:00",
+            "2026-07-12T16:45:00+02:00",
+            "2026-07-12T20:40:00+02:00",
+            "2026-07-12T21:15:00+02:00",
+        )
+        for value in anchors:
+            anchor = self.local(value)
+            before = SCENE.compute_scene_state(anchor - timedelta(seconds=1), astronomy)
+            after = SCENE.compute_scene_state(anchor + timedelta(seconds=1), astronomy)
+            with self.subTest(anchor=value):
+                self.assertLess(abs(before.ambient_brightness - after.ambient_brightness), 0.001)
+                self.assertLess(
+                    abs(
+                        before.layer_looks["1.png"].tint_strength
+                        - after.layer_looks["1.png"].tint_strength
+                    ),
+                    0.001,
+                )
+
+    def test_layer_looks_use_only_supported_bounded_primitives(self):
+        state = SCENE.compute_scene_state(
+            self.local("2026-07-12T06:00:00+02:00"), self.astronomy()
+        )
+        self.assertEqual({f"{index}.png" for index in range(1, 7)}, set(state.layer_looks))
+        self.assertEqual(
+            {"tint_rgb", "tint_strength", "opacity", "blur"},
+            set(SCENE.LayerLook.__dataclass_fields__),
+        )
+        self.assertNotIn("saturation", SCENE.LayerLook.__dataclass_fields__)
+        self.assertIn("saturation_impression", SCENE.SceneState.__dataclass_fields__)
+        for look in state.layer_looks.values():
+            self.assertTrue(all(0.0 <= channel <= 1.0 for channel in look.tint_rgb))
+            self.assertTrue(0.0 <= look.tint_strength <= 1.0)
+            self.assertTrue(0.0 <= look.opacity <= 1.0)
+            self.assertGreaterEqual(look.blur, 0.0)
+        self.assertEqual([0.0, 2.0, 1.1, 0.3, 0.0, 0.0], [
+            state.layer_looks[f"{index}.png"].blur for index in range(1, 7)
+        ])
+
+    def test_sun_trajectory_is_bounded_and_uses_opposite_endpoints(self):
+        astronomy = self.astronomy()
+        for hour in range(24):
+            state = SCENE.compute_scene_state(
+                datetime(2026, 7, 12, hour, 0, tzinfo=timezone.utc), astronomy
+            )
+            with self.subTest(hour=hour):
+                self.assertTrue(-0.34 <= state.sun_x <= 0.34)
+                self.assertTrue(-0.24 <= state.sun_y <= 0.18)
+                self.assertTrue(0.0 <= state.sun_progress <= 1.0)
+                self.assertTrue(0.0 <= state.sun_opacity <= 1.0)
+                self.assertTrue(0.0 <= state.solar_elevation <= 1.0)
+        sunrise = SCENE.compute_scene_state(
+            self.local("2026-07-12T05:00:00+02:00"), astronomy
+        )
+        sunset = SCENE.compute_scene_state(
+            self.local("2026-07-12T20:40:00+02:00"), astronomy
+        )
+        self.assertAlmostEqual(-0.34, sunrise.sun_x)
+        self.assertAlmostEqual(0.34, sunset.sun_x)
+
+    def test_cross_midnight_moon_visibility_and_bounds(self):
+        astronomy = self.astronomy()
+        cases = (
+            ("2026-07-12T01:00:00+02:00", True),
+            ("2026-07-12T12:00:00+02:00", False),
+            ("2026-07-12T23:30:00+02:00", True),
+        )
+        for value, expected in cases:
+            state = SCENE.compute_scene_state(self.local(value), astronomy)
+            with self.subTest(value=value):
+                self.assertEqual(expected, state.moon_visible)
+                self.assertTrue(-0.35 <= state.moon_x <= 0.35)
+                self.assertTrue(-0.16 <= state.moon_y <= 0.20)
+                self.assertTrue(0.0 <= state.moon_progress <= 1.0)
+                self.assertTrue(0.0 <= state.moon_opacity <= 1.0)
+
+    def test_missing_moon_event_never_invents_visibility(self):
+        astronomy = self.astronomy()
+        now = self.local("2026-07-12T01:00:00+02:00")
+        for missing in ("moonrise", "moonset"):
+            changed = replace(astronomy, **{missing: None})
+            with self.subTest(missing=missing):
+                self.assertFalse(SCENE.compute_scene_state(now, changed).moon_visible)
+
+    def test_new_quarter_full_moon_lighting_is_strictly_ordered(self):
+        astronomy = self.astronomy()
+        now = self.local("2026-07-12T01:00:00+02:00")
+        states = [
+            SCENE.compute_scene_state(
+                now,
+                replace(astronomy, moon_phase=phase, moon_illumination=illumination),
+            )
+            for phase, illumination in (
+                ("New Moon", 0.0),
+                ("First Quarter", 50.0),
+                ("Full Moon", 100.0),
+            )
+        ]
+        self.assertEqual(0.0, states[0].lunar_fill)
+        self.assertLess(states[0].lunar_fill, states[1].lunar_fill)
+        self.assertLess(states[1].lunar_fill, states[2].lunar_fill)
+        self.assertLess(states[0].ambient_brightness, states[1].ambient_brightness)
+        self.assertLess(states[1].ambient_brightness, states[2].ambient_brightness)
+        self.assertEqual("Full Moon", states[2].moon_phase)
+
+    def test_dst_and_polar_states_are_deterministic(self):
+        dst = SCENE.neutral_astronomy(date(2026, 10, 25), "Europe/Budapest")
+        dst_state = SCENE.compute_scene_state(
+            datetime(2026, 10, 25, 11, 0, tzinfo=timezone.utc), dst
+        )
+        self.assertEqual("high_noon", dst_state.phase)
+        base = self.astronomy()
+        polar_night = replace(
+            base,
+            sun_status="polar_night",
+            sunrise=None,
+            sunset=None,
+            solar_noon=None,
+        )
+        midnight_sun = replace(
+            base,
+            sun_status="midnight_sun",
+            sunrise=None,
+            sunset=None,
+            solar_noon=None,
+        )
+        night_state = SCENE.compute_scene_state(FIXED_NOW, polar_night)
+        day_state = SCENE.compute_scene_state(FIXED_NOW, midnight_sun)
+        self.assertEqual("night", night_state.phase)
+        self.assertFalse(night_state.sun_visible)
+        self.assertEqual("high_noon", day_state.phase)
+        self.assertTrue(day_state.sun_visible)
+
+    def test_normal_missing_solar_fields_use_neutral_anchors(self):
+        missing = replace(
+            self.astronomy(),
+            civil_twilight_begin=None,
+            sunrise=None,
+            solar_noon=None,
+            sunset=None,
+            civil_twilight_end=None,
+        )
+        state = SCENE.compute_scene_state(
+            self.local("2026-07-12T12:00:00+02:00"), missing
+        )
+        self.assertEqual("high_noon", state.phase)
+        self.assertTrue(state.sun_visible)
+
+
 class CopiedExampleTests(unittest.TestCase):
     def test_copied_config_parses_with_six_existing_layers(self):
         try:
@@ -407,4 +589,3 @@ class CopiedExampleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

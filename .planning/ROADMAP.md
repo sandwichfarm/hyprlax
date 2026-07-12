@@ -48,7 +48,7 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 02-01: Implement normalized timeline, keyframe interpolation, and solar/lunar trajectories
+- [x] 02-01: Implement normalized timeline, keyframe interpolation, and solar/lunar trajectories
 - [ ] 02-02: Lock named states, DST/polar transitions, and moon illumination with model tests
 
 ### Phase 3: Pixel Sky and Shadows
@@ -101,7 +101,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Daily Data Foundation | 2/2 | Complete    | 2026-07-12 |
-| 2. Astronomical Scene Model | 0/2 | Not started | - |
+| 2. Astronomical Scene Model | 1/2 | In Progress|  |
 | 3. Pixel Sky and Shadows | 0/2 | Not started | - |
 | 4. Safe IPC Controller | 0/2 | Not started | - |
 | 5. Operational Proof and Delivery | 0/2 | Not started | - |
