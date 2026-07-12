@@ -30,9 +30,9 @@
 
 ### Generated Visuals
 
-- [ ] **ASSET-01**: Example generates valid transparent 576x324 pixel-art sun and phase-correct moon PNG overlays using only Python standard library.
-- [ ] **SHADOW-01**: Example synthesizes a directional pixel shadow overlay whose direction, length, and opacity respond to solar position and disappear safely when the sun is unavailable.
-- [ ] **ASSET-02**: Dynamic image updates are atomic and double-buffered so Hyprlax never reads a partial PNG and path changes reliably reload textures.
+- [x] **ASSET-01**: Example generates valid transparent 576x324 pixel-art sun and phase-correct moon PNG overlays using only Python standard library.
+- [x] **SHADOW-01**: Example synthesizes a directional pixel shadow overlay whose direction, length, and opacity respond to solar position and disappear safely when the sun is unavailable.
+- [x] **ASSET-02**: Dynamic image updates are atomic and double-buffered so Hyprlax never reads a partial PNG and path changes reliably reload textures.
 
 ### IPC and Operation
 
@@ -74,9 +74,9 @@
 | LIGHT-03 | Phase 2 | Complete |
 | SKY-01 | Phase 2 | Complete |
 | SKY-02 | Phase 2 | Complete |
-| ASSET-01 | Phase 3 | Pending |
-| SHADOW-01 | Phase 3 | Pending |
-| ASSET-02 | Phase 3 | Pending |
+| ASSET-01 | Phase 3 | Complete |
+| SHADOW-01 | Phase 3 | Complete |
+| ASSET-02 | Phase 3 | Complete |
 | IPC-01 | Phase 4 | Pending |
 | IPC-02 | Phase 4 | Pending |
 | CLI-01 | Phase 4 | Pending |

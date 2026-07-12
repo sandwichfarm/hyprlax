@@ -15,7 +15,7 @@ experience before opening the PR.
 
 - [x] **Phase 1: Daily Data Foundation** - Valid copied scene plus bounded, cached location and astronomy inputs (completed 2026-07-12)
 - [x] **Phase 2: Astronomical Scene Model** - Deterministic continuous sun, moon, and lighting calculations (completed 2026-07-12)
-- [ ] **Phase 3: Pixel Sky and Shadows** - Dependency-free phase-correct celestial and directional shadow overlays
+- [x] **Phase 3: Pixel Sky and Shadows** - Dependency-free phase-correct celestial and directional shadow overlays (completed 2026-07-12)
 - [ ] **Phase 4: Safe IPC Controller** - Managed-only runtime animation, loop/status/override surfaces, and error recovery
 - [ ] **Phase 5: Operational Proof and Delivery** - Full tests, documentation, runtime smoke evidence, and verified PR
 
@@ -64,7 +64,7 @@ Plans:
 
 Plans:
 - [x] 03-01: Implement standard-library PNG writer and celestial sprite generation
-- [ ] 03-02: Implement projected pixel shadows, double buffering, and artifact tests
+- [x] 03-02: Implement projected pixel shadows, double buffering, and artifact tests
 
 ### Phase 4: Safe IPC Controller
 **Goal**: A long-running sidecar animates only the copied example's layers through current Hyprlax IPC and remains inspectable/recoverable.
@@ -102,7 +102,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Daily Data Foundation | 2/2 | Complete    | 2026-07-12 |
 | 2. Astronomical Scene Model | 2/2 | Complete    | 2026-07-12 |
-| 3. Pixel Sky and Shadows | 1/2 | In Progress|  |
+| 3. Pixel Sky and Shadows | 2/2 | Complete    | 2026-07-12 |
 | 4. Safe IPC Controller | 0/2 | Not started | - |
 | 5. Operational Proof and Delivery | 0/2 | Not started | - |
 
