@@ -12,6 +12,7 @@
 
 #define IPC_SOCKET_PATH_PREFIX "/tmp/hyprlax-"
 #define IPC_MAX_MESSAGE_SIZE 4096
+#define IPC_MAX_RESPONSE_SIZE 65536
 #define IPC_MAX_LAYERS 32
 /* Validation limits for IPC tokens */
 #define IPC_MAX_PROP_LEN   64

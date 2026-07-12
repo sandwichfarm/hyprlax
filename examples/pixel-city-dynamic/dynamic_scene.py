@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta, timezone as datetime_timezone
 import fcntl
 import json
@@ -22,6 +22,12 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import zlib
+
+
+_EXAMPLE_MODULE_DIRECTORY = Path(__file__).resolve().parent
+if str(_EXAMPLE_MODULE_DIRECTORY) not in sys.path:
+    sys.path.insert(0, str(_EXAMPLE_MODULE_DIRECTORY))
+import weather as weather_module
 
 
 CACHE_SCHEMA_VERSION = 1
@@ -272,6 +278,17 @@ class DailyFacts:
     location_source: str
     astronomy_source: str
     stale: bool
+    errors: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class WeatherFacts:
+    timeline: Optional[weather_module.WeatherTimeline]
+    sample: weather_module.WeatherSample
+    state: weather_module.WeatherState
+    source: str
+    stale: bool
+    age_seconds: Optional[float]
     errors: Tuple[str, ...] = ()
 
 
@@ -704,6 +721,56 @@ def compute_scene_state(
     )
 
 
+def compose_weather_scene(
+    astronomy_scene: SceneState,
+    weather: weather_module.WeatherState,
+) -> SceneState:
+    """Apply bounded weather modulation after astronomy has been computed."""
+    if weather == weather_module.neutral_weather_state():
+        return astronomy_scene
+    cloud = _clamp(weather.cloud_intensity)
+    fog = _clamp(weather.fog_intensity)
+    precipitation = _clamp(weather.precipitation_intensity)
+    rain_darkening = precipitation if weather.precipitation_type in ("rain", "hail") else 0.0
+    cool_tint = (0.48, 0.60, 0.72)
+    adjusted_looks: Dict[str, LayerLook] = {}
+    for index in range(1, 7):
+        name = f"{index}.png"
+        look = astronomy_scene.layer_looks[name]
+        distance = (7.0 - index) / 6.0
+        fog_loss = 0.66 * fog * distance
+        cloud_loss = 0.07 * cloud * distance
+        tint_mix = _clamp(0.30 * cloud + 0.18 * rain_darkening + 0.12 * fog)
+        adjusted_looks[name] = LayerLook(
+            tint_rgb=tuple(
+                _clamp(_lerp(look.tint_rgb[channel], cool_tint[channel], tint_mix))
+                for channel in range(3)
+            ),
+            tint_strength=_clamp(
+                look.tint_strength + 0.22 * cloud + 0.12 * rain_darkening + 0.08 * fog
+            ),
+            opacity=_clamp(look.opacity * (1.0 - fog_loss - cloud_loss)),
+            blur=_clamp(look.blur + 2.2 * fog * distance + 0.45 * cloud, 0.0, 50.0),
+        )
+    return replace(
+        astronomy_scene,
+        ambient_brightness=_clamp(
+            astronomy_scene.ambient_brightness * (1.0 - 0.22 * cloud - 0.12 * rain_darkening)
+        ),
+        saturation_impression=_clamp(
+            astronomy_scene.saturation_impression * (1.0 - 0.38 * cloud - 0.18 * fog)
+        ),
+        stars_opacity=_clamp(astronomy_scene.stars_opacity * (1.0 - 0.94 * cloud)),
+        layer_looks=adjusted_looks,
+        sun_opacity=_clamp(
+            astronomy_scene.sun_opacity * (1.0 - 0.88 * cloud) * (1.0 - 0.52 * fog)
+        ),
+        moon_opacity=_clamp(
+            astronomy_scene.moon_opacity * (1.0 - 0.78 * cloud) * (1.0 - 0.42 * fog)
+        ),
+    )
+
+
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 PIXEL_WIDTH = 576
 PIXEL_HEIGHT = 324
@@ -874,11 +941,20 @@ class DoubleBufferedAssets:
             )
         return name
 
-    def next_path(self, name: str, current: Optional[Path] = None) -> Path:
+    def next_path(
+        self,
+        name: str,
+        current: Optional[Path] = None,
+        extension: str = "png",
+    ) -> Path:
         safe_name = self._safe_name(name)
+        if extension not in ("png", "gif"):
+            raise ValueError("asset extension must be png or gif")
         if current is None:
             side = "a"
         else:
+            if Path(current).suffix != f".{extension}":
+                raise ValueError(f"current asset is not a {safe_name} {extension.upper()} path")
             stem = Path(current).stem
             if stem == f"{safe_name}-a":
                 side = "b"
@@ -886,11 +962,23 @@ class DoubleBufferedAssets:
                 side = "a"
             else:
                 raise ValueError(f"current asset is not a {safe_name} A/B path")
-        return self.directory / f"{safe_name}-{side}.png"
+        return self.directory / f"{safe_name}-{side}.{extension}"
 
-    def write(self, name: str, payload: bytes, current: Optional[Path] = None) -> Path:
-        destination = self.next_path(name, current)
+    def write(
+        self,
+        name: str,
+        payload: bytes,
+        current: Optional[Path] = None,
+        extension: str = "png",
+    ) -> Path:
+        destination = self.next_path(name, current, extension)
         _atomic_write_bytes(destination, payload)
+        return destination
+
+    def write_gif(self, name: str, payload: bytes, current: Optional[Path] = None) -> Path:
+        weather_module.validate_gif(payload, PIXEL_WIDTH, PIXEL_HEIGHT)
+        destination = self.write(name, payload, current, extension="gif")
+        weather_module.validate_gif(destination, PIXEL_WIDTH, PIXEL_HEIGHT)
         return destination
 
 
@@ -995,11 +1083,17 @@ def prepare_initial_assets(example_directory: Path) -> Mapping[str, Path]:
     transparent = encode_png_rgba(
         PIXEL_WIDTH, PIXEL_HEIGHT, bytes(PIXEL_WIDTH * PIXEL_HEIGHT * 4)
     )
-    return {
+    result = {
         "sun": buffers.write("sun", render_sun_png()),
         "moon": buffers.write("moon", render_moon_png("New Moon", 0.0)),
         "shadow": buffers.write("shadow", transparent),
     }
+    neutral = weather_module.neutral_weather_state()
+    for name in WEATHER_LAYER_NAMES:
+        result[name] = buffers.write_gif(
+            name, weather_module.render_weather_gif(name, neutral)
+        )
+    return result
 
 
 class IPCError(RuntimeError):
@@ -1046,16 +1140,28 @@ class IPCCommand:
         }
 
 
+WEATHER_LAYER_NAMES = (
+    "weather-cloud",
+    "weather-fog-back",
+    "weather-precip-back",
+    "weather-fog-front",
+    "weather-precip-front",
+)
 MANAGED_NAMES = (
     "1.png",
     "sun",
     "moon",
+    "weather-cloud",
     "2.png",
     "3.png",
+    "weather-fog-back",
     "4.png",
+    "weather-precip-back",
     "5.png",
     "shadow",
     "6.png",
+    "weather-fog-front",
+    "weather-precip-front",
 )
 ASSUMED_IDS = {name: index for index, name in enumerate(MANAGED_NAMES, 1)}
 SUPPORTED_SCENE_PROPERTIES = frozenset(("path", "x", "y", "opacity", "tint", "blur"))
@@ -1076,8 +1182,14 @@ def _managed_name_for_path(path: Path, example_directory: Path) -> Optional[str]
             return f"{index}.png"
     generated = example_directory / "generated"
     if path.parent == generated:
+        for index in range(1, 4):
+            if path.name in (f"heat-{index}-a.gif", f"heat-{index}-b.gif"):
+                return f"{index}.png"
         for name in ("sun", "moon", "shadow"):
             if path.name in (f"{name}-a.png", f"{name}-b.png"):
+                return name
+        for name in WEATHER_LAYER_NAMES:
+            if path.name in (f"{name}-a.gif", f"{name}-b.gif"):
                 return name
     return None
 
@@ -1121,6 +1233,8 @@ def assumed_managed_layers(example_directory: Path) -> ManagedLayers:
     for name in MANAGED_NAMES:
         if name.endswith(".png"):
             path = example / name
+        elif name in WEATHER_LAYER_NAMES:
+            path = example / "generated" / f"{name}-a.gif"
         else:
             path = example / "generated" / f"{name}-a.png"
         raw.append({"id": ASSUMED_IDS[name], "path": str(path)})
@@ -1194,16 +1308,25 @@ def _screen_position_as_uv_offset(value: float) -> str:
 
 def plan_asset_paths(managed: ManagedLayers) -> Mapping[str, Path]:
     buffers = DoubleBufferedAssets(managed.example_directory / "generated")
-    return {
+    paths = {
         "moon": buffers.next_path("moon", managed.require("moon").path),
         "shadow": buffers.next_path("shadow", managed.require("shadow").path),
     }
+    for name in WEATHER_LAYER_NAMES:
+        paths[name] = managed.require(name).path
+    for index in range(1, 4):
+        paths[f"{index}.png"] = managed.example_directory / f"{index}.png"
+    return paths
 
 
 def update_scene_assets(
-    managed: ManagedLayers, scene: SceneState, names: Tuple[str, ...] = ("moon", "shadow")
+    managed: ManagedLayers,
+    scene: SceneState,
+    names: Tuple[str, ...] = ("moon", "shadow"),
+    weather: Optional[weather_module.WeatherState] = None,
 ) -> Mapping[str, Path]:
     buffers = DoubleBufferedAssets(managed.example_directory / "generated")
+    weather_state = weather or weather_module.neutral_weather_state()
     paths = {}
     if "moon" in names:
         paths["moon"] = buffers.write(
@@ -1217,7 +1340,34 @@ def update_scene_assets(
             render_shadow_png(managed.example_directory / "6.png", scene),
             managed.require("shadow").path,
         )
-    unknown = set(names) - {"moon", "shadow"}
+    for name in WEATHER_LAYER_NAMES:
+        if name not in names:
+            continue
+        paths[name] = buffers.write_gif(
+            name,
+            weather_module.render_weather_gif(name, weather_state),
+            managed.require(name).path,
+        )
+    for index in range(1, 4):
+        asset_name = f"heat-{index}"
+        if asset_name not in names:
+            continue
+        width, height, source = decode_png_rgba(
+            managed.example_directory / f"{index}.png"
+        )
+        current = managed.require(f"{index}.png").path
+        if current.parent != managed.example_directory / "generated":
+            current = None
+        paths[f"{index}.png"] = buffers.write_gif(
+            asset_name,
+            weather_module.render_heat_gif(
+                source, weather_state.heat_intensity, width, height
+            ),
+            current,
+        )
+    supported = {"moon", "shadow", *WEATHER_LAYER_NAMES}
+    supported.update(f"heat-{index}" for index in range(1, 4))
+    unknown = set(names) - supported
     if unknown:
         raise ValueError(f"unknown dynamic asset names: {', '.join(sorted(unknown))}")
     return paths
@@ -1227,17 +1377,52 @@ def build_ipc_commands(
     managed: ManagedLayers,
     scene: SceneState,
     asset_paths: Mapping[str, Path],
+    weather: Optional[weather_module.WeatherState] = None,
 ) -> Tuple[IPCCommand, ...]:
+    weather_state = weather or weather_module.neutral_weather_state()
     commands = []
     for index in range(1, 7):
         name = f"{index}.png"
         layer = managed.require(name)
         look = scene.layer_looks[name]
+        if index <= 3:
+            desired_path = Path(
+                asset_paths.get(name, managed.example_directory / name)
+            ).resolve(strict=False)
+            commands.append(IPCCommand(name, layer.layer_id, "path", str(desired_path)))
         commands.extend(
             (
                 IPCCommand(name, layer.layer_id, "tint", _tint_value(look)),
                 IPCCommand(name, layer.layer_id, "opacity", f"{look.opacity:.3f}"),
                 IPCCommand(name, layer.layer_id, "blur", f"{look.blur:.3f}"),
+            )
+        )
+    overlay_opacities = {
+        "weather-cloud": 0.78 * weather_state.cloud_intensity,
+        "weather-fog-back": 0.54 * weather_state.fog_intensity,
+        "weather-fog-front": 0.72 * weather_state.fog_intensity,
+        "weather-precip-back": 0.72 * weather_state.precipitation_intensity,
+        "weather-precip-front": weather_state.precipitation_intensity,
+    }
+    if weather_state.precipitation_type == "none":
+        overlay_opacities["weather-precip-front"] = (
+            0.34 * weather_state.wind_intensity
+            if weather_state.wind_intensity >= 0.35
+            else 0.0
+        )
+        overlay_opacities["weather-precip-back"] = 0.0
+    for name in WEATHER_LAYER_NAMES:
+        layer = managed.require(name)
+        path = Path(asset_paths.get(name, layer.path)).resolve(strict=False)
+        commands.extend(
+            (
+                IPCCommand(name, layer.layer_id, "path", str(path)),
+                IPCCommand(
+                    name,
+                    layer.layer_id,
+                    "opacity",
+                    f"{_clamp(overlay_opacities[name]):.3f}",
+                ),
             )
         )
     sun = managed.require("sun")
@@ -1300,8 +1485,12 @@ class SceneController:
         self.pending_asset_signatures: Dict[str, Tuple[Any, ...]] = {}
 
     @staticmethod
-    def _asset_signature(scene: SceneState) -> Mapping[str, Tuple[Any, ...]]:
-        return {
+    def _asset_signature(
+        scene: SceneState,
+        weather: weather_module.WeatherState,
+    ) -> Mapping[str, Tuple[Any, ...]]:
+        weather_signature = weather_module.quantized_weather_signature(weather)
+        signatures = {
             "moon": (scene.moon_phase, round(scene.moon_illumination, 3)),
             "shadow": (
                 scene.sun_visible,
@@ -1311,36 +1500,112 @@ class SceneController:
                 round(scene.solar_elevation, 5),
             ),
         }
+        signatures["weather-cloud"] = (
+            weather_signature[2], weather_signature[5], weather_signature[6]
+        )
+        for name in ("weather-fog-back", "weather-fog-front"):
+            signatures[name] = (
+                weather_signature[3], weather_signature[5], weather_signature[6]
+            )
+        for name in ("weather-precip-back", "weather-precip-front"):
+            signatures[name] = (
+                weather_signature[1], weather_signature[4],
+                weather_signature[5], weather_signature[6],
+            )
+        for index in range(1, 4):
+            signatures[f"heat-{index}"] = (weather_signature[-1],)
+        return signatures
+
+    @staticmethod
+    def _transparent_gif(path: Path) -> bool:
+        try:
+            decoded = weather_module.validate_gif(path, PIXEL_WIDTH, PIXEL_HEIGHT)
+        except (OSError, ValueError):
+            return False
+        transparent = decoded.transparent_index
+        return transparent is not None and all(
+            all(index == transparent for index in frame) for frame in decoded.frames
+        )
 
     def plan(
-        self, scene: SceneState, dry_run: bool = False
+        self,
+        scene: SceneState,
+        weather: Optional[weather_module.WeatherState] = None,
+        dry_run: bool = False,
     ) -> Tuple[ManagedLayers, Tuple[IPCCommand, ...]]:
+        weather_state = weather or weather_module.neutral_weather_state()
         if dry_run:
             managed = assumed_managed_layers(self.example_directory)
             assets = plan_asset_paths(managed)
             self.pending_asset_signatures = {}
         else:
             managed = discover_managed_layers(self.ipc.list_layers(), self.example_directory)
-            signatures = self._asset_signature(scene)
+            signatures = self._asset_signature(scene, weather_state)
             assets = {
                 "moon": managed.require("moon").path,
                 "shadow": managed.require("shadow").path,
             }
+            for name in WEATHER_LAYER_NAMES:
+                assets[name] = managed.require(name).path
+            for index in range(1, 4):
+                name = f"{index}.png"
+                assets[name] = managed.require(name).path
             pending = {}
             changed = {
                 name for name, signature in signatures.items()
                 if self.asset_signatures.get(name) != signature
             }
-            if changed:
-                generated = update_scene_assets(managed, scene, tuple(sorted(changed)))
-                for name in changed:
-                    assets[name] = generated[name]
+            generate = set(changed)
+            for name in WEATHER_LAYER_NAMES:
+                if name not in changed:
+                    continue
+                inactive = (
+                    name == "weather-cloud" and weather_state.cloud_intensity <= 0.0005
+                ) or (
+                    name.startswith("weather-fog") and weather_state.fog_intensity <= 0.0005
+                ) or (
+                    name == "weather-precip-back"
+                    and weather_state.precipitation_intensity <= 0.0005
+                ) or (
+                    name == "weather-precip-front"
+                    and weather_state.precipitation_intensity <= 0.0005
+                    and weather_state.wind_intensity < 0.35
+                )
+                if inactive and self._transparent_gif(managed.require(name).path):
+                    generate.remove(name)
+                    pending[name] = signatures[name]
+            for index in range(1, 4):
+                asset_name = f"heat-{index}"
+                if asset_name not in changed:
+                    continue
+                if weather_state.heat_intensity <= 0.0005:
+                    generate.remove(asset_name)
+                    assets[f"{index}.png"] = managed.example_directory / f"{index}.png"
+                    pending[asset_name] = signatures[asset_name]
+            if generate:
+                generated = update_scene_assets(
+                    managed,
+                    scene,
+                    tuple(sorted(generate)),
+                    weather_state,
+                )
+                for name in generate:
+                    target = name
+                    if name.startswith("heat-"):
+                        target = f"{name.removeprefix('heat-')}.png"
+                    assets[target] = generated[target]
                     pending[name] = signatures[name]
             self.pending_asset_signatures = pending
-        return managed, self.delta.pending(build_ipc_commands(managed, scene, assets))
+        return managed, self.delta.pending(
+            build_ipc_commands(managed, scene, assets, weather_state)
+        )
 
-    def apply_once(self, scene: SceneState) -> Tuple[IPCCommand, ...]:
-        _, commands = self.plan(scene, dry_run=False)
+    def apply_once(
+        self,
+        scene: SceneState,
+        weather: Optional[weather_module.WeatherState] = None,
+    ) -> Tuple[IPCCommand, ...]:
+        _, commands = self.plan(scene, weather, dry_run=False)
         executed = []
         for command in commands:
             self.ipc.modify(command)
@@ -1827,6 +2092,185 @@ def _facts_json(facts: DailyFacts) -> Mapping[str, Any]:
     }
 
 
+def _effective_view_azimuth(
+    astronomy: Astronomy, requested: Optional[float]
+) -> float:
+    if requested is not None:
+        return requested % 360.0
+    value = _solar_position_number(
+        astronomy.solar_position.get("solar_noon_azimuth"), 0.0, 360.0
+    )
+    return value if value is not None else 0.0
+
+
+def _weather_facts_json(facts: WeatherFacts) -> Mapping[str, Any]:
+    return {
+        "sample": facts.sample.to_mapping(),
+        "state": facts.state.to_mapping(),
+        "source": facts.source,
+        "stale": facts.stale,
+        "age_seconds": facts.age_seconds,
+        "errors": list(facts.errors),
+        "provider_current": (
+            facts.timeline.current.to_mapping() if facts.timeline is not None else None
+        ),
+        "warnings": list(facts.timeline.warnings) if facts.timeline is not None else [],
+    }
+
+
+def _neutral_weather_facts(
+    now: datetime,
+    source: str,
+    error: Optional[str] = None,
+) -> WeatherFacts:
+    sample = weather_module.neutral_weather_sample(now)
+    return WeatherFacts(
+        timeline=None,
+        sample=sample,
+        state=weather_module.neutral_weather_state(),
+        source=source,
+        stale=source == "neutral",
+        age_seconds=None,
+        errors=(error,) if error else (),
+    )
+
+
+def resolve_weather_facts(
+    arguments: argparse.Namespace,
+    facts: DailyFacts,
+    client: HttpJsonClient,
+    now: datetime,
+    cache: Optional[weather_module.WeatherCache] = None,
+) -> WeatherFacts:
+    mode = getattr(arguments, "weather", "auto")
+    preset = getattr(arguments, "weather_preset", None)
+    view = _effective_view_azimuth(facts.astronomy, arguments.view_azimuth)
+    if mode == "off":
+        return _neutral_weather_facts(now, "off")
+    if preset is not None:
+        sample = weather_module.preset_weather_sample(preset, now)
+        return WeatherFacts(
+            timeline=None,
+            sample=sample,
+            state=weather_module.derive_weather_state(sample, view),
+            source=f"preset:{preset}",
+            stale=False,
+            age_seconds=0.0,
+        )
+    if facts.location_source == "fallback":
+        return _neutral_weather_facts(
+            now,
+            "neutral",
+            "Open-Meteo: skipped because no valid location is available",
+        )
+    weather_cache = cache or weather_module.WeatherCache(
+        getattr(arguments, "weather_cache", None)
+    )
+    provider = weather_module.OpenMeteoProvider(client)
+
+    def fetch_weather(fetched_at: datetime) -> weather_module.WeatherTimeline:
+        try:
+            return provider.fetch(facts.location, fetched_at)
+        except ProviderError as error:
+            raise weather_module.WeatherError(_bounded_error(error)) from error
+
+    try:
+        result = weather_cache.resolve(
+            facts.location,
+            getattr(
+                arguments,
+                "weather_refresh",
+                weather_module.DEFAULT_WEATHER_REFRESH_SECONDS,
+            ),
+            fetch_weather,
+        )
+    except (weather_module.WeatherCacheError, OSError, ValueError) as error:
+        return _neutral_weather_facts(
+            now, "neutral", f"Open-Meteo cache: {_bounded_error(error)}"
+        )
+    errors = []
+    if result.error:
+        errors.append(f"Open-Meteo: {result.error}")
+    if result.timeline is None:
+        neutral = _neutral_weather_facts(
+            now,
+            "neutral",
+            errors[0] if errors else "Open-Meteo: no usable weather timeline",
+        )
+        return neutral
+    sample = result.timeline.current
+    state = weather_module.derive_weather_state(sample, view)
+    errors.extend(result.timeline.warnings)
+    return WeatherFacts(
+        timeline=result.timeline,
+        sample=sample,
+        state=state,
+        source=result.source,
+        stale=result.stale,
+        age_seconds=result.age_seconds,
+        errors=tuple(errors),
+    )
+
+
+def resolve_daily_facts_offline(
+    arguments: argparse.Namespace,
+    cache: DailyCache,
+    now: datetime,
+) -> DailyFacts:
+    latitude, longitude, timezone_name = _manual_values(arguments)
+    errors = []
+    if latitude is not None and longitude is not None and timezone_name is not None:
+        location = manual_location(
+            latitude, longitude, timezone_name, arguments.locality
+        )
+        location_source = "manual"
+    else:
+        cached_location = cache.last_success("ip-api")
+        try:
+            location = (
+                Location.from_mapping(cached_location, source="cache")
+                if cached_location is not None
+                else Location(0.0, 0.0, "UTC", city="Unknown", source="fallback")
+            )
+            location_source = "cache" if cached_location is not None else "fallback"
+        except ProviderError as error:
+            location = Location(0.0, 0.0, "UTC", city="Unknown", source="fallback")
+            location_source = "fallback"
+            errors.append(f"cached location: {_bounded_error(error)}")
+    local_day = now.astimezone(_zone(location.timezone)).date()
+    astronomy_mapping = (
+        cache.last_success("sunrise-sunset-v2", location.identity)
+        if location_source != "fallback"
+        else None
+    )
+    try:
+        astronomy = (
+            Astronomy.from_mapping(
+                astronomy_mapping,
+                expected_day=local_day,
+                expected_timezone=location.timezone,
+                source="cache",
+            )
+            if astronomy_mapping is not None
+            else neutral_astronomy(local_day, location.timezone)
+        )
+        astronomy_source = "cache" if astronomy_mapping is not None else "fallback"
+    except ProviderError as error:
+        astronomy = neutral_astronomy(local_day, location.timezone)
+        astronomy_source = "fallback"
+        errors.append(f"cached astronomy: {_bounded_error(error)}")
+    if astronomy_source == "fallback":
+        errors.append("demo-weather uses neutral astronomy because no same-day cache is available")
+    return DailyFacts(
+        location=location,
+        astronomy=astronomy,
+        location_source=location_source,
+        astronomy_source=astronomy_source,
+        stale=location_source != "manual" or astronomy_source != "cache",
+        errors=tuple(errors),
+    )
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Drive the dynamic Pixel City example from daily sun and moon data."
@@ -1838,6 +2282,11 @@ def _parser() -> argparse.ArgumentParser:
         "--demo-day",
         action="store_true",
         help="play one local 24-hour cycle using today's astronomy",
+    )
+    mode.add_argument(
+        "--demo-weather",
+        action="store_true",
+        help="play every weather preset once without network access",
     )
     parser.add_argument("--status", action="store_true", help="print resolved state without IPC")
     parser.add_argument(
@@ -1873,6 +2322,24 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--cache", type=Path)
     parser.add_argument(
+        "--weather",
+        choices=("auto", "off"),
+        default="auto",
+        help="resolve Open-Meteo weather or preserve astronomy unchanged",
+    )
+    parser.add_argument(
+        "--weather-refresh",
+        type=int,
+        default=weather_module.DEFAULT_WEATHER_REFRESH_SECONDS,
+        help="Open-Meteo refresh interval in seconds (600..21600)",
+    )
+    parser.add_argument("--weather-cache", type=Path)
+    parser.add_argument(
+        "--weather-preset",
+        choices=weather_module.WEATHER_PRESETS,
+        help="bypass weather provider/cache with a deterministic condition",
+    )
+    parser.add_argument(
         "--example-dir",
         type=Path,
         default=Path(__file__).resolve().parent,
@@ -1900,15 +2367,26 @@ def _preview(arguments: argparse.Namespace, now: datetime) -> Mapping[str, Any]:
         location = manual_location(latitude, longitude, timezone_name, arguments.locality)
     local_day = now.astimezone(_zone(location.timezone)).date()
     astronomy = neutral_astronomy(local_day, location.timezone)
-    state = compute_scene_state(now, astronomy, arguments.view_azimuth)
+    weather_sample = weather_module.neutral_weather_sample(now)
+    weather_state = weather_module.neutral_weather_state()
+    state = compose_weather_scene(
+        compute_scene_state(now, astronomy, arguments.view_azimuth), weather_state
+    )
     managed = assumed_managed_layers(arguments.example_dir)
-    commands = build_ipc_commands(managed, state, plan_asset_paths(managed))
+    commands = build_ipc_commands(
+        managed, state, plan_asset_paths(managed), weather_state
+    )
     return {
         "mode": "dry-run",
         "source": "preview",
         "assumed_ids": True,
         "location": _location_json(location),
         "astronomy": astronomy.to_mapping(),
+        "weather": {
+            "sample": weather_sample.to_mapping(),
+            "state": weather_state.to_mapping(),
+            "source": "preview-neutral",
+        },
         "state": _state_json(state),
         "commands": [command.as_json() for command in commands],
     }
@@ -1938,6 +2416,7 @@ def _run_demo_day(
     anchor: datetime,
     sleep: Callable[[float], None],
     monotonic: Callable[[], float],
+    weather_facts: Optional[WeatherFacts] = None,
 ) -> int:
     zone = _zone(facts.location.timezone)
     local_day = anchor.astimezone(zone).date()
@@ -1951,10 +2430,21 @@ def _run_demo_day(
             simulated = day_start + timedelta(days=1) - timedelta(microseconds=1)
         else:
             simulated = day_start + timedelta(seconds=SECONDS_PER_DAY * progress)
-        state = compute_scene_state(
+        astronomy_scene = compute_scene_state(
             simulated, facts.astronomy, arguments.view_azimuth
         )
-        commands = controller.apply_once(state)
+        if weather_facts is not None and weather_facts.timeline is not None:
+            _, weather_state = weather_module.weather_state_at(
+                weather_facts.timeline,
+                simulated,
+                _effective_view_azimuth(facts.astronomy, arguments.view_azimuth),
+            )
+        elif weather_facts is not None:
+            weather_state = weather_facts.state
+        else:
+            weather_state = weather_module.neutral_weather_state()
+        state = compose_weather_scene(astronomy_scene, weather_state)
+        commands = controller.apply_once(state, weather_state)
         payload = {
             "mode": "demo-day",
             "simulated_at": simulated.isoformat(),
@@ -1962,6 +2452,7 @@ def _run_demo_day(
             "phase": state.phase,
             "sun_x": round(state.sun_x, 6),
             "sun_y": round(state.sun_y, 6),
+            "weather_condition": weather_state.condition,
             "commands_applied": len(commands),
             "location_source": facts.location_source,
             "astronomy_source": facts.astronomy_source,
@@ -1972,6 +2463,98 @@ def _run_demo_day(
         if progress >= 1.0:
             return 0
 
+        elapsed_after_apply = max(0.0, monotonic() - real_start)
+        next_step = (
+            math.floor(elapsed_after_apply / arguments.demo_step) + 1
+        ) * arguments.demo_step
+        next_step = min(arguments.demo_seconds, next_step)
+        delay = max(0.0, real_start + next_step - monotonic())
+        sleep(delay)
+
+
+def _blend_weather_states(
+    start: weather_module.WeatherState,
+    end: weather_module.WeatherState,
+    amount: float,
+) -> weather_module.WeatherState:
+    blend = _smoothstep(amount)
+    precipitation_type = (
+        start.precipitation_type if blend < 0.5 else end.precipitation_type
+    )
+    condition = start.condition if blend < 0.5 else end.condition
+    return weather_module.WeatherState(
+        condition=condition,
+        cloud_intensity=_clamp(_lerp(start.cloud_intensity, end.cloud_intensity, blend)),
+        fog_intensity=_clamp(_lerp(start.fog_intensity, end.fog_intensity, blend)),
+        precipitation_type=precipitation_type,
+        precipitation_intensity=_clamp(
+            _lerp(start.precipitation_intensity, end.precipitation_intensity, blend)
+        ),
+        wind_intensity=_clamp(_lerp(start.wind_intensity, end.wind_intensity, blend)),
+        wind_screen_direction=_clamp(
+            _lerp(start.wind_screen_direction, end.wind_screen_direction, blend),
+            -1.0,
+            1.0,
+        ),
+        heat_intensity=_clamp(_lerp(start.heat_intensity, end.heat_intensity, blend)),
+        snow_cover=_clamp(_lerp(start.snow_cover, end.snow_cover, blend)),
+    )
+
+
+def _run_demo_weather(
+    arguments: argparse.Namespace,
+    controller: SceneController,
+    facts: DailyFacts,
+    anchor: datetime,
+    sleep: Callable[[float], None],
+    monotonic: Callable[[], float],
+) -> int:
+    presets = weather_module.WEATHER_PRESETS
+    real_start = monotonic()
+    astronomy_scene = compute_scene_state(
+        anchor, facts.astronomy, arguments.view_azimuth
+    )
+    view = _effective_view_azimuth(facts.astronomy, arguments.view_azimuth)
+    while True:
+        elapsed = _clamp(monotonic() - real_start, 0.0, arguments.demo_seconds)
+        progress = elapsed / arguments.demo_seconds
+        scaled = min(len(presets) - 1e-9, progress * len(presets))
+        preset_index = min(len(presets) - 1, int(scaled))
+        segment_progress = scaled - preset_index
+        preset = presets[preset_index]
+        target_sample = weather_module.preset_weather_sample(preset, anchor)
+        target_state = weather_module.derive_weather_state(target_sample, view)
+        if preset_index == 0:
+            weather_state = target_state
+        else:
+            previous_sample = weather_module.preset_weather_sample(
+                presets[preset_index - 1], anchor
+            )
+            previous_state = weather_module.derive_weather_state(previous_sample, view)
+            transition = _clamp(segment_progress / 0.35)
+            weather_state = _blend_weather_states(
+                previous_state, target_state, transition
+            )
+        scene = compose_weather_scene(astronomy_scene, weather_state)
+        commands = controller.apply_once(scene, weather_state)
+        print(
+            json.dumps(
+                {
+                    "mode": "demo-weather",
+                    "progress": round(progress, 6),
+                    "preset": preset,
+                    "condition": weather_state.condition,
+                    "commands_applied": len(commands),
+                    "network": "disabled",
+                    "astronomy_source": facts.astronomy_source,
+                    "errors": list(facts.errors),
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        if progress >= 1.0:
+            return 0
         elapsed_after_apply = max(0.0, monotonic() - real_start)
         next_step = (
             math.floor(elapsed_after_apply / arguments.demo_step) + 1
@@ -2005,10 +2588,20 @@ def main(
         parser.error("--demo-step must be between 0.25 and 5 seconds")
     if arguments.demo_step > arguments.demo_seconds:
         parser.error("--demo-step cannot exceed --demo-seconds")
+    if not (
+        weather_module.MIN_WEATHER_REFRESH_SECONDS
+        <= arguments.weather_refresh
+        <= weather_module.MAX_WEATHER_REFRESH_SECONDS
+    ):
+        parser.error("--weather-refresh must be between 600 and 21600 seconds")
+    if arguments.weather == "off" and arguments.weather_preset is not None:
+        parser.error("--weather off cannot be combined with --weather-preset")
     if arguments.loop and (arguments.status or arguments.dry_run):
         parser.error("--loop cannot be combined with --status or --dry-run")
     if arguments.demo_day and (arguments.status or arguments.dry_run):
         parser.error("--demo-day cannot be combined with --status or --dry-run")
+    if arguments.demo_weather and (arguments.status or arguments.dry_run):
+        parser.error("--demo-weather cannot be combined with --status or --dry-run")
 
     def current_time() -> datetime:
         value = arguments.at or now_provider()
@@ -2022,16 +2615,33 @@ def main(
             return 0
 
         cache = DailyCache(arguments.cache)
+        if arguments.demo_weather:
+            anchor = current_time()
+            facts = resolve_daily_facts_offline(arguments, cache, anchor)
+            controller = SceneController(
+                ipc_factory(binary=arguments.hyprlax_bin), arguments.example_dir
+            )
+            return _run_demo_weather(
+                arguments, controller, facts, anchor, sleep, monotonic
+            )
+
         client = client_factory()
+        weather_cache = weather_module.WeatherCache(arguments.weather_cache)
         if arguments.status:
             now = current_time()
             facts = _resolve(arguments, cache, client, now)
+            weather_facts = resolve_weather_facts(
+                arguments, facts, client, now, weather_cache
+            )
+            state = compose_weather_scene(
+                compute_scene_state(now, facts.astronomy, arguments.view_azimuth),
+                weather_facts.state,
+            )
             payload = {
                 "mode": "status",
                 "facts": _facts_json(facts),
-                "state": _state_json(
-                    compute_scene_state(now, facts.astronomy, arguments.view_azimuth)
-                ),
+                "weather": _weather_facts_json(weather_facts),
+                "state": _state_json(state),
             }
             print(json.dumps(payload, sort_keys=True))
             return 0
@@ -2042,25 +2652,43 @@ def main(
         if arguments.demo_day:
             anchor = current_time()
             facts = _resolve(arguments, cache, client, anchor)
+            weather_facts = resolve_weather_facts(
+                arguments, facts, client, anchor, weather_cache
+            )
             return _run_demo_day(
-                arguments, controller, facts, anchor, sleep, monotonic
+                arguments,
+                controller,
+                facts,
+                anchor,
+                sleep,
+                monotonic,
+                weather_facts,
             )
         while True:
             now = current_time()
             try:
                 facts = _resolve(arguments, cache, client, now)
-                state = compute_scene_state(
-                    now, facts.astronomy, arguments.view_azimuth
+                weather_facts = resolve_weather_facts(
+                    arguments, facts, client, now, weather_cache
                 )
-                commands = controller.apply_once(state)
+                state = compose_weather_scene(
+                    compute_scene_state(
+                        now, facts.astronomy, arguments.view_azimuth
+                    ),
+                    weather_facts.state,
+                )
+                commands = controller.apply_once(state, weather_facts.state)
                 payload = {
                     "mode": "loop" if arguments.loop else "once",
                     "phase": state.phase,
                     "commands_applied": len(commands),
                     "location_source": facts.location_source,
                     "astronomy_source": facts.astronomy_source,
-                    "stale": facts.stale,
-                    "errors": list(facts.errors),
+                    "weather_source": weather_facts.source,
+                    "weather_condition": weather_facts.state.condition,
+                    "weather_age_seconds": weather_facts.age_seconds,
+                    "stale": facts.stale or weather_facts.stale,
+                    "errors": [*facts.errors, *weather_facts.errors],
                 }
                 print(json.dumps(payload, sort_keys=True), flush=True)
             except (CacheError, IPCError, ProviderError, OSError, ValueError) as error:

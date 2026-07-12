@@ -181,6 +181,44 @@ START_TEST(test_ipc_list_layers)
 }
 END_TEST
 
+// Layer listings may exceed the command-size limit and must remain complete.
+START_TEST(test_ipc_list_layers_large_response)
+{
+    ipc_context_t* ctx = ipc_init();
+    ck_assert_ptr_nonnull(ctx);
+
+    char long_path[224] = "/tmp/hyprlax-ipc-response-";
+    size_t prefix_len = strlen(long_path);
+    memset(long_path + prefix_len, 'a', sizeof(long_path) - prefix_len - 1);
+    long_path[sizeof(long_path) - 1] = '\0';
+    FILE* image = fopen(long_path, "w");
+    ck_assert_ptr_nonnull(image);
+    fclose(image);
+
+    for (int i = 0; i < IPC_MAX_LAYERS; i++) {
+        uint32_t id = ipc_add_layer(ctx, long_path, 1.0f, 1.0f,
+                                    0.0f, 0.0f, i);
+        ck_assert_int_gt(id, 0);
+    }
+
+    char* list = ipc_list_layers(ctx);
+    ck_assert_ptr_nonnull(list);
+    ck_assert_uint_gt(strlen(list), IPC_MAX_MESSAGE_SIZE);
+
+    int entries = 0;
+    const char* cursor = list;
+    while ((cursor = strstr(cursor, "ID: ")) != NULL) {
+        entries++;
+        cursor += 4;
+    }
+    ck_assert_int_eq(entries, IPC_MAX_LAYERS);
+
+    free(list);
+    ipc_cleanup(ctx);
+    unlink(long_path);
+}
+END_TEST
+
 // Test clearing layers
 START_TEST(test_ipc_clear_layers)
 {
@@ -506,6 +544,7 @@ Suite *ipc_suite(void)
     tcase_add_test(tc_layers, test_ipc_remove_layer);
     tcase_add_test(tc_layers, test_ipc_modify_layer);
     tcase_add_test(tc_layers, test_ipc_list_layers);
+    tcase_add_test(tc_layers, test_ipc_list_layers_large_response);
     tcase_add_test(tc_layers, test_ipc_clear_layers);
     tcase_add_test(tc_layers, test_ipc_sort_layers);
     tcase_add_test(tc_layers, test_ipc_max_layers);
