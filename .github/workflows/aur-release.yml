@@ -112,6 +112,8 @@ jobs:
             git add PKGBUILD .SRCINFO
             git commit -m "aur: hyprlax ${TAG}"
             # Tag checkouts are detached; push the prepared commit explicitly.
+            git fetch origin master
+            git rebase origin/master
             GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o StrictHostKeyChecking=no" git push origin HEAD:master
           else
             echo "No changes to push for stable"
@@ -206,6 +208,8 @@ jobs:
             PKGVER_VAL=$(bash -c 'source PKGBUILD; echo $pkgver')
             git commit -m "aur: hyprlax-git ${PKGVER_VAL}"
             # Branch checkouts may also be detached in workflow runs.
+            git fetch origin master
+            git rebase origin/master
             GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o StrictHostKeyChecking=no" git push origin HEAD:master
           else
             echo "No changes to push for -git"
