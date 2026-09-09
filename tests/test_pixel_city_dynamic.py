@@ -826,17 +826,22 @@ class GeneratedAssetTests(unittest.TestCase):
                 "./1.png",
                 "./generated/sun-a.png",
                 "./generated/moon-a.png",
+                "./generated/weather-cloud-a.gif",
                 "./2.png",
                 "./3.png",
+                "./generated/weather-fog-back-a.gif",
                 "./4.png",
+                "./generated/weather-precip-back-a.gif",
                 "./5.png",
                 "./generated/shadow-a.png",
                 "./6.png",
+                "./generated/weather-fog-front-a.gif",
+                "./generated/weather-precip-front-a.gif",
             ],
             [layer["path"] for layer in layers],
         )
         self.assertTrue(all((config.parent / layer["path"]).is_file() for layer in layers))
-        for dynamic_index in (1, 2, 7):
+        for dynamic_index in (1, 2, 3, 6, 8, 10, 12, 13):
             self.assertEqual(0.0, layers[dynamic_index]["opacity"])
             self.assertEqual("none", layers[dynamic_index]["overflow"])
 
@@ -846,6 +851,8 @@ def managed_layer_rows(example_directory, unrelated=True):
     for name in SCENE.MANAGED_NAMES:
         if name.endswith(".png"):
             path = example_directory / name
+        elif name in SCENE.WEATHER_LAYER_NAMES:
+            path = example_directory / "generated" / f"{name}-a.gif"
         else:
             path = example_directory / "generated" / f"{name}-a.png"
         rows.append({"id": SCENE.ASSUMED_IDS[name], "path": str(path)})
@@ -964,7 +971,7 @@ class IPCControllerTests(unittest.TestCase):
         commands = SCENE.build_ipc_commands(
             managed, self.state, SCENE.plan_asset_paths(managed)
         )
-        self.assertEqual(27, len(commands))
+        self.assertEqual(40, len(commands))
         self.assertTrue(
             all(command.property in SCENE.SUPPORTED_SCENE_PROPERTIES for command in commands)
         )
@@ -996,18 +1003,18 @@ class IPCControllerTests(unittest.TestCase):
         controller = SCENE.SceneController(ipc, self.example)
         first = controller.apply_once(self.state)
         second = controller.apply_once(self.state)
-        self.assertEqual(27, len(first))
+        self.assertEqual(40, len(first))
         self.assertEqual(0, len(second))
         self.assertEqual(2, ipc.list_calls)
         failing = FakeIPC(self.example, fail_modifies=1)
         retrying = SCENE.SceneController(failing, self.example)
         with self.assertRaisesRegex(SCENE.IPCError, "injected"):
             retrying.apply_once(self.state)
-        self.assertEqual(27, len(retrying.apply_once(self.state)))
+        self.assertEqual(40, len(retrying.apply_once(self.state)))
 
     def test_dry_run_is_deterministic_and_has_no_external_side_effects(self):
         cache = Path(self.temporary.name) / "must-not-exist.json"
-        generated = sorted((self.example / "generated").glob("*.png"))
+        generated = sorted((self.example / "generated").iterdir())
         before = {path.name: (path.stat().st_mtime_ns, path.read_bytes()) for path in generated}
 
         def forbidden(*args, **kwargs):
@@ -1027,7 +1034,7 @@ class IPCControllerTests(unittest.TestCase):
         self.assertEqual(0, result)
         self.assertEqual("preview", payload["source"])
         self.assertTrue(payload["assumed_ids"])
-        self.assertEqual(27, len(payload["commands"]))
+        self.assertEqual(40, len(payload["commands"]))
         self.assertEqual(before, after)
         self.assertFalse(cache.exists())
 
@@ -1060,7 +1067,8 @@ class IPCControllerTests(unittest.TestCase):
                 (
                     "--once", "--at", "2026-07-12T12:00:00+02:00",
                     "--latitude", "47.4979", "--longitude", "19.0402",
-                    "--timezone", "Europe/Budapest", "--cache", str(cache),
+                    "--timezone", "Europe/Budapest", "--weather", "off",
+                    "--cache", str(cache),
                     "--example-dir", str(self.example),
                 ),
                 ipc_factory=lambda **kwargs: ipc,
@@ -1068,7 +1076,7 @@ class IPCControllerTests(unittest.TestCase):
             )
         payload = json.loads(stdout.getvalue())
         self.assertEqual(0, result)
-        self.assertEqual(27, payload["commands_applied"])
+        self.assertEqual(40, payload["commands_applied"])
         self.assertEqual("manual", payload["location_source"])
         self.assertNotIn(99, {command.layer_id for command in ipc.commands})
 
@@ -1088,6 +1096,7 @@ class IPCControllerTests(unittest.TestCase):
                     "--loop", "--at", "2026-07-12T12:00:00+02:00",
                     "--latitude", "47.4979", "--longitude", "19.0402",
                     "--timezone", "Europe/Budapest", "--view-azimuth", "90",
+                    "--weather", "off",
                     "--cache", str(Path(self.temporary.name) / "loop.json"),
                     "--example-dir", str(self.example), "--interval", "15",
                 ),
@@ -1099,7 +1108,7 @@ class IPCControllerTests(unittest.TestCase):
         self.assertEqual([15, 15], sleep_calls)
         self.assertEqual(1, len(client.calls))
         self.assertGreaterEqual(ipc.list_calls, 2)
-        self.assertEqual(27, len(ipc.commands))
+        self.assertEqual(40, len(ipc.commands))
 
     def test_demo_day_maps_one_local_day_to_bounded_monotonic_cycle(self):
         ipc = FakeIPC(self.example)
@@ -1113,6 +1122,7 @@ class IPCControllerTests(unittest.TestCase):
                     "--at", "2026-07-12T12:00:00+02:00",
                     "--latitude", "47.4979", "--longitude", "19.0402",
                     "--timezone", "Europe/Budapest", "--view-azimuth", "90",
+                    "--weather", "off",
                     "--cache", str(Path(self.temporary.name) / "demo.json"),
                     "--example-dir", str(self.example),
                 ),
