@@ -279,7 +279,13 @@ int hyprlax_run(hyprlax_context_t *ctx) {
 
             parallax_layer_t *layer = ctx->layers;
             while (layer) {
-                if ((layer->is_gif && layer->frame_count > 1) || animation_is_active(&layer->x_animation) || animation_is_active(&layer->y_animation)) { animations_active = true; break; }
+                if (!ctx->screen_locked && layer_is_visible(layer) &&
+                    ((layer->is_gif && layer->frame_count > 1) ||
+                     animation_is_active(&layer->x_animation) ||
+                     animation_is_active(&layer->y_animation))) {
+                    animations_active = true;
+                    break;
+                }
                 layer = layer->next;
             }
 
@@ -330,11 +336,14 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                     }
                 }
             }
+            /* Refresh logical clocks after pacing sleep, immediately before
+             * drawing, so a due GIF frame is presented without one-frame lag. */
+            current_time = ev_get_time();
+            time_since_render = current_time - last_render_time;
+            hyprlax_update_layers(ctx, current_time);
             /* Ensure input providers (e.g., cursor) update during continuous render
                windows (animations), even when we aren't blocking on epoll. */
             hyprlax_cursor_tick(ctx);
-            /* Advance animations before rendering */
-            hyprlax_update_layers(ctx, current_time);
             if (ctx->monitors) {
                 monitor_instance_t *m = ctx->monitors->head;
                 while (m) { monitor_update_animation(m, current_time); m = m->next; }

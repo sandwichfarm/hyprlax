@@ -6,6 +6,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include "../include/core.h"
 #include "../include/log.h"
 #include "../include/defaults.h"
@@ -111,6 +112,58 @@ void layer_tick(parallax_layer_t *layer, timestamp_ms_t current_time) {
     if (animation_is_active(&layer->y_animation)) {
         layer->current_y = animation_evaluate(&layer->y_animation, current_time);
         layer->offset_y = layer->current_y;  /* Update offset for rendering */
+    }
+}
+
+bool layer_is_visible(const parallax_layer_t *layer) {
+    return layer && !layer->hidden && layer->opacity > 0.0f;
+}
+
+/* Advance animated GIF timing independently from rendering. This keeps hidden
+ * or transparent layers on their real timeline without forcing GPU work. */
+void layer_tick_gif(parallax_layer_t *layer, double current_time) {
+    if (!layer || !layer->is_gif || layer->frame_count <= 1 ||
+        !layer->gif_delays || !layer->gif_textures) {
+        return;
+    }
+
+    if (!isfinite(current_time) || !isfinite(layer->last_frame_time) ||
+        current_time < layer->last_frame_time) {
+        layer->last_frame_time = current_time;
+        return;
+    }
+
+    int current_delay_ms = layer->gif_delays[layer->current_frame];
+    if (current_delay_ms < 10) current_delay_ms = 10;
+    if (current_time - layer->last_frame_time < current_delay_ms / 1000.0) {
+        return;
+    }
+
+    /* Skip complete loops mathematically after a long idle period. This keeps
+     * wall-clock phase without replaying every elapsed frame. */
+    double cycle = 0.0;
+    for (int i = 0; i < layer->frame_count; i++) {
+        int delay_ms = layer->gif_delays[i];
+        if (delay_ms < 10) delay_ms = 10;
+        cycle += delay_ms / 1000.0;
+    }
+    if (cycle > 0.0) {
+        double elapsed = current_time - layer->last_frame_time;
+        if (elapsed >= cycle) {
+            double loops = floor(elapsed / cycle);
+            layer->last_frame_time += loops * cycle;
+        }
+    }
+
+    for (int advanced = 0; advanced < layer->frame_count; advanced++) {
+        int delay_ms = layer->gif_delays[layer->current_frame];
+        if (delay_ms < 10) delay_ms = 10;
+        double delay = delay_ms / 1000.0;
+        if (current_time - layer->last_frame_time < delay) break;
+
+        layer->current_frame = (layer->current_frame + 1) % layer->frame_count;
+        layer->texture_id = layer->gif_textures[layer->current_frame];
+        layer->last_frame_time += delay;
     }
 }
 

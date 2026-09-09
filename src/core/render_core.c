@@ -135,15 +135,7 @@ static void hyprlax_render_monitor(hyprlax_context_t *ctx, monitor_instance_t *m
 
     parallax_layer_t *layer = ctx->layers;
     while (layer) {
-        if (layer->hidden) { layer = layer->next; continue; }
-
-        if (layer->is_gif) {
-            if (now_time - layer->last_frame_time > layer->gif_delays[layer->current_frame] / 1000.0) {
-                layer->current_frame = (layer->current_frame + 1) % layer->frame_count;
-                layer->texture_id = layer->gif_textures[layer->current_frame];
-                layer->last_frame_time = now_time;
-            }
-        }
+        if (!layer_is_visible(layer)) { layer = layer->next; continue; }
 
         if (layer->texture_id == 0) { layer = layer->next; continue; }
 

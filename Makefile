@@ -308,6 +308,9 @@ tests/test_workspace_changes: tests/test_workspace_changes.c
 tests/test_animation_state: tests/test_animation_state.c
 	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
 
+tests/test_layer: tests/test_layer.c src/core/layer.c src/core/animation.c src/core/easing.c src/core/log.c
+	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) -o $@
+
 tests/test_config_validation: tests/test_config_validation.c
 	$(CC) $(TEST_CFLAGS) $< $(TEST_LIBS) -o $@
 

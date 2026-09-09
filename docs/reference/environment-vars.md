@@ -58,7 +58,8 @@ The renderer recognizes the following variables:
 
 - `HYPRLAX_PERSISTENT_VBO=1` — reuse VBOs to reduce allocations
 - `HYPRLAX_UNIFORM_OFFSET=1` — pass offsets via uniforms (keeps geometry static)
-- `HYPRLAX_NO_GLFINISH=1` — skip glFinish to reduce CPU/GPU sync
+- `HYPRLAX_GLFINISH=1` — force glFinish before present for diagnostics
+- `HYPRLAX_NO_GLFINISH=1` — legacy alias; flush-only present is now default
 - `HYPRLAX_SEPARABLE_BLUR=1` — enable separable blur path
 - `HYPRLAX_BLUR_DOWNSCALE=<n>` — render blur at lower resolution (2, 4, ...)
 - `HYPRLAX_FRAME_CALLBACK=1` — use Wayland frame callbacks for timing
