@@ -300,8 +300,7 @@ static void gles2_begin_frame(void) {
 
 /* End frame */
 static void gles2_end_frame(void) {
-    /* Ensure all commands are flushed */
-    glFlush();
+    /* Present path flushes once after all layer work is complete. */
 }
 
 /* Present frame */
@@ -316,15 +315,15 @@ static void gles2_present(void) {
     /*
      * GPU synchronization before buffer swap:
      *
-     * Default: glFinish() ensures GPU commands complete before swap.
-     * On Wayland, eglSwapBuffers with the default swap interval (1) blocks
-     * until the compositor's frame callback fires.  glFinish() ensures GPU
-     * work is done so the swap can proceed promptly when the callback arrives.
+     * Default: flush commands and let eglSwapBuffers / compositor pacing do
+     * synchronization. glFinish() makes the CPU busy-wait in NVIDIA's EGL
+     * driver and is only useful as an explicit diagnostic workaround.
      *
-     * HYPRLAX_NO_GLFINISH=1: Skip glFinish, use glFlush instead.
+     * HYPRLAX_GLFINISH=1: Force glFinish before present.
+     * HYPRLAX_NO_GLFINISH=1: Legacy alias for the default flush behavior.
      * HYPRLAX_GPU_FENCE=1: Use glFenceSync with timeout (hyprlock-safe).
      */
-    const char *no_finish = getenv("HYPRLAX_NO_GLFINISH");
+    const char *force_finish = getenv("HYPRLAX_GLFINISH");
     const char *use_gpu_fence = getenv("HYPRLAX_GPU_FENCE");
     if (use_gpu_fence && strcmp(use_gpu_fence, "1") == 0) {
         GLsync fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
@@ -339,11 +338,10 @@ static void gles2_present(void) {
         } else {
             glFlush();
         }
-    } else if (no_finish && strcmp(no_finish, "1") == 0) {
-        glFlush();
-    } else {
-        /* Default: wait for GPU to finish before swap */
+    } else if (force_finish && strcmp(force_finish, "1") == 0) {
         glFinish();
+    } else {
+        glFlush();
     }
 
     eglSwapBuffers(g_gles2_data->egl_display, surface);

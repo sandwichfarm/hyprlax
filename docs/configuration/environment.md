@@ -33,7 +33,8 @@ The following variables are recognized by hyprlax today (non-exhaustive; impleme
 - Rendering performance toggles
   - `HYPRLAX_PERSISTENT_VBO=1`       Use a single persistent VBO
   - `HYPRLAX_UNIFORM_OFFSET=1`       Use a uniform vec2 offset for parallax
-  - `HYPRLAX_NO_GLFINISH=1`          Skip glFinish() before present
+  - `HYPRLAX_GLFINISH=1`             Force glFinish() before present (diagnostic)
+  - `HYPRLAX_NO_GLFINISH=1`          Legacy no-op alias for flush-before-present
   - `HYPRLAX_SEPARABLE_BLUR=1`       Enable two-pass FBO blur
   - `HYPRLAX_BLUR_DOWNSCALE=N`       Downscale factor for blur FBO (2/3/4)
 

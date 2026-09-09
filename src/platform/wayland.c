@@ -1463,6 +1463,18 @@ static bool wl_frame_callback_enabled(void) {
 
 void wayland_commit_monitor_surface(monitor_instance_t *monitor) {
     if (monitor && monitor->wl_surface) {
+        /* EGL Wayland owns commits and its private event queue for surfaces
+         * created with an EGLSurface. eglSwapBuffers() already attaches,
+         * commits, and dispatches those buffer-release events. Sending a
+         * second wl_surface.commit here breaks EGL frame throttling and lets
+         * release events accumulate on the private queue. */
+        if (monitor->egl_surface) {
+            if (g_wayland_data && g_wayland_data->display) {
+                wl_display_flush(g_wayland_data->display);
+            }
+            return;
+        }
+
         /* Request a frame callback to pace the next frame if not already pending.
          * Frame callbacks are enabled by default; disable with HYPRLAX_NO_FRAME_CALLBACK=1. */
         if (wl_frame_callback_enabled() && !monitor->frame_pending) {

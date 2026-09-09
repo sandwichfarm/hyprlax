@@ -225,6 +225,8 @@ void layer_destroy(parallax_layer_t *layer);
 void layer_update_offset(parallax_layer_t *layer, float target_x, float target_y,
                         int duration_ms, easing_type_t easing);
 void layer_tick(parallax_layer_t *layer, timestamp_ms_t current_time);
+void layer_tick_gif(parallax_layer_t *layer, double current_time);
+bool layer_is_visible(const parallax_layer_t *layer);
 
 /* Layer list management */
 parallax_layer_t* layer_list_add(parallax_layer_t *head, parallax_layer_t *new_layer);

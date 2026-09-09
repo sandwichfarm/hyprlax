@@ -109,14 +109,14 @@ HYPRLAX_UNIFORM_OFFSET=1 hyprlax image.jpg
 - Keeps geometry static
 - Works best with persistent VBO
 
-### Skip glFinish
-Remove CPU/GPU synchronization:
+### GPU synchronization
+For older launch scripts, explicitly request flush-only present:
 ```bash
 HYPRLAX_NO_GLFINISH=1 hyprlax image.jpg
 ```
-- Higher throughput
-- May increase latency
-- Best for high FPS targets
+Hyprlax now uses `glFlush()` by default. `HYPRLAX_NO_GLFINISH=1` remains
+accepted for older launch scripts. Use `HYPRLAX_GLFINISH=1` only for
+diagnostics; it can make NVIDIA's EGL driver busy-wait on the CPU.
 
 ## Rendering Optimization
 

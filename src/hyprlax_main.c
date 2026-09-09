@@ -1476,6 +1476,7 @@ void hyprlax_update_layers(hyprlax_context_t *ctx, double current_time) {
     parallax_layer_t *layer = ctx->layers;
     while (layer) {
         layer_tick(layer, current_time_ms);
+        layer_tick_gif(layer, current_time);
         layer = layer->next;
     }
     pthread_mutex_unlock(&ctx->layer_mutex);
