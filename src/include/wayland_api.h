@@ -17,7 +17,7 @@ bool wayland_get_cursor_global(double *x, double *y);
 /* Query current Wayland window size (width/height in pixels) */
 void wayland_get_window_size(int *width, int *height);
 
-/* Commit a specific monitor surface (frame pacing + wl_surface_commit) */
+/* Commit non-EGL monitor surfaces; EGL surfaces commit inside eglSwapBuffers. */
 void wayland_commit_monitor_surface(monitor_instance_t *monitor);
 
 /* Force realization of monitors based on discovered outputs if none exist yet. */
