@@ -113,7 +113,9 @@ jobs:
             git commit -m "aur: hyprlax ${TAG}"
             # Tag checkouts are detached; push the prepared commit explicitly.
             GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o StrictHostKeyChecking=no" git fetch origin master
-            git rebase origin/master
+            # Explicit fetch updates FETCH_HEAD; remote-tracking refs may be stale
+            # in a detached clone, so rebase onto the fetched tip directly.
+            git rebase FETCH_HEAD
             GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o StrictHostKeyChecking=no" git push origin HEAD:master
           else
             echo "No changes to push for stable"
@@ -209,7 +211,9 @@ jobs:
             git commit -m "aur: hyprlax-git ${PKGVER_VAL}"
             # Branch checkouts may also be detached in workflow runs.
             GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o StrictHostKeyChecking=no" git fetch origin master
-            git rebase origin/master
+            # Explicit fetch updates FETCH_HEAD; remote-tracking refs may be stale
+            # in a detached clone, so rebase onto the fetched tip directly.
+            git rebase FETCH_HEAD
             GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o StrictHostKeyChecking=no" git push origin HEAD:master
           else
             echo "No changes to push for -git"
