@@ -111,7 +111,8 @@ jobs:
           if [[ -n "$(git status --porcelain)" ]]; then
             git add PKGBUILD .SRCINFO
             git commit -m "aur: hyprlax ${TAG}"
-            GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o StrictHostKeyChecking=no" git push origin master
+            # Tag checkouts are detached; push the prepared commit explicitly.
+            GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o StrictHostKeyChecking=no" git push origin HEAD:master
           else
             echo "No changes to push for stable"
           fi
@@ -204,7 +205,8 @@ jobs:
             # Read pkgver back for log message
             PKGVER_VAL=$(bash -c 'source PKGBUILD; echo $pkgver')
             git commit -m "aur: hyprlax-git ${PKGVER_VAL}"
-            GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o StrictHostKeyChecking=no" git push origin master
+            # Branch checkouts may also be detached in workflow runs.
+            GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o StrictHostKeyChecking=no" git push origin HEAD:master
           else
             echo "No changes to push for -git"
           fi
