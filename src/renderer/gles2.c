@@ -235,8 +235,11 @@ static int gles2_init(void *native_display, void *native_window,
     data->height = config->height;
     data->vsync_enabled = config->vsync;
 
-    /* Set vsync if requested (default off to prevent GPU blocking when idle) */
-    eglSwapInterval(data->egl_display, config->vsync ? 1 : 0);
+    /* Wayland compositors own scanout synchronization. Keep EGL swaps
+     * nonblocking; the event loop applies the configured pacing policy. */
+    if (!eglSwapInterval(data->egl_display, 0)) {
+        LOG_WARN("Failed to disable EGL swap interval during renderer init");
+    }
 
     /* Store private data globally */
     g_gles2_data = data;
@@ -973,8 +976,10 @@ static void gles2_resize(int width, int height) {
 /* Set vsync */
 static void gles2_set_vsync(bool enabled) {
     if (g_gles2_data && g_gles2_data->egl_display != EGL_NO_DISPLAY) {
-        eglSwapInterval(g_gles2_data->egl_display, enabled ? 1 : 0);
         g_gles2_data->vsync_enabled = enabled;
+        if (!eglSwapInterval(g_gles2_data->egl_display, 0)) {
+            LOG_WARN("Failed to keep EGL swap interval nonblocking");
+        }
     }
 }
 
@@ -1013,6 +1018,15 @@ int gles2_make_current(EGLSurface surface) {
     }
 
     if (!eglMakeCurrent(g_gles2_data->egl_display, surface, surface, g_gles2_data->egl_context)) {
+        return HYPRLAX_ERROR_GL_INIT;
+    }
+
+    /* eglSwapInterval applies to the current draw surface. New monitor
+     * surfaces default to 1, which can block eglSwapBuffers forever after an
+     * output disconnect. Reapply the nonblocking policy every time a monitor
+     * surface becomes current. */
+    if (!eglSwapInterval(g_gles2_data->egl_display, 0)) {
+        LOG_ERROR("Failed to disable EGL swap interval for monitor surface");
         return HYPRLAX_ERROR_GL_INIT;
     }
 

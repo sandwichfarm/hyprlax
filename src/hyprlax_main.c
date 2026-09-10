@@ -878,9 +878,8 @@ static int hyprlax_init_ipc(hyprlax_context_t *ctx) {
 
     ctx->ipc_ctx = ipc_init();
     if (!ctx->ipc_ctx) {
-        /* Check if failure was due to another instance running */
-        /* The ipc_init() function already printed the error message */
-        return HYPRLAX_ERROR_ALREADY_RUNNING;
+        return errno == ETIMEDOUT ? HYPRLAX_ERROR_UNRESPONSIVE_INSTANCE :
+                                  HYPRLAX_ERROR_ALREADY_RUNNING;
     }
 
     /* Link IPC context to main context for runtime settings */

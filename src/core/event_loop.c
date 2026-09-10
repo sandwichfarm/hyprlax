@@ -175,6 +175,26 @@ static double ev_get_time(void) {
     return time_ms_to_seconds(ms);
 }
 
+/* EGL swaps remain nonblocking on Wayland. When the user requests vsync,
+ * pace rendering at the slowest active output refresh instead. */
+static int ev_effective_fps(const hyprlax_context_t *ctx) {
+    int fps = ctx && ctx->config.target_fps > 0 ?
+              ctx->config.target_fps : HYPRLAX_DEFAULT_FPS;
+    if (!ctx || !ctx->config.vsync || !ctx->monitors) {
+        return fps;
+    }
+
+    int refresh = 0;
+    for (monitor_instance_t *monitor = ctx->monitors->head; monitor;
+         monitor = monitor->next) {
+        if (!monitor->failed && monitor->configured && monitor->refresh_rate > 0 &&
+            (refresh == 0 || monitor->refresh_rate < refresh)) {
+            refresh = monitor->refresh_rate;
+        }
+    }
+    return refresh > 0 && refresh < fps ? refresh : fps;
+}
+
 /* Main run loop */
 int hyprlax_run(hyprlax_context_t *ctx) {
     if (!ctx) return HYPRLAX_ERROR_INVALID_ARGS;
@@ -198,8 +218,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
     bool needs_render = true;
 
     while (ctx->running && !g_shutdown_requested) {
-        int current_fps = ctx->config.target_fps;
-        if (current_fps <= 0) current_fps = HYPRLAX_DEFAULT_FPS;
+        int current_fps = ev_effective_fps(ctx);
         if (current_fps != prev_target_fps) {
             bool use_frame_callback = ev_frame_callback_enabled();
             if (!use_frame_callback) {
@@ -369,7 +388,7 @@ int hyprlax_run(hyprlax_context_t *ctx) {
                  * This prevents the epoll_wait from stalling when some
                  * monitors are occluded and their frame callbacks never fire
                  * (e.g., Niri fullscreen on 2 of 3 monitors). */
-                if (!ctx->frame_timer_armed) hyprlax_arm_frame_timer(ctx, ctx->config.target_fps);
+                if (!ctx->frame_timer_armed) hyprlax_arm_frame_timer(ctx, current_fps);
             } else if (!use_frame_callback) {
                 if (ctx->frame_timer_armed) hyprlax_disarm_frame_timer(ctx);
                 if (needs_render) {
