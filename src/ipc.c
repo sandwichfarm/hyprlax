@@ -30,6 +30,7 @@
 /* IPC timeout configuration */
 #define IPC_READ_TIMEOUT_SEC 10
 #define IPC_WRITE_TIMEOUT_SEC 5
+#define IPC_HEALTH_TIMEOUT_MS 500
 
 /* stb_image prototypes (implementation is compiled in hyprlax_main.c) */
 extern int stbi_info(const char *filename, int *x, int *y, int *comp);
@@ -48,6 +49,53 @@ static void ipc_errorf(char *out, size_t out_sz, int code, const char *fmt, ...)
 static int token_check_len(const char *tok, size_t maxlen, const char *name,
                            char *response, size_t response_sz);
 static int parse_int_range(const char *s, int minv, int maxv, int *out);
+
+/* Return 1 for a responding daemon, 0 for no daemon/stale socket, and -1
+ * for a listener that accepts connections but cannot answer a health probe. */
+static int ipc_probe_existing_daemon(const char *socket_path) {
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    if (fd < 0) return 0;
+
+    struct sockaddr_un addr = { .sun_family = AF_UNIX };
+    strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
+    int connect_result = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
+    if (connect_result < 0 && errno == EINPROGRESS) {
+        struct pollfd pfd = { .fd = fd, .events = POLLOUT };
+        int ready = poll(&pfd, 1, IPC_HEALTH_TIMEOUT_MS);
+        int so_error = 0;
+        socklen_t so_error_len = sizeof(so_error);
+        if (ready != 1 || getsockopt(fd, SOL_SOCKET, SO_ERROR,
+                                     &so_error, &so_error_len) < 0 || so_error != 0) {
+            close(fd);
+            return 0;
+        }
+    } else if (connect_result < 0) {
+        close(fd);
+        return 0;
+    }
+
+    static const char health_request[] = "status\n";
+    if (send(fd, health_request, sizeof(health_request) - 1, MSG_NOSIGNAL) < 0 &&
+        errno != EAGAIN && errno != EWOULDBLOCK) {
+        close(fd);
+        return -1;
+    }
+
+    struct pollfd pfd = { .fd = fd, .events = POLLIN };
+    int ready = poll(&pfd, 1, IPC_HEALTH_TIMEOUT_MS);
+    if (ready == 0) {
+        close(fd);
+        return -1;
+    }
+    if (ready < 0 || !(pfd.revents & POLLIN)) {
+        close(fd);
+        return 0;
+    }
+    char response[32];
+    ssize_t bytes = recv(fd, response, sizeof(response), 0);
+    close(fd);
+    return bytes > 0 ? 1 : 0;
+}
 
 /* Helper function for safe send with timeout error handling */
 static bool ipc_send_safe(int fd, const char* data, size_t len) {
@@ -401,25 +449,22 @@ ipc_context_t* ipc_init(void) {
     get_socket_path(ctx->socket_path, sizeof(ctx->socket_path));
     LOG_DEBUG("[IPC] Socket path: %s", ctx->socket_path);
 
-    // Check if another instance is already running by trying to connect to the socket
-    int test_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (test_fd >= 0) {
-        struct sockaddr_un test_addr;
-        memset(&test_addr, 0, sizeof(test_addr));
-        test_addr.sun_family = AF_UNIX;
-        strncpy(test_addr.sun_path, ctx->socket_path, sizeof(test_addr.sun_path) - 1);
-
-        if (connect(test_fd, (struct sockaddr*)&test_addr, sizeof(test_addr)) == 0) {
-            // Successfully connected - another instance is running
-            LOG_ERROR("[IPC] Another instance of hyprlax is already running");
-            LOG_ERROR("[IPC] Socket: %s", ctx->socket_path);
-            close(test_fd);
-            free(ctx);
-            return NULL;
-        }
-        close(test_fd);
-        LOG_DEBUG("[IPC] No existing instance detected");
+    int daemon_state = ipc_probe_existing_daemon(ctx->socket_path);
+    if (daemon_state > 0) {
+        LOG_ERROR("[IPC] Another instance of hyprlax is already running");
+        LOG_ERROR("[IPC] Socket: %s", ctx->socket_path);
+        free(ctx);
+        errno = EADDRINUSE;
+        return NULL;
     }
+    if (daemon_state < 0) {
+        LOG_ERROR("[IPC] Existing hyprlax instance is unresponsive");
+        LOG_ERROR("[IPC] Socket: %s", ctx->socket_path);
+        free(ctx);
+        errno = ETIMEDOUT;
+        return NULL;
+    }
+    LOG_DEBUG("[IPC] No existing instance detected");
 
     // Remove existing socket if it exists (stale from a crash)
     unlink(ctx->socket_path);

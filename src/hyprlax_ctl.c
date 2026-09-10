@@ -10,6 +10,9 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/time.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <errno.h>
 #include <pwd.h>
 #include <dirent.h>
@@ -17,16 +20,44 @@
 #include "ipc.h"
 #include "include/config_legacy.h"
 
-/* Note: socket operations are blocking for simplicity; timeout not used */
+#define CTL_CONNECT_TIMEOUT_MS 500
+#define CTL_RESPONSE_TIMEOUT_MS 1000
+
+static int connect_socket_with_timeout(const struct sockaddr_un *addr) {
+    int sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+    if (sock < 0) return -1;
+
+    int connect_result = connect(sock, (const struct sockaddr *)addr, sizeof(*addr));
+    if (connect_result < 0 && errno != EINPROGRESS) {
+        close(sock);
+        return -1;
+    }
+    if (connect_result < 0) {
+        struct pollfd pfd = { .fd = sock, .events = POLLOUT };
+        int ready = poll(&pfd, 1, CTL_CONNECT_TIMEOUT_MS);
+        int so_error = 0;
+        socklen_t so_error_len = sizeof(so_error);
+        if (ready != 1 || getsockopt(sock, SOL_SOCKET, SO_ERROR,
+                                     &so_error, &so_error_len) < 0 || so_error != 0) {
+            errno = ready == 0 ? ETIMEDOUT : (so_error ? so_error : errno);
+            close(sock);
+            return -1;
+        }
+    }
+
+    int flags = fcntl(sock, F_GETFL, 0);
+    if (flags >= 0) (void)fcntl(sock, F_SETFL, flags & ~O_NONBLOCK);
+    struct timeval timeout = {
+        .tv_sec = CTL_RESPONSE_TIMEOUT_MS / 1000,
+        .tv_usec = (CTL_RESPONSE_TIMEOUT_MS % 1000) * 1000,
+    };
+    (void)setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    (void)setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    return sock;
+}
 
 /* Connect to hyprlax daemon socket */
 static int connect_to_daemon(void) {
-    int sock = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (sock < 0) {
-        fprintf(stderr, "Failed to create socket: %s\n", strerror(errno));
-        return -1;
-    }
-
     struct sockaddr_un addr = {0};
     addr.sun_family = AF_UNIX;
 
@@ -57,7 +88,8 @@ static int connect_to_daemon(void) {
 
     if (sig && *sig && xdg && *xdg) {
         snprintf(addr.sun_path, sizeof(addr.sun_path), "%s/hyprlax-%s-%s%s.sock", xdg, user, sig, suffix);
-        if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
+        int sock = connect_socket_with_timeout(&addr);
+        if (sock >= 0) {
             return sock;
         }
         /* Fallback to legacy path if preferred path not available */
@@ -89,7 +121,8 @@ static int connect_to_daemon(void) {
                         snprintf(cand, sizeof(cand), "%s/%s", runtime_dir, name);
                         struct sockaddr_un a2; memset(&a2, 0, sizeof(a2)); a2.sun_family = AF_UNIX;
                         strncpy(a2.sun_path, cand, sizeof(a2.sun_path) - 1);
-                        if (connect(sock, (struct sockaddr*)&a2, sizeof(a2)) == 0) {
+                        int sock = connect_socket_with_timeout(&a2);
+                        if (sock >= 0) {
                             closedir(d);
                             return sock;
                         }
@@ -101,10 +134,11 @@ static int connect_to_daemon(void) {
     }
 
     snprintf(addr.sun_path, sizeof(addr.sun_path), "%s%s%s.sock", IPC_SOCKET_PATH_PREFIX, user, suffix);
-    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        fprintf(stderr, "Failed to connect to hyprlax daemon at %s\n", addr.sun_path);
+    int sock = connect_socket_with_timeout(&addr);
+    if (sock < 0) {
+        fprintf(stderr, "Failed to connect to hyprlax daemon at %s: %s\n",
+                addr.sun_path, strerror(errno));
         fprintf(stderr, "Is hyprlax running?\n");
-        close(sock);
         return -1;
     }
 
