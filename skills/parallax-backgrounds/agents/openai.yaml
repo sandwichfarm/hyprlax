@@ -1,0 +1,4 @@
+interface:
+  display_name: "Parallax Backgrounds"
+  short_description: "Generate aligned, motion-safe parallax image layers"
+  default_prompt: "Use $parallax-backgrounds to generate a layered parallax wallpaper for hyprlax."

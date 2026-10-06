@@ -133,6 +133,37 @@ hyprlax ctl convert-config ~/.config/hyprlax/parallax.conf ~/.config/hyprlax/hyp
 hyprlax --config ~/.config/hyprlax/parallax.conf
 ```
 
+## Generate Parallax Backgrounds with an Agent Skill
+
+The [parallax-backgrounds skill](skills/parallax-backgrounds/SKILL.md) guides an image-capable
+agent through generating aligned layers, reconstructing scenery hidden by foreground objects,
+and exporting transparency and borders that remain convincing during movement.
+
+Install with the [skills CLI](https://skills.sh/docs/cli) (requires Node.js/npm):
+
+```bash
+npx skills add sandwichfarm/hyprlax --skill parallax-backgrounds
+```
+
+Choose your agent when prompted, or target Codex explicitly:
+
+```bash
+npx skills add sandwichfarm/hyprlax --skill parallax-backgrounds --agent codex
+```
+
+Add `--global` for installation across projects. To install from a local checkout, including
+an unmerged branch, run this from the repository root:
+
+```bash
+npx skills add . --skill parallax-backgrounds
+```
+
+Example request: “Use the parallax-backgrounds skill to create a three-layer forest wallpaper
+for hyprlax at 1920×1080, with cursor movement of ±80 px horizontally and ±40 px vertically.”
+The skill includes generation prompts, motion/occlusion checks, a hyprlax configuration example,
+and an optional PNG inspection helper (Python 3 + Pillow). Actual image creation requires the
+agent to have an image-generation/editing capability; installing the skill does not supply one.
+
 ## Compositor Configuration
 
 > **Important:** For `exec-once` commands to work, hyprlax must be installed system-wide (`/usr/local/bin`).
