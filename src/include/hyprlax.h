@@ -144,6 +144,9 @@ void hyprlax_handle_resize(hyprlax_context_t *ctx, int width, int height);
 /* Rendering */
 void hyprlax_render_frame(hyprlax_context_t *ctx);
 int hyprlax_load_layer_textures(hyprlax_context_t *ctx);
+int hyprlax_load_layer_texture(hyprlax_context_t *ctx, parallax_layer_t *layer);
+void hyprlax_release_layer_textures(parallax_layer_t *layer);
+int hyprlax_reload_layer_texture(hyprlax_context_t *ctx, parallax_layer_t *layer, const char *new_path);
 /* Texture loading helper */
 unsigned int load_texture(const char *path, int *width, int *height);
 
