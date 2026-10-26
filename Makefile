@@ -380,6 +380,14 @@ tests/test_monitor_lifecycle: tests/test_monitor_lifecycle.c \
     src/core/animation.c src/core/easing.c src/core/log.c
 	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) $(PKG_LIBS) -o $@
 
+# Include the real Wayland callbacks; discard unrelated platform entry points.
+tests/test_wayland_scaling: tests/test_wayland_scaling.c src/platform/wayland.c \
+    src/core/monitor.c src/core/log.c src/core/input/input_manager.c \
+    src/compositor/workspace_models.c $(PROTOCOL_SRCS) $(PROTOCOL_HDRS)
+	$(CC) $(TEST_CFLAGS) -ffunction-sections -fdata-sections $(PKG_CFLAGS) \
+	    $(filter-out src/platform/wayland.c %.h,$^) \
+	    -Wl,--gc-sections $(TEST_LIBS) $(PKG_LIBS) -o $@
+
 # Run all tests
 test: $(ALL_TEST_TARGETS)
 	@echo "=== Running Full Test Suite ==="

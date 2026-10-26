@@ -297,8 +297,10 @@ static void registry_global(void *data, struct wl_registry *registry,
     wayland_data_t *wl_data = (wayland_data_t *)data;
 
     if (strcmp(interface, "wl_compositor") == 0) {
+        /* Buffer scaling requires wl_surface v3 (inherited from compositor). */
+        uint32_t bind_version = version < 3 ? version : 3;
         wl_data->compositor = wl_registry_bind(registry, id,
-                                              &wl_compositor_interface, 1);
+                                              &wl_compositor_interface, bind_version);
     } else if (strcmp(interface, "wl_output") == 0) {
         /* Bind to ALL outputs for multi-monitor support */
         struct wl_output *output = wl_registry_bind(registry, id,
@@ -768,66 +770,67 @@ static void wayland_show_window(void) {
     }
 }
 
+/* Map physical buffers to surface-local coordinates. Keep integer outputs free
+ * of viewports: their mapping is expressed by wl_surface.set_buffer_scale. */
+static void wayland_apply_monitor_scale(monitor_instance_t *monitor) {
+    if (!monitor || !monitor->wl_surface) return;
+
+    double scale = monitor_get_effective_scale(monitor);
+    if (scale <= 0.0) scale = 1.0;
+    bool is_fractional = scale != floor(scale);
+    bool supports_buffer_scale = wl_surface_get_version(monitor->wl_surface) >=
+                                 WL_SURFACE_SET_BUFFER_SCALE_SINCE_VERSION;
+
+    if (is_fractional) {
+        if (supports_buffer_scale) wl_surface_set_buffer_scale(monitor->wl_surface, 1);
+        if (!monitor->wp_viewport && g_wayland_data && g_wayland_data->viewporter) {
+            monitor->wp_viewport = wp_viewporter_get_viewport(
+                g_wayland_data->viewporter, monitor->wl_surface);
+        }
+        if (monitor->wp_viewport && monitor->width > 0 && monitor->height > 0) {
+            wp_viewport_set_destination((struct wp_viewport *)monitor->wp_viewport,
+                                       (int)lround(monitor->width / scale),
+                                       (int)lround(monitor->height / scale));
+        }
+    } else {
+        /* A previous fractional destination would override the integer scale. */
+        if (monitor->wp_viewport) {
+            /* Explicitly invalidate the destination before destroying the object;
+             * Hyprland otherwise retains the old mapping until a later update. */
+            wp_viewport_set_destination((struct wp_viewport *)monitor->wp_viewport, -1, -1);
+            wp_viewport_destroy((struct wp_viewport *)monitor->wp_viewport);
+            monitor->wp_viewport = NULL;
+        }
+        if (supports_buffer_scale) wl_surface_set_buffer_scale(monitor->wl_surface, (int)scale);
+    }
+
+    /* wl_output.mode and the renderer viewport are already physical pixels. */
+    if (monitor->wl_egl_window && monitor->width > 0 && monitor->height > 0) {
+        wl_egl_window_resize(monitor->wl_egl_window,
+                             monitor->width, monitor->height, 0, 0);
+        /* Wake the idle renderer through the existing resize event. Preserve
+         * its global dimensions when a differently sized output changes scale. */
+        if (monitor->configured && g_wayland_data &&
+            g_wayland_data->width > 0 && g_wayland_data->height > 0) {
+            g_wayland_data->has_pending_resize = true;
+            g_wayland_data->pending_width = g_wayland_data->width;
+            g_wayland_data->pending_height = g_wayland_data->height;
+        }
+    }
+}
+
 /* Fractional scale preferred_scale event: scale is in 1/120ths */
 static void fractional_scale_preferred(void *data,
                                        struct wp_fractional_scale_v1 *frac_scale,
                                        uint32_t scale_times_120) {
     (void)frac_scale;
     monitor_instance_t *monitor = (monitor_instance_t *)data;
-    if (!monitor) return;
+    if (!monitor || scale_times_120 == 0) return;
 
-    double new_scale = scale_times_120 / 120.0;
+    monitor->fractional_scale = scale_times_120 / 120.0;
     LOG_INFO("Monitor %s: fractional scale preferred: %.4f (raw: %u/120)",
-             monitor->name, new_scale, scale_times_120);
-    monitor->fractional_scale = new_scale;
-
-    /* Check if scale is truly fractional (not integer) */
-    bool is_fractional = (scale_times_120 % 120) != 0;
-
-    /* Resize EGL window to match the physical pixel dimensions of the surface.
-     *
-     * monitor->width / monitor->height are populated from wl_output.mode,
-     * which the protocol defines as physical scanout pixels. The buffer
-     * therefore must be exactly that size — multiplying by the fractional
-     * scale (the previous behavior) over-sizes the buffer by `new_scale`
-     * and the wallpaper visibly zooms in by the same factor.
-     *
-     * The viewport's destination is the *logical* surface size, which is
-     * physical / fractional_scale.
-     */
-    if (monitor->wl_egl_window && monitor->width > 0 && monitor->height > 0) {
-        int buffer_w = monitor->width;
-        int buffer_h = monitor->height;
-        int logical_w = (int)lround(monitor->width / new_scale);
-        int logical_h = (int)lround(monitor->height / new_scale);
-        wl_egl_window_resize(monitor->wl_egl_window, buffer_w, buffer_h, 0, 0);
-
-        if (is_fractional) {
-            /* Fractional scale: need viewport to set logical surface size,
-             * since wl_surface.set_buffer_scale only handles integers. */
-            if (!monitor->wp_viewport && g_wayland_data && g_wayland_data->viewporter) {
-                struct wp_viewport *vp = wp_viewporter_get_viewport(
-                    g_wayland_data->viewporter, monitor->wl_surface);
-                if (vp) {
-                    monitor->wp_viewport = vp;
-                    LOG_DEBUG("Created viewport for monitor %s (fractional scale %.4f)",
-                              monitor->name, new_scale);
-                }
-            }
-            if (monitor->wp_viewport) {
-                wp_viewport_set_destination((struct wp_viewport *)monitor->wp_viewport,
-                                           logical_w, logical_h);
-            }
-        } else {
-            /* Integer scale: no viewport needed, existing integer scale
-             * from wl_output listener handles this case. */
-            LOG_DEBUG("Monitor %s: integer scale %d, no viewport needed",
-                      monitor->name, (int)(new_scale + 0.5));
-        }
-
-        LOG_DEBUG("Monitor %s: resized EGL window to %dx%d (logical %dx%d, scale %.4f, fractional=%d)",
-                  monitor->name, buffer_w, buffer_h, logical_w, logical_h, new_scale, is_fractional);
-    }
+             monitor->name, monitor->fractional_scale, scale_times_120);
+    wayland_apply_monitor_scale(monitor);
 }
 
 static const struct wp_fractional_scale_v1_listener fractional_scale_listener = {
@@ -846,6 +849,8 @@ int wayland_create_monitor_surface(monitor_instance_t *monitor) {
         LOG_ERROR("Failed to create surface for monitor %s", monitor->name);
         return HYPRLAX_ERROR_NO_MEMORY;
     }
+
+    wayland_apply_monitor_scale(monitor);
 
     /* Create layer surface bound to specific output */
     if (g_wayland_data->layer_shell && monitor->wl_output) {
@@ -1328,9 +1333,17 @@ static void output_handle_done(void *data, struct wl_output *output) {
 
 static void output_handle_scale(void *data, struct wl_output *output, int32_t scale) {
     output_info_t *info = (output_info_t *)data;
-    if (info) {
+    if (info && scale > 0) {
         info->scale = scale;
         LOG_TRACE("Output scale: %s scale=%d", info->name, scale);
+        if (g_wayland_data && g_wayland_data->ctx && g_wayland_data->ctx->monitors) {
+            monitor_instance_t *monitor = monitor_list_find_by_output(
+                g_wayland_data->ctx->monitors, output);
+            if (monitor) {
+                monitor->scale = scale;
+                wayland_apply_monitor_scale(monitor);
+            }
+        }
     }
 }
 
