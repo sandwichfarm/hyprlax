@@ -135,126 +135,126 @@ ok:
     return gif;
 }
 
-static void
-discard_sub_blocks(gd_GIF *gif)
+/* Read a complete data sub-block. Return its size, 0 for the terminator,
+ * or -1 for a truncated block or read error. */
+static int
+read_sub_block(gd_GIF *gif, uint8_t buffer[255])
 {
     uint8_t size;
 
-    do {
-        read(gif->fd, &size, 1);
-        lseek(gif->fd, size, SEEK_CUR);
-    } while (size);
+    if (read(gif->fd, &size, 1) != 1)
+        return -1;
+    if (read(gif->fd, buffer, size) != size)
+        return -1;
+    return size;
 }
 
-static void
+static int
+discard_sub_blocks(gd_GIF *gif)
+{
+    uint8_t buffer[255];
+    int size;
+
+    /* Read rather than seek: seeking can succeed beyond the end of a file. */
+    do {
+        size = read_sub_block(gif, buffer);
+    } while (size > 0);
+    return size;
+}
+
+static int
 read_plain_text_ext(gd_GIF *gif)
 {
+    uint8_t block[255];
+
+    if (read_sub_block(gif, block) != 12)
+        return -1;
     if (gif->plain_text) {
-        uint16_t tx, ty, tw, th;
-        uint8_t cw, ch, fg, bg;
-        off_t sub_block;
-        lseek(gif->fd, 1, SEEK_CUR); /* block size = 12 */
-        tx = read_num(gif->fd);
-        ty = read_num(gif->fd);
-        tw = read_num(gif->fd);
-        th = read_num(gif->fd);
-        read(gif->fd, &cw, 1);
-        read(gif->fd, &ch, 1);
-        read(gif->fd, &fg, 1);
-        read(gif->fd, &bg, 1);
-        sub_block = lseek(gif->fd, 0, SEEK_CUR);
-        gif->plain_text(gif, tx, ty, tw, th, cw, ch, fg, bg);
-        lseek(gif->fd, sub_block, SEEK_SET);
-    } else {
-        /* Discard plain text metadata. */
-        lseek(gif->fd, 13, SEEK_CUR);
+        uint16_t tx = block[0] | (block[1] << 8);
+        uint16_t ty = block[2] | (block[3] << 8);
+        uint16_t tw = block[4] | (block[5] << 8);
+        uint16_t th = block[6] | (block[7] << 8);
+        off_t sub_block = lseek(gif->fd, 0, SEEK_CUR);
+        if (sub_block == -1)
+            return -1;
+        gif->plain_text(gif, tx, ty, tw, th, block[8], block[9], block[10], block[11]);
+        if (lseek(gif->fd, sub_block, SEEK_SET) == -1)
+            return -1;
     }
-    /* Discard plain text sub-blocks. */
-    discard_sub_blocks(gif);
+    return discard_sub_blocks(gif);
 }
 
-static void
+static int
 read_graphic_control_ext(gd_GIF *gif)
 {
-    uint8_t rdit;
+    uint8_t block[255], terminator;
 
-    /* Discard block size (always 0x04). */
-    lseek(gif->fd, 1, SEEK_CUR);
-
-    read(gif->fd, &rdit, 1);
-    gif->gce.disposal = (rdit >> 2) & 3;
-    gif->gce.input = rdit & 2;
-    gif->gce.transparency = rdit & 1;
-    gif->gce.delay = read_num(gif->fd);
-    read(gif->fd, &gif->gce.tindex, 1);
-
-    /* Skip block terminator. */
-    lseek(gif->fd, 1, SEEK_CUR);
+    if (read_sub_block(gif, block) != 4 ||
+        read(gif->fd, &terminator, 1) != 1 || terminator != 0)
+        return -1;
+    gif->gce.disposal = (block[0] >> 2) & 3;
+    gif->gce.input = block[0] & 2;
+    gif->gce.transparency = block[0] & 1;
+    gif->gce.delay = block[1] | (block[2] << 8);
+    gif->gce.tindex = block[3];
+    return 0;
 }
 
-static void
+static int
 read_comment_ext(gd_GIF *gif)
 {
     if (gif->comment) {
         off_t sub_block = lseek(gif->fd, 0, SEEK_CUR);
+        if (sub_block == -1)
+            return -1;
         gif->comment(gif);
-        lseek(gif->fd, sub_block, SEEK_SET);
+        if (lseek(gif->fd, sub_block, SEEK_SET) == -1)
+            return -1;
     }
-    /* Discard comment sub-blocks. */
-    discard_sub_blocks(gif);
+    return discard_sub_blocks(gif);
 }
 
-static void
+static int
 read_application_ext(gd_GIF *gif)
 {
-    char app_id[8];
-    char app_auth_code[3];
+    uint8_t block[255];
 
-    /* Discard block size (always 0x0B). */
-    lseek(gif->fd, 1, SEEK_CUR);
-
-    /* Application Identifier. */
-    read(gif->fd, app_id, 8);
-    /* Application Authentication Code. */
-    read(gif->fd, app_auth_code, 3);
-
-    if (!strncmp(app_id, "NETSCAPE", sizeof(app_id))) {
-        /* Discard block size (0x03) and constant byte (0x01). */
-        lseek(gif->fd, 2, SEEK_CUR);
-        gif->loop_count = read_num(gif->fd);
-        /* Skip block terminator. */
-        lseek(gif->fd, 1, SEEK_CUR);
+    if (read_sub_block(gif, block) != 11)
+        return -1;
+    if (!memcmp(block, "NETSCAPE", 8)) {
+        if (read_sub_block(gif, block) != 3 || block[0] != 1)
+            return -1;
+        gif->loop_count = block[1] | (block[2] << 8);
     } else if (gif->application) {
         off_t sub_block = lseek(gif->fd, 0, SEEK_CUR);
-        gif->application(gif, app_id, app_auth_code);
-        lseek(gif->fd, sub_block, SEEK_SET);
-        discard_sub_blocks(gif);
-    } else {
-        discard_sub_blocks(gif);
+        if (sub_block == -1)
+            return -1;
+        gif->application(gif, (char *)block, (char *)block + 8);
+        if (lseek(gif->fd, sub_block, SEEK_SET) == -1)
+            return -1;
     }
+    return discard_sub_blocks(gif);
 }
 
-static void
+static int
 read_ext(gd_GIF *gif)
 {
     uint8_t label;
 
-    read(gif->fd, &label, 1);
+    if (read(gif->fd, &label, 1) != 1)
+        return -1;
     switch (label) {
     case 0x01:
-        read_plain_text_ext(gif);
-        break;
+        return read_plain_text_ext(gif);
     case 0xF9:
-        read_graphic_control_ext(gif);
-        break;
+        return read_graphic_control_ext(gif);
     case 0xFE:
-        read_comment_ext(gif);
-        break;
+        return read_comment_ext(gif);
     case 0xFF:
-        read_application_ext(gif);
-        break;
+        return read_application_ext(gif);
     default:
         fprintf(stderr, "unknown extension: %02X\n", label);
+        return discard_sub_blocks(gif);
     }
 }
 
@@ -310,11 +310,11 @@ get_key(gd_GIF *gif, int key_size, uint8_t *sub_len, uint8_t *shift, uint8_t *by
         if (rpad == 0) {
             /* Update byte. */
             if (*sub_len == 0) {
-                read(gif->fd, sub_len, 1); /* Must be nonzero! */
-                if (*sub_len == 0)
+                if (read(gif->fd, sub_len, 1) != 1 || *sub_len == 0)
                     return 0x1000;
             }
-            read(gif->fd, byte, 1);
+            if (read(gif->fd, byte, 1) != 1)
+                return 0x1000;
             (*sub_len)--;
         }
         frag_size = MIN(key_size - bits_read, 8 - rpad);
@@ -352,7 +352,7 @@ interlaced_line_index(int h, int y)
 }
 
 /* Decompress image pixels.
- * Return 0 on success or -1 on out-of-memory (w.r.t. LZW code table). */
+ * Return 0 on success or -1 on read, seek or LZW table allocation failure. */
 static int
 read_image_data(gd_GIF *gif, int interlace)
 {
@@ -365,23 +365,32 @@ read_image_data(gd_GIF *gif, int interlace)
     Entry entry;
     off_t start, end;
 
-    read(gif->fd, &byte, 1);
+    if (read(gif->fd, &byte, 1) != 1)
+        return -1;
     key_size = (int) byte;
     if (key_size < 2 || key_size > 8)
         return -1;
 
     start = lseek(gif->fd, 0, SEEK_CUR);
-    discard_sub_blocks(gif);
+    if (start == -1 || discard_sub_blocks(gif) == -1)
+        return -1;
     end = lseek(gif->fd, 0, SEEK_CUR);
-    lseek(gif->fd, start, SEEK_SET);
+    if (end == -1 || lseek(gif->fd, start, SEEK_SET) == -1)
+        return -1;
 
     clear = 1 << key_size;
     stop = clear + 1;
     table = new_table(key_size);
+    if (!table)
+        return -1;
     key_size++;
     init_key_size = key_size;
     sub_len = shift = 0;
     key = get_key(gif, key_size, &sub_len, &shift, &byte); /* clear code */
+    if (key != clear) {
+        free(table);
+        return -1;
+    }
 
     frm_off = 0;
     ret = 0;
@@ -405,7 +414,11 @@ read_image_data(gd_GIF *gif, int interlace)
         key = get_key(gif, key_size, &sub_len, &shift, &byte);
         if (key == clear)
             continue;
-        if (key == stop || key == 0x1000)
+        if (key == 0x1000) {
+            free(table);
+            return -1;
+        }
+        if (key == stop)
             break;
         if (ret == 1)
             key_size++;
@@ -429,14 +442,10 @@ read_image_data(gd_GIF *gif, int interlace)
             table->entries[table->nentries - 1].suffix = entry.suffix;
     }
     free(table);
-    if (key == stop)
-        read(gif->fd, &sub_len, 1); /* Must be zero! */
-    lseek(gif->fd, end, SEEK_SET);
-    return 0;
+    return lseek(gif->fd, end, SEEK_SET) == -1 ? -1 : 0;
 }
 
-/* Read image.
- * Return 0 on success or -1 on out-of-memory (w.r.t. LZW code table). */
+/* Read image. Return 0 on success or -1 on decoding failure. */
 static int
 read_image(gd_GIF *gif)
 {
@@ -529,9 +538,8 @@ gd_get_frame(gd_GIF *gif)
     while (sep != ',') {
         if (sep == ';')
             return 0;
-        if (sep == '!')
-            read_ext(gif);
-        else return -1;
+        if (sep != '!' || read_ext(gif) == -1)
+            return -1;
         if (read(gif->fd, &sep, 1) != 1)
             return -1;
     }
