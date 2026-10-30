@@ -60,15 +60,14 @@ gd_open_gif(const char *fname)
 #endif
 
     /* Header */
-    read(fd, sigver, 3);
-    if (memcmp(sigver, "GIF", 3) != 0) {
+    if (read(fd, sigver, 3) != 3 || memcmp(sigver, "GIF", 3) != 0) {
         fprintf(stderr, "invalid signature\n");
         goto fail;
     }
 
     /* Version */
-    read(fd, sigver, 3);
-    if (memcmp(sigver, "89a", 3) != 0) {
+    if (read(fd, sigver, 3) != 3 ||
+        (memcmp(sigver, "89a", 3) != 0 && memcmp(sigver, "87a", 3) != 0)) {
         fprintf(stderr, "invalid version\n");
         goto fail;
     }
@@ -80,19 +79,13 @@ gd_open_gif(const char *fname)
     /* FDSZ */
     read(fd, &fdsz, 1);
 
-    /* Presence of GCT */
-    if (!(fdsz & 0x80)) {
-        fprintf(stderr, "no global color table\n");
-        goto fail;
-    }
-
     /* Color Space's Depth */
     depth = ((fdsz >> 4) & 7) + 1;
 
     /* Ignore Sort Flag. */
 
     /* GCT Size */
-    gct_sz = 1 << ((fdsz & 0x07) + 1);
+    gct_sz = (fdsz & 0x80) ? 1 << ((fdsz & 0x07) + 1) : 0;
 
     /* Background Color Index */
     read(fd, &bgidx, 1);
@@ -111,9 +104,13 @@ gd_open_gif(const char *fname)
 
     /* Read GCT */
     gif->gct.size = gct_sz;
-    read(fd, gif->gct.colors, 3 * gif->gct.size);
+    if (read(fd, gif->gct.colors, 3 * gif->gct.size) != 3 * gif->gct.size) {
+        free(gif);
+        goto fail;
+    }
     gif->palette = &gif->gct;
-    gif->bgindex = bgidx;
+    /* Without a GCT the background index is undefined; keep the black canvas. */
+    gif->bgindex = gct_sz ? bgidx : 0;
     gif->frame = calloc(4, width * height);
     if (!gif->frame) {
         free(gif);
@@ -468,8 +465,11 @@ read_image(gd_GIF *gif)
         gif->lct.size = 1 << ((fisrz & 0x07) + 1);
         read(gif->fd, gif->lct.colors, 3 * gif->lct.size);
         gif->palette = &gif->lct;
-    } else
+    } else {
+        if (!gif->gct.size)
+            return -1;
         gif->palette = &gif->gct;
+    }
 
     /* Image Data. */
     return read_image_data(gif, interlace);
@@ -501,7 +501,7 @@ dispose(gd_GIF *gif)
 
     switch (gif->gce.disposal) {
     case 2: /* Restore to background color. */
-        bgcolor = &gif->palette->colors[gif->bgindex*3];
+        bgcolor = &gif->gct.colors[gif->bgindex*3];
         i = gif->fy * gif->width + gif->fx;
         for (j = 0; j < gif->fh; j++) {
             for (k = 0; k < gif->fw; k++)
@@ -524,14 +524,16 @@ gd_get_frame(gd_GIF *gif)
 
     dispose(gif);
 
-    read(gif->fd, &sep, 1);
+    if (read(gif->fd, &sep, 1) != 1)
+        return -1;
     while (sep != ',') {
         if (sep == ';')
             return 0;
         if (sep == '!')
             read_ext(gif);
         else return -1;
-        read(gif->fd, &sep, 1);
+        if (read(gif->fd, &sep, 1) != 1)
+            return -1;
     }
     if (read_image(gif) == -1)
         return -1;

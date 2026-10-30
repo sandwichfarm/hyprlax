@@ -342,38 +342,38 @@ int hyprlax_load_layer_texture(hyprlax_context_t *ctx, parallax_layer_t *layer) 
         }
 
         int frame_count = 0;
-        while (gd_get_frame(gif)) {
+        int frame_result;
+        while ((frame_result = gd_get_frame(gif)) > 0) {
             frame_count++;
+        }
+        if (frame_result < 0 || frame_count == 0) {
+            LOG_ERROR("Failed to decode GIF frames: %s", layer->image_path);
+            gd_close_gif(gif);
+            return 0;
         }
         gd_rewind(gif);
 
-        if (frame_count == 0) {
-            LOG_ERROR("GIF file has no frames: %s", layer->image_path);
-            gd_close_gif(gif);
-            return 0;
-        }
-
         GLuint *textures = calloc(frame_count, sizeof(GLuint));
         int *delays = calloc(frame_count, sizeof(int));
-        if (!textures || !delays) {
-            free(textures);
-            free(delays);
-            gd_close_gif(gif);
-            return 0;
+        size_t pixel_count = (size_t)gif->width * gif->height;
+        uint8_t *buffer = malloc(pixel_count * 3);
+        uint8_t *rgba_buffer = malloc(pixel_count * 4);
+        int loaded_frames = 0;
+        if (!textures || !delays || !buffer || !rgba_buffer) {
+            goto gif_failed;
         }
 
         for (int i = 0; i < frame_count; i++) {
-            gd_get_frame(gif);
-            uint8_t *buffer = malloc(gif->width * gif->height * 3);
+            if (gd_get_frame(gif) <= 0) {
+                goto gif_failed;
+            }
             gd_render_frame(gif, buffer);
 
             // convert to rgba
-            uint8_t *rgba_buffer = malloc(gif->width * gif->height * 4);
-
             bool has_transparency = gif->gce.transparency;
             uint8_t transparent_index = gif->gce.tindex;
 
-            for (int j = 0; j < gif->width * gif->height; j++) {
+            for (size_t j = 0; j < pixel_count; j++) {
                 uint8_t color_index = gif->frame[j];
 
                 rgba_buffer[j * 4 + 0] = buffer[j * 3 + 0];
@@ -404,10 +404,13 @@ int hyprlax_load_layer_texture(hyprlax_context_t *ctx, parallax_layer_t *layer) 
 
             textures[i] = texture;
             delays[i] = (gif->gce.delay * 10 >= 10) ? gif->gce.delay * 10 : 10;
-
-            free(buffer);
-            free(rgba_buffer);
+            loaded_frames++;
         }
+        if (gd_get_frame(gif) != 0) {
+            goto gif_failed;
+        }
+        free(buffer);
+        free(rgba_buffer);
 
         layer->is_gif = true;
         layer->gif_data = gif;
@@ -426,6 +429,18 @@ int hyprlax_load_layer_texture(hyprlax_context_t *ctx, parallax_layer_t *layer) 
                       layer->image_path, gif->width, gif->height, frame_count);
         }
         return 1;
+
+gif_failed:
+        LOG_ERROR("Failed to load GIF frames: %s", layer->image_path);
+        if (loaded_frames > 0) {
+            glDeleteTextures(loaded_frames, textures);
+        }
+        free(buffer);
+        free(rgba_buffer);
+        free(textures);
+        free(delays);
+        gd_close_gif(gif);
+        return 0;
     }
 
     int img_width, img_height;

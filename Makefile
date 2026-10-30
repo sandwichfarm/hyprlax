@@ -317,6 +317,10 @@ tests/test_config_validation: tests/test_config_validation.c
 tests/test_gif: tests/test_gif.c src/vendor/gifdec.c
 	$(CC) $(TEST_CFLAGS) -Isrc -Isrc/include $^ $(TEST_LIBS) -o $@
 
+tests/test_gif_reload: tests/test_gif_reload.c src/core/render_core.c src/vendor/gifdec.c src/core/log.c
+	$(CC) $(TEST_CFLAGS) -fno-lto -ffunction-sections -fdata-sections $^ $(TEST_LIBS) \
+		-Wl,--gc-sections -Wl,--wrap=gd_get_frame -Wl,--wrap=gd_close_gif -o $@
+
 tests/gif_probe: tests/gif_probe.c src/vendor/gifdec.c
 	$(CC) $(TEST_CFLAGS) -Wno-maybe-uninitialized -Isrc -Isrc/include $^ -o $@
 
